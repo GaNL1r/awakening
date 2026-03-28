@@ -1,0 +1,6 @@
+main_camera: /home/hy/awakening/config/camera.yaml
+
+
+serial:
+  enable: true
+  device_name: /dev/stm32_acm
