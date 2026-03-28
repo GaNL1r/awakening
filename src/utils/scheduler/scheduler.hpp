@@ -17,8 +17,8 @@ namespace awakening {
 
 class Scheduler {
 public:
-    inline static unsigned int __hardware_concurrency = 
-        (std::thread::hardware_concurrency());
+    using clock = std::chrono::steady_clock;
+    inline static unsigned int __hardware_concurrency = (std::thread::hardware_concurrency());
     explicit Scheduler(size_t threads = __hardware_concurrency):
         worker_count(threads ? threads : 1),
         arena(worker_count) {}
@@ -112,8 +112,6 @@ public:
             rate_threads.emplace_back([this, w](std::stop_token st) {
                 bind_cpu(w.core_id);
 
-                using clock = std::chrono::steady_clock;
-
                 const auto period = std::chrono::duration_cast<clock::duration>(
                     std::chrono::duration<double>(1.0 / w.rate)
                 );
@@ -137,7 +135,6 @@ public:
             });
         }
     }
-
 
     void stop() {
         if (!running.exchange(false, std::memory_order_acq_rel))

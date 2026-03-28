@@ -14,9 +14,9 @@ using Quaternion = Eigen::Quaterniond;
 using AngleAxis = Eigen::AngleAxisd;
 using Clock = std::chrono::steady_clock;
 using TimePoint = std::chrono::time_point<Clock>;
-enum class Frame : uint8_t { ODOM, GIMBAL_ODOM, GIMBAL, CAMERA, SHOOT };
+enum class Frame : int { ODOM, GIMBAL_ODOM, GIMBAL, CAMERA, SHOOT };
 
-enum class EnemyColor : uint8_t {
+enum class EnemyColor : bool {
     RED = 0,
     BLUE = 1,
 };

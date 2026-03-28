@@ -3,7 +3,7 @@ cmake_policy(SET CMP0072 NEW)
 project(awakening LANGUAGES CXX)
 
 
-set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/bin)
@@ -18,6 +18,8 @@ option(BUILD_WITH_ORT      "Enable ORT backend"        ON)
 
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} ${PROJECT_SOURCE_DIR}/cmake)
 file(GLOB_RECURSE SOURCES CONFIGURE_DEPENDS src/*.cpp)
+
+
 
 find_package(OpenCV REQUIRED)
 find_package(Eigen3 REQUIRED)
@@ -93,3 +95,4 @@ function(add_common_executable exe_name src_file)
     target_link_libraries(${exe_name}  ${PROJECT_NAME})
 endfunction()
 add_common_executable(a test/a.cpp)
+add_common_executable(auto_aim runtime/auto_aim.cpp)

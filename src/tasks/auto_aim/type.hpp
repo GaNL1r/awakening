@@ -1,167 +1,175 @@
 #pragma once
 #include "common.hpp"
 #include "utils/utils.hpp"
-namespace awakening {
+#include <array>
+#include <cstddef>
+#include <opencv2/core/types.hpp>
+#include <optional>
+#include <utility>
+namespace awakening::auto_aim {
+constexpr double SIMPLE_SMALL_ARMOR_WIDTH = 133.0 / 1000.0; // 135
+constexpr double SIMPLE_SMALL_ARMOR_HEIGHT = 50.0 / 1000.0; // 55
+constexpr double LARGE_ARMOR_WIDTH = 225.0 / 1000.0;
+constexpr double LARGE_ARMOR_HEIGHT = 50.0 / 1000.0; // 55
+enum class ArmorColor : int { BLUE = 0, RED, NONE, PURPLE };
+constexpr std::string getStringByArmorColor(const ArmorColor& armor_class) {
+    constexpr std::array details { "blue", "red", "none", "purple" };
+    return details[std::to_underlying(armor_class)];
+}
+enum class ArmorClass : int { SENTRY = 0, NO1, NO2, NO3, NO4, NO5, OUTPOST, BASE, UNKNOWN };
+constexpr int getArmorNumByArmorClass(const ArmorClass& armor_class) {
+    constexpr std::array details { 4, 4, 4, 4, 4, 4, 3, 4, 4 };
+    return details[std::to_underlying(armor_class)];
+}
+constexpr std::string getStringByArmorClass(const ArmorClass& armor_class) {
+    constexpr std::array details { "sentry", "no1",     "no2",  "no3",    "no4",
+                                   "no5",    "optpost", "base", "unknown" };
+    return details[std::to_underlying(armor_class)];
+}
+enum class ArmorType { SMALL, LARGE, INVALID };
+struct Light: public cv::RotatedRect {
+    Light() = default;
 
-namespace auto_aim {
-    constexpr double SMALL_ARMOR_WIDTH = 133.0 / 1000.0; // 135
-    constexpr double SMALL_ARMOR_HEIGHT = 50.0 / 1000.0; // 55
-    constexpr double LARGE_ARMOR_WIDTH = 225.0 / 1000.0;
-    constexpr double LARGE_ARMOR_HEIGHT = 50.0 / 1000.0; // 55
+    explicit Light(const std::vector<cv::Point>& contour);
 
-    constexpr double FIFTTEN_DEGREE_RAD = 15 * CV_PI / 180;
-    struct Light: public cv::RotatedRect {
-        Light() = default;
+    void addOffset(const cv::Point2f& offset) noexcept {
+        this->center += offset;
+        top += offset;
+        bottom += offset;
+    }
+    void transform(const Eigen::Matrix<float, 3, 3>& transform_matrix) noexcept {
+        top = utils::transformPoint2D(transform_matrix, top);
+        bottom = utils::transformPoint2D(transform_matrix, bottom);
+        length = cv::norm(top - bottom);
+        cv::Point2f p[4];
+        this->points(p);
 
-        explicit Light(const std::vector<cv::Point>& contour);
+        width = cv::norm(
+            utils::transformPoint2D(transform_matrix, p[0])
+            - utils::transformPoint2D(transform_matrix, p[1])
+        );
+        const cv::Point2f p0 = center;
+        const cv::Point2f p1 = center + axis;
 
-        void addOffset(const cv::Point2f& offset) noexcept;
-        void transform(const Eigen::Matrix<float, 3, 3>& transform_matrix) noexcept;
+        const cv::Point2f p0_t = utils::transformPoint2D(transform_matrix, p0);
 
-        cv::Point2f top, bottom;
-        EnemyColor color;
-        cv::Point2f axis;
-        double length = 0;
-        double width = 0;
-        float tilt_angle = 0;
+        const cv::Point2f p1_t = utils::transformPoint2D(transform_matrix, p1);
+
+        axis = p1_t - p0_t;
+        axis /= cv::norm(axis);
+
+        tilt_angle =
+            std::atan2(std::abs(top.x - bottom.x), std::abs(top.y - bottom.y)) / CV_PI * 180.0f;
+        center = utils::transformPoint2D(transform_matrix, center);
+    }
+
+    cv::Point2f top, bottom;
+    int color = 0;
+    cv::Point2f axis;
+    double length = 0;
+    double width = 0;
+    float tilt_angle = 0;
+};
+
+enum class ArmorKeyPointsIndex : int {
+    RIGHT_BOTTOM,
+    RIGHT_MID,
+    RIGHT_TOP,
+    LEFT_TOP,
+    LEFT_MID,
+    LEFT_BOTTOM,
+    N
+};
+namespace armor_keypoints {
+    using I = ArmorKeyPointsIndex;
+    constexpr std::array sys_pairs = {
+
+        std::pair { std::to_underlying(I::RIGHT_BOTTOM), std::to_underlying(I::LEFT_BOTTOM) },
+        std::pair { std::to_underlying(I::RIGHT_MID), std::to_underlying(I::LEFT_MID) },
+        std::pair { std::to_underlying(I::RIGHT_MID), std::to_underlying(I::LEFT_TOP) }
     };
+} // namespace armor_keypoints
 
-    enum class ArmorColor : int { BLUE = 0, RED, NONE, PURPLE };
+template<typename PointT>
+struct ArmorKeyPoints2D {
+    using I = ArmorKeyPointsIndex;
+    void addOffset(const PointT& offset) noexcept {
+        for (auto& p: points) {
+            if (p.has_value()) {
+                p.value() += offset;
+            }
+        }
+    }
+    void transform(const Eigen::Matrix<float, 3, 3>& transform_matrix) noexcept {
+        for (auto& p: points) {
+            if (p.has_value()) {
+                p.value() = utils::transformPoint2D(transform_matrix, p.value());
+            }
+        }
+    }
+    std::array<PointT, 6> getPoints() noexcept {
+        if (!points[I::RIGHT_MID].has_value()) {
+            points[I::RIGHT_MID] = (points[I::RIGHT_BOTTOM] + points[I::RIGHT_TOP]) / 2.0;
+        }
+        if (!points[I::LEFT_MID].has_value()) {
+            points[I::LEFT_MID] = (points[I::LEFT_BOTTOM] + points[I::LEFT_TOP]) / 2.0;
+        }
+        for (const auto& p: points) {
+            if (!p.has_value()) {
+                throw std::runtime_error("ArmorKeyPoints2D::points(): one of the points is not set"
+                );
+            }
+        }
+        return points;
+    }
+    std::array<std::optional<PointT>, 6> points;
+};
+template<typename PointT, double W, double H>
+struct ArmorKeyPoint3D {
+    using I = ArmorKeyPointsIndex;
+    static constexpr std::array points = {
+        PointT(0, W / 2, -H / 2), // 右下
+        PointT(0, W / 2, 0.0), // 右中
+        PointT(0, W / 2, H / 2), // 右上
 
-    int formArmorColor(const ArmorColor& color) noexcept;
-    enum class ArmorNumber : int { SENTRY = 0, NO1, NO2, NO3, NO4, NO5, OUTPOST, BASE, UNKNOWN };
-    std::ostream& operator<<(std::ostream& os, const ArmorNumber& number) noexcept;
-
-    int formArmorNumber(const ArmorNumber& number) noexcept;
-    std::string armorNumberToString(const ArmorNumber& num) noexcept;
-    ArmorNumber armorNumberFromString(const std::string& s) noexcept;
-    int retypetotracker(const ArmorNumber& a) noexcept;
-    bool isSameTarget(const ArmorNumber& a, const ArmorNumber& b) noexcept;
-    enum class ArmorsNum { NORMAL_4 = 4, OUTPOST_3 = 3 };
-
-    enum class ArmorType { SMALL, LARGE, INVALID };
-    std::string armorTypeToString(const ArmorType& type) noexcept;
-
-    struct ArmorObject {
-        ArmorColor color;
-        ArmorNumber number;
-        std::vector<cv::Point2f> pts;
-        cv::Rect box;
-
+        PointT(0, -W / 2, H / 2), // 左上
+        PointT(0, -W / 2, 0.0), // 左中
+        PointT(0, -W / 2, -H / 2) // 左下
+    };
+};
+struct Armor {
+    ArmorColor color = ArmorColor::NONE;
+    ArmorClass number = ArmorClass::UNKNOWN;
+    ArmorKeyPoints2D<cv::Point2f> key_points;
+    std::chrono::steady_clock::time_point timestamp;
+    int id = -1;
+    int frame_id = -1;
+    ISO3 pose;
+    struct NetCtx {
+        double confidence = 0;
+        ArmorColor color = ArmorColor::NONE;
+        ArmorClass number = ArmorClass::UNKNOWN;
+        ArmorKeyPoints2D<cv::Point2f> key_points;
+    } net;
+    struct ClassifierCtx {
+        ArmorClass number = ArmorClass::UNKNOWN;
         cv::Mat number_img;
-
-        double confidence;
-
+        double confidence = 0;
+    } classifier;
+    struct CvCtx {
+        ArmorColor color = ArmorColor::NONE;
+        ArmorType type = ArmorType::INVALID;
         cv::Mat whole_binary_img;
         cv::Mat whole_rgb_img;
         cv::Mat whole_gray_img;
+        std::vector<Light> tmp_lights;
+        Light left_light, right_light;
+        bool is_valid = false;
+    } cv;
+    bool isBig() const noexcept {
+        return number == ArmorClass::NO1;
+    }
+    Armor() = default;
+};
 
-        std::vector<Light> lights;
-        cv::Point2f local_offset;
-        cv::Point2f center;
-        bool is_ok = false;
-        ArmorType type;
-        static constexpr const int N_LANDMARKS = 6;
-        static constexpr const int N_LANDMARKS_2 = N_LANDMARKS * 2;
-
-        template<typename PointType>
-        static std::vector<PointType> buildObjectPoints(const double& w, const double& h) noexcept {
-            if constexpr (N_LANDMARKS == 4) {
-                return {
-                    PointType(0, w / 2, -h / 2), // 右下
-                    PointType(0, w / 2, h / 2), // 右上
-                    PointType(0, -w / 2, h / 2), // 左上
-                    PointType(0, -w / 2, -h / 2) // 左下
-                };
-            } else {
-                return {
-                    PointType(0, w / 2, -h / 2), // 右下
-                    PointType(0, w / 2, 0.0), // 右中
-                    PointType(0, w / 2, h / 2), // 右上
-
-                    PointType(0, -w / 2, h / 2), // 左上
-                    PointType(0, -w / 2, 0.0), // 左中
-                    PointType(0, -w / 2, -h / 2) // 左下
-                };
-            }
-        }
-        template<typename IDType>
-        static std::vector<std::pair<IDType, IDType>> buildSymPairs() noexcept {
-            if constexpr (N_LANDMARKS == 4) {
-                static const std::vector<std::pair<IDType, IDType>> pairs = {
-                    { 0, 3 },
-                    { 1, 2 },
-                    // { 0, 2 },
-                    //    { 1, 3 }
-                };
-                return pairs;
-            } else {
-                static const std::vector<std::pair<IDType, IDType>> pairs = {
-                    { 0, 5 },
-                    { 1, 4 },
-                    { 2, 3 },
-                    //    { 0, 3 },
-                    //    { 2, 5 }
-
-                };
-                return pairs;
-            }
-        }
-        std::vector<cv::Point2f> toPts() const noexcept;
-        bool checkOkptsRight(double max_error) const noexcept;
-        std::array<cv::Point2f, 4> sortCorners(const std::vector<cv::Point2f>& pts) const noexcept;
-
-        // Landmarks start from bottom left in clockwise order
-        std::vector<cv::Point2f> landmarks() const noexcept;
-        void addOffset(const cv::Point2f& offset) noexcept {
-            for (auto& pt: pts) {
-                pt += offset;
-            }
-            center += offset;
-            box.x += offset.x;
-            box.y += offset.y;
-            for (auto& l: lights) {
-                l.addOffset(offset);
-            }
-        }
-        void transform(const Eigen::Matrix<float, 3, 3>& transform_matrix) noexcept {
-            for (auto& l: lights) {
-                l.transform(transform_matrix);
-            }
-            center = utils::transformPoint2D(transform_matrix, center);
-            box = utils::transformRect(transform_matrix, box);
-            for (auto& pt: pts) {
-                pt = utils::transformPoint2D(transform_matrix, pt);
-            }
-        }
-        ArmorObject(const Light& l1, const Light& l2);
-        ArmorObject() = default;
-    };
-
-    struct Armor {
-    public:
-        ArmorNumber number;
-        std::string type;
-        ISO3 pose;
-
-        float distance_to_image_center;
-        float yaw;
-        std::chrono::steady_clock::time_point timestamp;
-        bool is_ok = false;
-        bool is_none_purple = false;
-        int id = -1;
-        std::vector<cv::Point2f> toPtsDebug(
-            const cv::Mat& camera_intrinsic,
-            const cv::Mat& camera_distortion
-        ) const noexcept;
-    };
-    struct Armors {
-    public:
-        std::vector<Armor> armors;
-        std::chrono::steady_clock::time_point timestamp;
-        int id;
-        Frame frame_id;
-    };
-
-} // namespace auto_aim
-} // namespace awakening
+} // namespace awakening::auto_aim

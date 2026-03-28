@@ -1,11 +1,11 @@
 #include "base/robot.hpp"
 #include "common.hpp"
+#include "tasks/auto_aim/type.hpp"
 #include "utils/scheduler/scheduler.hpp"
 #include <opencv2/highgui.hpp>
 #include <optional>
 #include <utility>
 #include <yaml-cpp/yaml.h>
-
 using namespace awakening;
 
 struct CameraFrameTag {};
@@ -52,7 +52,7 @@ int main() {
             return std::make_tuple(std::optional<DetIo::second_type>(std::nullopt));
         }
         running_count++;
-        std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+
         running_count--;
         rate_count.detect++;
         return std::make_tuple(std::optional<DetIo::second_type>(1));
@@ -71,7 +71,6 @@ int main() {
             return;
 
         rate_count.cam++;
-
         s.runtime_push_source<CamIO>(cam_source, [f = std::move(img_frame)]() {
             CommonFrame frame;
             frame.img_frame = std::move(f);
