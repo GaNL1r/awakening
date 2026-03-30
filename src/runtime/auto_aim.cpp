@@ -1,3 +1,4 @@
+#include "param_deliver.h"
 #include "tasks/auto_aim/armor_detect/armor_detector.hpp"
 #include "tasks/auto_aim/type.hpp"
 #include "tasks/base/robot.hpp"
@@ -7,12 +8,6 @@
 #include "utils/scheduler/scheduler.hpp"
 #include "utils/signal_guard.hpp"
 #include <opencv2/highgui.hpp>
-#include <optional>
-#include <spdlog/common.h>
-#include <spdlog/spdlog.h>
-#include <utility>
-#include <vector>
-#include <yaml-cpp/yaml.h>
 
 using namespace awakening;
 
@@ -36,12 +31,16 @@ struct LogCtx {
         latency_ms.clear();
     }
 };
+static constexpr auto CAMERA_CONFIG_PATH_ARR = utils::concat(ROOT_DIR, "/config/camera.yaml");
+static constexpr std::string_view CAMERA_CONFIG_PATH(CAMERA_CONFIG_PATH_ARR.data());
+static constexpr auto AUTO_AIM_CONFIG_PATH_ARR = utils::concat(ROOT_DIR, "/config/auto_aim.yaml");
+static constexpr std::string_view AUTO_AIM_CONFIG_PATH(AUTO_AIM_CONFIG_PATH_ARR.data());
 int main() {
     logger::init(spdlog::level::debug);
     Scheduler s;
 
-    auto camera_config = YAML::LoadFile("/home/hy/awakening/config/camera.yaml");
-    auto auto_aim_config = YAML::LoadFile("/home/hy/awakening/config/auto_aim.yaml");
+    auto camera_config = YAML::LoadFile(std::string(CAMERA_CONFIG_PATH));
+    auto auto_aim_config = YAML::LoadFile(std::string(AUTO_AIM_CONFIG_PATH));
     HikCamera camera(camera_config["hik_camera"], s);
     auto_aim::ArmorDetector armor_detector(auto_aim_config["armor_detector"]);
 
@@ -49,12 +48,13 @@ int main() {
     s.register_task<HikIO, CommonFrameIo>("push_common_frame", [&](HikIO::second_type&& f) {
         static int current_id = 0;
         log_ctx.camera_count++;
-        CommonFrame frame;
-        frame.img_frame = std::move(f);
-        frame.expanded = cv::Rect(0, 0, frame.img_frame.src_img.cols, frame.img_frame.src_img.rows);
-        frame.offset = cv::Point2f(0, 0);
-        frame.id = current_id++;
-        frame.frame_id = std::to_underlying(Frame::CAMERA);
+        CommonFrame frame {
+            .img_frame = std::move(f),
+            .id = current_id++,
+            .frame_id = std::to_underlying(Frame::CAMERA),
+            .expanded = cv::Rect(0, 0, frame.img_frame.src_img.cols, frame.img_frame.src_img.rows),
+            .offset = cv::Point2f(0, 0),
+        };
         return std::make_tuple(std::optional<CommonFrameIo::second_type>(std::move(frame)));
     });
     s.register_task<CommonFrameIo, DetIo>("detector", [&](CommonFrameIo::second_type&& frame) {
@@ -65,14 +65,12 @@ int main() {
         if (running_count > 5) {
             return std::make_tuple(std::optional<DetIo::second_type>(armors));
         }
-
         running_count++;
         armors.armors = armor_detector.detect(frame);
         running_count--;
         log_ctx.detect_count++;
         auto& show = frame.img_frame.src_img;
         armors.draw(show);
-
         cv::imshow("armor_detect", show);
         cv::waitKey(1);
         return std::make_tuple(std::optional<DetIo::second_type>(armors));

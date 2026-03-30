@@ -13,7 +13,7 @@ armor_detector:
       model_distribution_policy: "TENSOR_PARALLEL"
       execution_mode: "PERFORMANCE"
   number_classifier:
-    enable: true
+    enable: false
     model_path: /home/hy/awakening/model/mlp.onnx
     label_path: /home/hy/awakening/model/label.txt
   color_classifier:

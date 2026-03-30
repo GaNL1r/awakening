@@ -186,21 +186,36 @@ struct NetDetectorOpenVINO::Impl {
     }
 
     cv::Mat detect(const cv::Mat& img, PixelFormat format) noexcept {
-        cv::Mat output;
         if (resetting_ || img.empty()) {
-            return std::move(output);
+            return {};
         }
+
         if (format != input_format_) {
             input_format_ = format;
             init();
         }
+
         const auto input = compiled_model_->input();
-        const auto input_tensor = ov::Tensor(input.get_element_type(), input.get_shape(), img.data);
+        ov::Tensor input_tensor(input.get_element_type(), input.get_shape(), img.data);
+
         const auto output_tensor = infer_thread_local(input_tensor);
-        const auto output_shape = output_tensor.get_shape();
-        const float* ptr = output_tensor.data<const float>();
-        output = cv::Mat(output_shape[1], output_shape[2], CV_32F, const_cast<float*>(ptr));
-        return std::move(output);
+        const auto& shape = output_tensor.get_shape();
+
+        auto ptr = output_tensor.data<float>();
+
+        cv::Mat output;
+
+        if (shape.size() == 3) {
+            output = cv::Mat(shape[1], shape[2], CV_32F);
+        } else if (shape.size() == 4) {
+            output = cv::Mat(shape[2], shape[3], CV_32F);
+        } else {
+            return {};
+        }
+
+        std::memcpy(output.data, ptr, sizeof(float) * output.total());
+
+        return output;
     }
     std::atomic<bool> resetting_;
     std::unique_ptr<ov::Core> ov_core_;

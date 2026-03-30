@@ -11,6 +11,7 @@
 #include <spdlog/spdlog.h>
 #include <stdexcept>
 #include <utility>
+#include <vector>
 #include <wust_vl/video/icamera.hpp>
 namespace awakening::auto_aim {
 struct ArmorDetector::Impl {
@@ -254,59 +255,74 @@ struct ArmorDetector::Impl {
         }
         number_net_.reset();
     }
-    bool classifyNumber(Armor& armor) const noexcept {
+    bool classifyNumberBatch(std::vector<Armor*>& armors) const noexcept {
         static thread_local std::unique_ptr<cv::dnn::Net> thread_net;
-        if (!armor.number_classifier || armor.number_classifier->number_img.empty()) {
-            return false;
-        }
 
         if (!thread_net) {
             thread_net = std::make_unique<cv::dnn::Net>(
                 cv::dnn::readNetFromONNX(params_.number_classifier_params->model_path)
             );
-            AWAKENING_DEBUG("Loaded number classifier model for this thread");
+            AWAKENING_DEBUG("Created thread-local number classifier model");
             if (thread_net->empty()) {
-                AWAKENING_ERROR("Failed to load thread-local number classifier model.");
+                AWAKENING_ERROR("Failed to load model");
                 return false;
             }
         }
 
-        const cv::Mat image = armor.number_classifier->number_img;
+        std::vector<cv::Mat> images;
+        std::vector<Armor*> valid_armors;
+
+        for (auto* armor: armors) {
+            if (armor && armor->number_classifier && !armor->number_classifier->number_img.empty())
+            {
+                images.emplace_back(armor->number_classifier->number_img);
+                valid_armors.emplace_back(armor);
+            }
+        }
+
+        if (images.empty())
+            return false;
+
         cv::Mat blob;
-        cv::dnn::blobFromImage(image, blob, 1.0 / 255.0);
+        cv::dnn::blobFromImages(images, blob, 1.0 / 255.0);
 
         thread_net->setInput(blob);
         cv::Mat outputs = thread_net->forward();
-        double max_val;
-        cv::minMaxLoc(outputs, nullptr, &max_val);
 
-        cv::Mat prob;
-        cv::exp(outputs - max_val, prob);
-        prob /= cv::sum(prob)[0];
-
-        double confidence;
-        cv::Point class_id;
-        cv::minMaxLoc(prob, nullptr, &confidence, nullptr, &class_id);
-
-        const int label_id = class_id.x;
-        armor.number_classifier->confidence = confidence;
-
-        static const std::map<int, ArmorClass> label_to_armor_number = {
-            { 0, ArmorClass::NO1 },    { 1, ArmorClass::NO2 }, { 2, ArmorClass::NO3 },
-            { 3, ArmorClass::NO4 },    { 4, ArmorClass::NO5 }, { 5, ArmorClass::OUTPOST },
-            { 6, ArmorClass::SENTRY }, { 7, ArmorClass::BASE }
+        static const std::array<ArmorClass, 8> label_map = {
+            ArmorClass::NO1, ArmorClass::NO2,     ArmorClass::NO3,    ArmorClass::NO4,
+            ArmorClass::NO5, ArmorClass::OUTPOST, ArmorClass::SENTRY, ArmorClass::BASE
         };
 
-        if (label_id < 8 && label_to_armor_number.find(label_id) != label_to_armor_number.end()) {
-            armor.number = label_to_armor_number.at(label_id);
+        for (int i = 0; i < outputs.rows; ++i) {
+            cv::Mat logits = outputs.row(i);
 
-            return true;
-        } else {
-            armor.number = ArmorClass::UNKNOWN;
-            armor.number_classifier->confidence = confidence;
-            return false;
+            double max_val;
+            cv::minMaxLoc(logits, nullptr, &max_val);
+
+            cv::Mat prob;
+            cv::exp(logits - max_val, prob);
+            prob /= cv::sum(prob)[0];
+
+            double confidence;
+            cv::Point class_id;
+            cv::minMaxLoc(prob, nullptr, &confidence, nullptr, &class_id);
+
+            int label = class_id.x;
+
+            auto* armor = valid_armors[i];
+            armor->number_classifier->confidence = confidence;
+
+            if (label >= 0 && label < (int)label_map.size()) {
+                armor->number = label_map[label];
+            } else {
+                armor->number = ArmorClass::UNKNOWN;
+            }
         }
+
+        return true;
     }
+    
 
     std::vector<Armor> detect(const CommonFrame& frame) const {
         std::vector<Armor> result;
@@ -317,19 +333,22 @@ struct ArmorDetector::Impl {
             utils::letterbox(roi, transform_matrix, armor_infer_->inputW(), armor_infer_->inputH());
 
         auto net_output = net_detector_->detect(resized_img, frame.img_frame.format);
-
         result = armor_infer_->process(net_output);
-        for (auto& armor: result) {
-            if (params_.number_classifier_params) {
+        if (params_.number_classifier_params) {
+            std::vector<Armor*> batch_armors;
+            for (auto& armor: result) {
                 bool ok = extractNumber(resized_img, armor);
                 if (ok) {
-                    classifyNumber(armor);
+                    batch_armors.push_back(&armor);
                 }
             }
+            classifyNumberBatch(batch_armors);
+        }
+
+        for (auto& armor: result) {
             if (params_.color_classifier_params) {
                 classifyColor(resized_img, armor, frame.img_frame.format);
             }
-
             armor.tidy();
             armor.transform(transform_matrix);
             armor.addOffset(frame.offset);
