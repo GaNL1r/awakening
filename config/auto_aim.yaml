@@ -1,0 +1,21 @@
+armor_detector:
+  armor_infer:
+    model_type: tup
+    conf_threshold: 0.2
+  net_detector:
+    backend: openvino
+    openvino:
+      model_path: "/home/hy/awakening/model/opt-1208-001.onnx"
+      device_name: "CPU"
+      perf_mode: "THROUGHPUT"
+      # priority: "MEDIUM"
+      scheduling_core_type: "PCORE_ONLY"
+      model_distribution_policy: "TENSOR_PARALLEL"
+      execution_mode: "PERFORMANCE"
+  number_classifier:
+    enable: true
+    model_path: /home/hy/awakening/model/mlp.onnx
+    label_path: /home/hy/awakening/model/label.txt
+  color_classifier:
+    enable: true
+    diff_threshold: 20.0

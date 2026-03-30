@@ -43,9 +43,10 @@ public:
         cv::Mat D(1, 5, CV_64F);
         std::memcpy(D.data, camera_d.data(), 5 * sizeof(double));
 
-        camera_info_ = std::make_pair(K.clone(), D.clone());
+        camera_info_.camera_matrix = K.clone();
+        camera_info_.distortion_coefficients = D.clone();
     }
-    std::pair<cv::Mat, cv::Mat> camera_info_;
+    CameraInfo camera_info_;
     std::shared_ptr<wust_vl::video::Camera> device_;
     CTX ctx_;
 };

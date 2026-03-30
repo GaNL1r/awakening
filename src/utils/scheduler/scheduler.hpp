@@ -1,9 +1,12 @@
 #pragma once
 #include "node.hpp"
+#include "utils/logger.hpp"
 
 #include <atomic>
 #include <chrono>
+#include <fcntl.h>
 #include <iostream>
+#include <spdlog/spdlog.h>
 #include <stdexcept>
 #include <thread>
 #include <type_traits>
@@ -137,19 +140,21 @@ public:
     }
 
     void stop() {
-        if (!running.exchange(false, std::memory_order_acq_rel))
-            return;
+        static std::once_flag flag;
+        std::call_once(flag, [this]() {
+            if (!running.exchange(false, std::memory_order_acq_rel))
+                return;
 
-        for (auto& t: rate_threads) {
-            if (t.joinable())
-                t.request_stop();
-        }
+            for (auto& t: rate_threads) {
+                if (t.joinable())
+                    t.request_stop();
+            }
 
-        rate_threads.clear();
-
-        arena.execute([this] { tg.wait(); });
+            rate_threads.clear();
+            arena.execute([this] { tg.wait(); });
+            AWAKENING_INFO("awakening Scheduler stopped");
+        });
     }
-
     void build() {
         if (built)
             return;

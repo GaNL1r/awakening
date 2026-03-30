@@ -1,10 +1,13 @@
 #pragma once
 #include "wust_vl/common/utils/logger.hpp"
 #include "wust_vl/video/icamera.hpp"
+#include <param_deliver.h>
 #include <Eigen/Dense>
 #include <any>
 #include <chrono>
+#include <opencv2/core/mat.hpp>
 #include <opencv2/opencv.hpp>
+#include <spdlog/spdlog.h>
 #include <yaml-cpp/yaml.h>
 namespace awakening {
 using Vec3 = Eigen::Vector3d;
@@ -23,9 +26,14 @@ enum class EnemyColor : bool {
 struct CommonFrame {
     wust_vl::video::ImageFrame img_frame;
     int id;
+    int frame_id;
     EnemyColor detect_color;
     cv::Rect expanded;
     cv::Point2f offset = cv::Point2f(0, 0);
     std::any any_ctx;
+};
+struct CameraInfo {
+    cv::Mat camera_matrix;
+    cv::Mat distortion_coefficients;
 };
 } // namespace awakening

@@ -99,4 +99,17 @@ inline cv::Mat letterbox(
 
     return out;
 }
+inline std::string to_upper(std::string s) {
+    std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) { return std::toupper(c); });
+    return s;
+}
+template <std::size_t N1, std::size_t N2>
+consteval auto concat(const char (&a)[N1], const char (&b)[N2]) {
+    std::array<char, N1 + N2 - 1> result{}; // -1 是因为两个字面量都有 '\0'
+    for (std::size_t i = 0; i < N1 - 1; ++i)
+        result[i] = a[i];
+    for (std::size_t i = 0; i < N2; ++i)
+        result[i + N1 - 1] = b[i]; // 包含 '\0'
+    return result;
+}
 } // namespace awakening::utils

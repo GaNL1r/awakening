@@ -47,11 +47,6 @@ fi
 
 chmod 777 /dev/shm/debug_frame
 
-
-rm -rf "$BIN_DIR/config"
-ln -sf "$CONFIG_DIR" "$BIN_DIR/config"
-ln -sf "$WORK_DIR/env.bash" "$BUILD_DIR/env.bash"
-
 if [ "$1" == "rebuild" ]; then
     echo -e "${yellow}<--- Rebuilding: This will REMOVE the entire build directory --->${reset}"
     read -p "Are you sure you want to rebuild? [y/N]: " confirm

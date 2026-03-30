@@ -1,12 +1,9 @@
 #pragma once
 #include <memory>
 namespace awakening {}
-#define RMCS_PIMPL_DEFINITION(CLASS) \
+#define AWAKENING_IMPL_DEFINITION(CLASS) \
 public: \
-    explicit CLASS() noexcept; \
     ~CLASS() noexcept; \
-    CLASS(const CLASS&) = delete; \
-    CLASS& operator=(const CLASS&) = delete; \
 \
 private: \
     struct Impl; \

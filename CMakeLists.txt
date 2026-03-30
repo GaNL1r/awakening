@@ -13,8 +13,6 @@ message(STATUS "--------------------CMAKE_BUILD_TYPE: ${CMAKE_BUILD_TYPE}-------
 
 option(BUILD_WITH_TRT      "Enable TensorRT backend"   ON)
 option(BUILD_WITH_OPENVINO "Enable OpenVINO backend"   ON)
-option(BUILD_WITH_NCNN     "Enable NCNN backend"       OFF)
-option(BUILD_WITH_ORT      "Enable ORT backend"        ON)
 
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} ${PROJECT_SOURCE_DIR}/cmake)
 file(GLOB_RECURSE SOURCES CONFIGURE_DEPENDS src/*.cpp)
@@ -28,6 +26,7 @@ find_package(yaml-cpp REQUIRED)
 find_package(Ceres REQUIRED)
 find_package(HikSDK REQUIRED)
 find_package(TBB REQUIRED)
+find_package(spdlog REQUIRED)
 find_package(wust_vl REQUIRED)
 
 set(BUILD_DEFINITIONS "")
@@ -57,26 +56,18 @@ if(BUILD_WITH_TRT)
     list(APPEND BUILD_LIBS TensorRT::TensorRT TensorRT::nvonnxparser CUDA::cudart cuda_infer)
 endif()
 
-if(BUILD_WITH_NCNN)
-    find_package(ncnn REQUIRED)
-    list(APPEND BUILD_DEFINITIONS USE_NCNN)
-    list(APPEND BUILD_LIBS ncnn)
-endif()
-
-if(BUILD_WITH_ORT)
-    set(ort_root_path "/home/hy/onnxruntime-linux-x64-gpu-1.22.0")
-    find_package(Ort REQUIRED)
-    include_directories(${Ort_INCLUDE_DIR})
-    list(APPEND BUILD_DEFINITIONS USE_ORT)
-    list(APPEND BUILD_LIBS ${Ort_LIB})
-endif()
-
+configure_file(
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/param_deliver.h.in  
+    ${CMAKE_BINARY_DIR}/src/param_deliver.h            
+    @ONLY
+)
 add_library(${PROJECT_NAME} SHARED ${SOURCES})
 target_compile_definitions(${PROJECT_NAME} PUBLIC ${BUILD_DEFINITIONS})
 target_include_directories(${PROJECT_NAME} PUBLIC
     ${PROJECT_SOURCE_DIR}
     ${PROJECT_SOURCE_DIR}/src
     ${PROJECT_SOURCE_DIR}/3rdparty
+    ${CMAKE_BINARY_DIR}/src
     ${OpenCV_INCLUDE_DIRS}
 )
 target_link_libraries(${PROJECT_NAME}
@@ -87,6 +78,7 @@ target_link_libraries(${PROJECT_NAME}
     Eigen3::Eigen
     Ceres::ceres
     TBB::tbb
+    spdlog::spdlog
     ${OpenCV_LIBS}
     ${BUILD_LIBS}
 )
@@ -94,5 +86,4 @@ function(add_common_executable exe_name src_file)
     add_executable(${exe_name} ${src_file})
     target_link_libraries(${exe_name}  ${PROJECT_NAME})
 endfunction()
-add_common_executable(a test/a.cpp)
 add_common_executable(auto_aim runtime/auto_aim.cpp)
