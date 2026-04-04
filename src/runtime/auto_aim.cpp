@@ -38,10 +38,14 @@ using namespace awakening;
 enum class SimpleFrame : int { ODOM, GIMBAL_ODOM, GIMBAL, CAMERA, CAMERA_CV, SHOOT, N };
 
 using SimpleRobotTF = utils::tf::RobotTF<SimpleFrame, static_cast<size_t>(SimpleFrame::N), true>;
-std::string SimpleFrame_to_str(SimpleFrame frame) {
+
+std::string SimpleFrame_to_str(int frame) {
     constexpr const char* details[] = { "odom",   "gimbal_odom", "gimbal",
                                         "camera", "camera_cv",   "shoot" };
-    return std::string(details[std::to_underlying(frame)]);
+    return std::string(details[frame]);
+}
+std::string SimpleFrame_to_str(SimpleFrame frame) {
+    return SimpleFrame_to_str(std::to_underlying(frame));
 }
 struct HikTag {};
 struct SerialTag {};
@@ -95,22 +99,29 @@ int main() {
     auto_aim::ArmorTracker armor_tracker(auto_aim_config["armor_tracker"]);
     utils::OrderedQueue<auto_aim::Armors> armors_queue;
     LogCtx log_ctx;
-    auto_aim::AutoAimDebugCtx auto_aim_dbg;
-    auto_aim_dbg.camera_info_buffer.write(camera_info);
+    auto_aim::AutoAimDebugCtx auto_aim_dbg { .camera_info_ = camera_info };
     rcl::TF rcl_tf(rcl_node);
     auto tf = SimpleRobotTF::create();
-    tf->add_edge(SimpleFrame::ODOM, SimpleFrame::GIMBAL_ODOM);
-    tf->add_edge(SimpleFrame::GIMBAL_ODOM, SimpleFrame::GIMBAL);
-    tf->add_edge(SimpleFrame::GIMBAL, SimpleFrame::CAMERA);
-    tf->add_edge(SimpleFrame::GIMBAL, SimpleFrame::SHOOT);
-    tf->add_edge(SimpleFrame::CAMERA, SimpleFrame::CAMERA_CV);
-    ISO3 cv_in_camera = ISO3::Identity();
-    cv_in_camera.translation() = Vec3(0, 0, 0);
-    cv_in_camera.linear() = R_CV2PHYSICS;
-    tf->push(SimpleFrame::CAMERA, SimpleFrame::CAMERA_CV, Clock::now(), cv_in_camera);
-    ISO3 camera_in_gimbal = ISO3::Identity();
-    camera_in_gimbal.translation() = Vec3(0.0, 0, 0.0);
-    tf->push(SimpleFrame::GIMBAL, SimpleFrame::CAMERA, Clock::now(), camera_in_gimbal);
+    {
+        tf->add_edge(SimpleFrame::ODOM, SimpleFrame::GIMBAL_ODOM);
+        tf->add_edge(SimpleFrame::GIMBAL_ODOM, SimpleFrame::GIMBAL);
+        tf->add_edge(SimpleFrame::GIMBAL, SimpleFrame::CAMERA);
+        tf->add_edge(SimpleFrame::GIMBAL, SimpleFrame::SHOOT);
+        tf->add_edge(SimpleFrame::CAMERA, SimpleFrame::CAMERA_CV);
+        ISO3 cv_in_camera = ISO3::Identity();
+        cv_in_camera.translation() = Vec3(0, 0, 0);
+        cv_in_camera.linear() = R_CV2PHYSICS;
+        tf->push(SimpleFrame::CAMERA, SimpleFrame::CAMERA_CV, Clock::now(), cv_in_camera);
+        ISO3 camera_in_gimbal = ISO3::Identity();
+        camera_in_gimbal.translation() = Vec3(0.0, 0, 0.1);
+        tf->push(SimpleFrame::GIMBAL, SimpleFrame::CAMERA, Clock::now(), camera_in_gimbal);
+        ISO3 shoot_in_gimbal = ISO3::Identity();
+        shoot_in_gimbal.translation() = Vec3(0.1, 0.0, 0.0);
+        tf->push(SimpleFrame::GIMBAL, SimpleFrame::SHOOT, Clock::now(), shoot_in_gimbal);
+        ISO3 gimbal_odom_in_odom = ISO3::Identity();
+        gimbal_odom_in_odom.translation() = Vec3(0, 0, .0);
+        tf->push(SimpleFrame::ODOM, SimpleFrame::GIMBAL_ODOM, Clock::now(), gimbal_odom_in_odom);
+    }
     s.register_task<HikIO, CommonFrameIo>("push_common_frame", [&](HikIO::second_type&& f) {
         static int current_id = 0;
         log_ctx.camera_count++;
@@ -153,13 +164,16 @@ int main() {
         }
         auto target = armor_target.read();
         if (target.check()) {
-            auto __target_state = target.get_target_state();
-            auto camera_cv_in_odom =
-                tf->pose_in(SimpleFrame::CAMERA_CV, SimpleFrame::ODOM, frame.img_frame.timestamp);
-            __target_state.predict(frame.img_frame.timestamp);
+            auto camera_cv_in_odom = tf->pose_a_in_b(
+                SimpleFrame::CAMERA_CV,
+                SimpleFrame::ODOM,
+                frame.img_frame.timestamp
+            );
+            target.set_target_state([&](armor_motion_model::State& state) {
+                state.predict(frame.img_frame.timestamp);
+            });
             auto bbox = target.expanded(
                 frame.img_frame.timestamp,
-                __target_state,
                 camera_cv_in_odom,
                 camera_info,
                 frame.img_frame.src_img.size()
@@ -200,18 +214,15 @@ int main() {
                 armors.armors.push_back(a);
             }
             auto camera_cv_in_odom =
-                tf->pose_in(SimpleFrame::CAMERA_CV, SimpleFrame::ODOM, armors.timestamp);
-            auto __armor_target = armor_tracker.track(armors, camera_info, camera_cv_in_odom);
-            armor_target.write(__armor_target);
+                tf->pose_a_in_b(SimpleFrame::CAMERA_CV, SimpleFrame::ODOM, armors.timestamp);
             armors.frame_id = std::to_underlying(SimpleFrame::ODOM);
-            rcl::pub_armor_marker(
-                rcl_node,
-                SimpleFrame_to_str(SimpleFrame(armors.frame_id)),
-                armors
-            );
+            auto __armor_target =
+                armor_tracker.track(armors, camera_info, camera_cv_in_odom, armors.frame_id);
+            armor_target.write(__armor_target);
+            rcl::pub_armor_marker(rcl_node, SimpleFrame_to_str(armors.frame_id), armors);
             rcl::pub_armor_target_marker(
                 rcl_node,
-                SimpleFrame_to_str(SimpleFrame(armors.frame_id)),
+                SimpleFrame_to_str(__armor_target.get_target_state().frame_id),
                 __armor_target
             );
 
@@ -223,7 +234,6 @@ int main() {
             log_ctx.found_count += armor_tracker.get_count();
             armor_tracker.reset_count();
             auto_aim_dbg.armors_buffer.write(armors);
-            auto_aim_dbg.camera_cv_in_odom_buffer.write(camera_cv_in_odom);
             log_ctx.track_count++;
         }
     });
@@ -245,6 +255,14 @@ int main() {
     });
     s.add_rate_source<2>("debug", 60.0, [&]() {
         auto target = armor_target.read();
+        auto old_in_camera_cv = tf->pose_a_in_b(
+            SimpleFrame(target.get_target_state().frame_id),
+            SimpleFrame::CAMERA_CV,
+            target.get_target_state().timestamp
+        );
+        target.set_target_state([&](armor_motion_model::State& state) {
+            state.transform(old_in_camera_cv, std::to_underlying(SimpleFrame::CAMERA_CV));
+        });
         auto_aim_dbg.armor_target_buffer.write(target);
         auto debug_img = auto_aim_dbg.img_frame().src_img;
         if (!debug_img.empty()) {

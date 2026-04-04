@@ -36,4 +36,38 @@ struct CameraInfo {
         distortion_coefficients = D.clone();
     }
 };
+struct AimPoint {
+    ISO3 pose;
+};
+struct GimbalCmd {
+    std::chrono::steady_clock::time_point timestamp;
+    double pitch = 0;
+    double yaw = 0;
+    double enable_yaw_diff = 0;
+    double enable_pitch_diff = 0;
+    double target_yaw = 0;
+    double target_pitch = 0;
+    double v_yaw = 0;
+    double v_pitch = 0;
+    double a_yaw = 0;
+    double a_pitch = 0;
+    bool fire_advice = false;
+    double fly_time = 0;
+    bool appear = false;
+    AimPoint aim_point;
+    inline bool is_valid() const noexcept {
+        auto bad = [](double x) { return std::isnan(x) || std::isinf(x); };
+
+        if (bad(pitch) || bad(yaw) || bad(target_yaw) || bad(target_pitch) || bad(target_pitch)
+            || bad(v_yaw) || bad(v_pitch) || bad(enable_yaw_diff) || bad(enable_pitch_diff))
+            return false;
+
+        return true;
+    }
+    inline void no_shoot() {
+        fire_advice = false;
+        enable_pitch_diff = 0;
+        enable_pitch_diff = 0;
+    }
+};
 } // namespace awakening

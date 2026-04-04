@@ -72,10 +72,9 @@ public:
         }
     };
     ArmorTarget() = default;
-    ArmorTarget(const Armor& a, const ArmorTrackerCfg& c, const TimePoint& timestamp);
+    ArmorTarget(const Armor& a, const ArmorTrackerCfg& c, const TimePoint& timestamp, int frame_id);
     [[nodiscard]] cv::Rect expanded(
         const TimePoint& timestamp,
-        const State& __target_state,
         const ISO3& camera_cv_in_odom,
         const CameraInfo& camera_info,
         const cv::Size& image_size
@@ -92,6 +91,10 @@ public:
     ArmorTrackerCfg cfg;
     State get_target_state() const {
         return target_state;
+    }
+    template<typename F>
+    void set_target_state(F&& f) {
+        f(target_state);
     }
     bool is_inited = false;
     TrackState track_state;

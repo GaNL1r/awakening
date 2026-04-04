@@ -11,7 +11,6 @@ void draw_auto_aim(cv::Mat& img, AutoAimDebugCtx& ctx) {
     auto armors = ctx.armors();
     auto armor_target = ctx.armor_target();
     auto camera_info = ctx.camera_info();
-    auto camera_cv_in_odom = ctx.camera_cv_in_odom();
     const cv::Rect img_rect(0, 0, img.cols, img.rows);
     const cv::Rect roi = ctx.expanded() & img_rect;
     cv::rectangle(img, roi, cv::Scalar(255, 255, 255), 2);
@@ -19,9 +18,8 @@ void draw_auto_aim(cv::Mat& img, AutoAimDebugCtx& ctx) {
     if (armor_target.check()) {
         auto target_state = armor_target.get_target_state();
         target_state.predict(Clock::now());
-        auto armors_pose_in_odom = target_state.get_armors_pose(armor_target.target_number);
-        for (auto& armor_pose_in_odom: armors_pose_in_odom) {
-            auto armor_pose_in_camera_cv = camera_cv_in_odom.inverse() * armor_pose_in_odom;
+        auto armors_pose_in_camera_cv = target_state.get_armors_pose(armor_target.target_number);
+        for (auto& armor_pose_in_camera_cv: armors_pose_in_camera_cv) {
             auto image_points = utils::reprojection(
                 camera_info.camera_matrix,
                 camera_info.distortion_coefficients,
@@ -35,7 +33,7 @@ void draw_auto_aim(cv::Mat& img, AutoAimDebugCtx& ctx) {
                     image_points[std::to_underlying(i)],
                     image_points[std::to_underlying(j)],
                     cv::Scalar(200, 255, 200),
-                    1
+                    2
                 );
             };
             draw_line(I::LEFT_TOP, I::LEFT_BOTTOM);

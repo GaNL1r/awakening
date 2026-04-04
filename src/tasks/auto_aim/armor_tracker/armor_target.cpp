@@ -7,7 +7,12 @@
 #include <algorithm>
 #include <opencv2/core/mat.hpp>
 namespace awakening::auto_aim {
-ArmorTarget::ArmorTarget(const Armor& a, const ArmorTrackerCfg& c, const TimePoint& timestamp) {
+ArmorTarget::ArmorTarget(
+    const Armor& a,
+    const ArmorTrackerCfg& c,
+    const TimePoint& timestamp,
+    int frame_id
+) {
     cfg = c;
     measure_ctx.armor_num = getArmorNumByArmorClass(a.number);
     measure_ctx.id = 0;
@@ -75,6 +80,7 @@ ArmorTarget::ArmorTarget(const Armor& a, const ArmorTrackerCfg& c, const TimePoi
     const double zc = za;
     target_state.x << xc, 0, yc, 0, zc, 0, yaw, 0, r, 0, 0;
     target_state.timestamp = timestamp;
+    target_state.frame_id = frame_id;
     esekf.setState(target_state.x);
     target_number = a.number;
     last_update = timestamp;
@@ -263,7 +269,6 @@ std::vector<std::pair<int, Armor>> ArmorTarget::match(const std::vector<Armor>& 
 }
 [[nodiscard]] cv::Rect ArmorTarget::expanded(
     const TimePoint& timestamp,
-    const State& __target_state,
     const ISO3& camera_cv_in_odom,
     const CameraInfo& camera_info,
     const cv::Size& image_size
@@ -275,7 +280,7 @@ std::vector<std::pair<int, Armor>> ArmorTarget::match(const std::vector<Armor>& 
     }
 
     const float car_box_half =
-        std::max(__target_state.r(), __target_state.r() + __target_state.l()) + 0.15f;
+        std::max(target_state.r(), target_state.r() + target_state.l()) + 0.15f;
 
     static std::vector<cv::Point3f> CAR_BOX;
     CAR_BOX = { { 0, car_box_half, -car_box_half },
@@ -283,7 +288,7 @@ std::vector<std::pair<int, Armor>> ArmorTarget::match(const std::vector<Armor>& 
                 { 0, -car_box_half, car_box_half },
                 { 0, car_box_half, car_box_half } };
 
-    auto target_pos_in_odom = __target_state.pos();
+    auto target_pos_in_odom = target_state.pos();
     auto target_pos_in_camera_cv = camera_cv_in_odom.inverse() * target_pos_in_odom;
 
     if (target_pos_in_camera_cv.z() <= 0.2) {

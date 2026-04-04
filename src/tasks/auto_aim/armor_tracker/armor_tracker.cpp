@@ -16,8 +16,12 @@ struct ArmorTracker::Impl {
     Impl(const YAML::Node& config) {
         cfg_.load(config);
     }
-    ArmorTarget
-    track(Armors& armors, const CameraInfo& camera_info, const ISO3& camera_cv_in_odom) {
+    ArmorTarget track(
+        Armors& armors,
+        const CameraInfo& camera_info,
+        const ISO3& camera_cv_in_odom,
+        int frame_id
+    ) {
         static TimePoint last_track = Clock::now();
         double dt = std::chrono::duration<double>(armors.timestamp - last_track).count();
         dt = std::clamp(dt, 1e-3, 0.1);
@@ -27,7 +31,7 @@ struct ArmorTracker::Impl {
         auto process = [&](int idx) {
             bool found =
                 (target_buf_[idx].track_state.tracker_state == ArmorTarget::TrackState::LOST)
-                ? init_target(idx, armors)
+                ? init_target(idx, armors, frame_id)
                 : update_target(idx, armors);
             update_fsm(found, idx);
             return found;
@@ -49,7 +53,7 @@ struct ArmorTracker::Impl {
         }
         return target_buf_[cur_target_idx_];
     }
-    bool init_target(size_t i, const Armors& armors) noexcept {
+    bool init_target(size_t i, const Armors& armors, int frame_id) noexcept {
         if (armors.armors.empty()) {
             return false;
         }
@@ -70,7 +74,7 @@ struct ArmorTracker::Impl {
             return false;
         }
         AWAKENING_INFO("init target: {}", getStringByArmorClass(init_target.number));
-        target = ArmorTarget(init_target, cfg_, armors.timestamp);
+        target = ArmorTarget(init_target, cfg_, armors.timestamp, frame_id);
         target.track_state.tracker_state = ArmorTarget::TrackState::DETECTING;
         return true;
     }
@@ -213,7 +217,7 @@ struct ArmorTracker::Impl {
         );
         double cost = 0.0;
         for (int i = 0; i < std::to_underlying(ArmorKeyPointsIndex::N); i++) {
-             cost += cv::norm(image_points[i] - landmarks[i]);
+            cost += cv::norm(image_points[i] - landmarks[i]);
         }
         // for (auto& p: armor_keypoints::sys_pairs) {
         //     const auto mid = 0.5 * (image_points[p.first] + image_points[p.second]);
@@ -310,9 +314,13 @@ void ArmorTracker::pose_solve(
 ) {
     _impl->pose_solve(armors, camera_info, camera_cv_in_odom);
 }
-ArmorTarget
-ArmorTracker::track(Armors& armors, const CameraInfo& camera_info, const ISO3& camera_cv_in_odom) {
-    return _impl->track(armors, camera_info, camera_cv_in_odom);
+ArmorTarget ArmorTracker::track(
+    Armors& armors,
+    const CameraInfo& camera_info,
+    const ISO3& camera_cv_in_odom,
+    int frame_id
+) {
+    return _impl->track(armors, camera_info, camera_cv_in_odom, frame_id);
 }
 int ArmorTracker::get_count() {
     return _impl->found_count_;

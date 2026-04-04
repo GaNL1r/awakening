@@ -33,6 +33,7 @@ inline void pub_armor_target_marker(
         position_marker.scale.x = position_marker.scale.y = position_marker.scale.z = 0.1;
         position_marker.color.a = 1.0;
         position_marker.color.g = 1.0;
+        position_marker.lifetime = rclcpp::Duration::from_seconds(0.1);
         linear_v_marker.type = visualization_msgs::msg::Marker::ARROW;
         linear_v_marker.ns = "linear_v";
         linear_v_marker.scale.x = 0.03;
@@ -40,6 +41,7 @@ inline void pub_armor_target_marker(
         linear_v_marker.color.a = 1.0;
         linear_v_marker.color.r = 1.0;
         linear_v_marker.color.g = 1.0;
+        linear_v_marker.lifetime = rclcpp::Duration::from_seconds(0.1);
         angular_v_marker.type = visualization_msgs::msg::Marker::ARROW;
         angular_v_marker.ns = "angular_v";
         angular_v_marker.scale.x = 0.03;
@@ -47,12 +49,14 @@ inline void pub_armor_target_marker(
         angular_v_marker.color.a = 1.0;
         angular_v_marker.color.b = 1.0;
         angular_v_marker.color.g = 1.0;
+        angular_v_marker.lifetime = rclcpp::Duration::from_seconds(0.1);
         armors_marker.ns = "filtered_armors";
         armors_marker.type = visualization_msgs::msg::Marker::CUBE;
         armors_marker.scale.x = 0.03;
         armors_marker.scale.z = 0.125;
         armors_marker.color.a = 1.0;
         armors_marker.color.b = 1.0;
+        armors_marker.lifetime = rclcpp::Duration::from_seconds(0.1);
     }
     visualization_msgs::msg::MarkerArray marker_array;
     if (target.check()) {

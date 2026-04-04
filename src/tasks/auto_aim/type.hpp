@@ -166,7 +166,10 @@ inline std::string getStringByArmorColor(ArmorColor armor_color) {
     return std::string(details[std::to_underlying(armor_color)]);
 }
 inline cv::Scalar getCVColorByArmorClass(ArmorColor armor_color) {
-    static  cv::Scalar details[] = { cv::Scalar(255, 0, 0), cv::Scalar(0, 0, 255), cv::Scalar(255, 255, 255), cv::Scalar(255, 0, 255) };
+    static cv::Scalar details[] = { cv::Scalar(255, 0, 0),
+                                    cv::Scalar(0, 0, 255),
+                                    cv::Scalar(255, 255, 255),
+                                    cv::Scalar(255, 0, 255) };
     return details[std::to_underlying(armor_color)];
 }
 inline std::string getStringByArmorClass(ArmorClass armor_class) {
@@ -276,7 +279,7 @@ struct Armor {
 
         bottom_center.y += 20;
 
-        std::string text = getStringByArmorColor(color) + " " + getStringByArmorClass(number);
+        std::string text = get_str();
 
         int font = cv::FONT_HERSHEY_COMPLEX;
         double scale = 0.5;
@@ -291,6 +294,9 @@ struct Armor {
         );
 
         cv::putText(img, text, text_org, font, scale, getCVColorByArmorClass(color), thickness);
+    }
+    std::string get_str() const noexcept {
+        return getStringByArmorColor(color) + "_" + getStringByArmorClass(number);
     }
     Armor() = default;
 };

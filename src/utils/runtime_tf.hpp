@@ -57,15 +57,12 @@ public:
         buffers_[size_t(parent)][size_t(child)].buffer.push(t, pose_in_parent);
         return true;
     }
-
-    // 查询 pose: child 在 parent 中的位姿
-    ISO3 pose_in(FrameEnum child, FrameEnum parent, const TimePoint& t) const {
-        auto path = find_path(parent, child); // 查 parent->child 的路径
+    ISO3 pose_a_in_b(FrameEnum a, FrameEnum b, const TimePoint& t) const {
+        auto path = find_path(b, a); // 查 a->b 的路径
         if (!path) {
             if constexpr (Static) {
                 throw std::runtime_error(
-                    "No path from " + std::to_string(size_t(parent)) + " to "
-                    + std::to_string(size_t(child))
+                    "No path from " + std::to_string(size_t(a)) + " to " + std::to_string(size_t(b))
                 );
             } else {
                 return ISO3::Identity();
@@ -100,10 +97,6 @@ public:
 
     std::vector<Edge<FrameEnum>> get_edges() const {
         return edges_;
-    }
-
-    bool has_path(FrameEnum child, FrameEnum parent) const {
-        return find_path(parent, child).has_value();
     }
 
 private:

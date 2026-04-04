@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <ceres/ceres.h>
 #include <chrono>
+#include <optional>
 namespace awakening::armor_motion_model {
 
 enum class MotionModel { CONSTANT_VELOCITY, CONSTANT_ROTATION, CONSTANT_VEL_ROT };
@@ -127,12 +128,22 @@ struct Measure {
 struct State {
     VecX x;
     TimePoint timestamp;
+    int frame_id;
+    std::optional<ISO3> oldest_in_new;
+    double oldest_yaw;
+
     std::vector<ISO3> get_armors_pose(auto_aim::ArmorClass armor_number) const {
         std::vector<ISO3> r;
         const double armor_pitch = (armor_number == auto_aim::ArmorClass::OUTPOST)
             ? -auto_aim::FIFTTEN_DEGREE_RAD
             : auto_aim::FIFTTEN_DEGREE_RAD;
         int armor_num = getArmorNumByArmorClass(armor_number);
+        State tmp = *this;
+        if (oldest_in_new) {
+            tmp.transform(oldest_in_new.value().inverse(), frame_id);
+            tmp.x[idx::YAW] = oldest_yaw;
+            // std::cout << tmp.vel().transpose() << "  " << vel().transpose() << std::endl;
+        }
         for (int i = 0; i < armor_num; ++i) {
             Measure::Ctx ctx;
             ctx.id = i;
@@ -141,16 +152,43 @@ struct State {
                 .ctx = ctx,
             };
             double ax, ay, az, ayaw;
-            m.armor_pose(x.data(), ax, ay, az, ayaw);
+            m.armor_pose(tmp.x.data(), ax, ay, az, ayaw);
             ISO3 pose;
             auto p = Vec3 { ax, ay, az };
             pose.translation() = p;
-
-            auto R = utils::euler2matrix(Vec3 { ayaw, armor_pitch, 0 }, utils::EulerOrder::ZYX);
+            Mat3 R = utils::euler2matrix(Vec3 { ayaw, armor_pitch, 0 }, utils::EulerOrder::ZYX);
             pose.linear() = R;
+            if (oldest_in_new) {
+                pose = oldest_in_new.value() * pose;
+            }
             r.push_back(pose);
         }
+
         return r;
+    }
+    void transform(const ISO3& old_in_new, int new_frame_id) {
+        oldest_yaw = x[idx::YAW];
+        auto old_pose = ISO3::Identity();
+        Vec3 p_new = old_in_new * pos();
+        x[idx::CX] = p_new.x();
+        x[idx::CY] = p_new.y();
+        x[idx::CZ] = p_new.z();
+
+        auto old_vel = vel();
+        Vec3 v_new = old_in_new.linear() * vel();
+        x[idx::VCX] = v_new.x();
+        x[idx::VCY] = v_new.y();
+        x[idx::VCZ] = v_new.z();
+
+        double yaw_offset = std::atan2(old_in_new.linear()(1, 0), old_in_new.linear()(0, 0));
+        x[idx::YAW] += yaw_offset;
+
+        frame_id = new_frame_id;
+        if (!oldest_in_new) {
+            oldest_in_new = old_in_new;
+            return;
+        }
+        oldest_in_new.value() = old_in_new * oldest_in_new.value();
     }
     void predict(const TimePoint& t) {
         auto dt = std::chrono::duration<double>(t - timestamp).count();
@@ -166,6 +204,7 @@ struct State {
     Vec3 pos() const noexcept {
         return Vec3(x[idx::CX], x[idx::CY], x[idx::CZ]);
     }
+
     Vec3 vel() const noexcept {
         return Vec3(x[idx::VCX], x[idx::VCY], x[idx::VCZ]);
     }

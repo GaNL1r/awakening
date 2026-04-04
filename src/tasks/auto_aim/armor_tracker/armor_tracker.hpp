@@ -8,8 +8,12 @@ namespace awakening::auto_aim {
 class ArmorTracker {
 public:
     ArmorTracker(const YAML::Node& config);
-    [[nodiscard]] ArmorTarget
-    track(Armors& armors, const CameraInfo& camera_info, const ISO3& camera_cv_in_odom);
+    [[nodiscard]] ArmorTarget track(
+        Armors& armors,
+        const CameraInfo& camera_info,
+        const ISO3& camera_cv_in_odom,
+        int frame_id
+    );
     void pose_solve(Armors& armors, const CameraInfo& camera_info, const ISO3& camera_cv_in_odom);
     int get_count();
     void reset_count();
