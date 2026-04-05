@@ -97,6 +97,7 @@ public:
         f(target_state);
     }
     bool is_inited = false;
+    bool jumped = false;
     TrackState track_state;
     TimePoint last_update;
     ArmorClass target_number = ArmorClass::UNKNOWN;

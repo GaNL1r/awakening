@@ -142,13 +142,13 @@ private:
     std::optional<std::array<PointT, std::to_underlying(I::N)>> full_points;
     std::optional<cv::Rect2f> bbox;
 };
-inline ArmorType getArmorTypebyArmorClass(ArmorClass armor_class) {
+inline ArmorType armor_type_by_armor_class(ArmorClass armor_class) {
     bool is_large = armor_class == ArmorClass::NO1;
     return is_large ? ArmorType::Large : ArmorType::SimpleSmall;
 }
 template<typename PointT>
 inline std::vector<PointT> getArmorKeyPoints3D(ArmorClass armor_class) {
-    auto armor_type = getArmorTypebyArmorClass(armor_class);
+    auto armor_type = armor_type_by_armor_class(armor_class);
     if (armor_type == ArmorType::Large) {
         return ArmorKeyPoint3D<PointT, ArmorType::Large>::build();
     } else {
@@ -157,28 +157,28 @@ inline std::vector<PointT> getArmorKeyPoints3D(ArmorClass armor_class) {
 }
 enum class ArmorColor : int { BLUE = 0, RED, NONE, PURPLE };
 
-constexpr int getArmorNumByArmorClass(const ArmorClass& armor_class) {
+constexpr int armor_num_by_armor_class(const ArmorClass& armor_class) {
     constexpr std::array details { 4, 4, 4, 4, 4, 4, 3, 4, 4 };
     return details[std::to_underlying(armor_class)];
 }
-inline std::string getStringByArmorColor(ArmorColor armor_color) {
+inline std::string string_by_armor_color(ArmorColor armor_color) {
     constexpr const char* details[] = { "blue", "red", "none", "purple" };
     return std::string(details[std::to_underlying(armor_color)]);
 }
-inline cv::Scalar getCVColorByArmorClass(ArmorColor armor_color) {
+inline cv::Scalar CV_color_by_armor_class(ArmorColor armor_color) {
     static cv::Scalar details[] = { cv::Scalar(255, 0, 0),
                                     cv::Scalar(0, 0, 255),
                                     cv::Scalar(255, 255, 255),
                                     cv::Scalar(255, 0, 255) };
     return details[std::to_underlying(armor_color)];
 }
-inline std::string getStringByArmorClass(ArmorClass armor_class) {
+inline std::string string_by_armor_class(ArmorClass armor_class) {
     constexpr const char* details[] = { "sentry", "no1",     "no2",  "no3",    "no4",
                                         "no5",    "outpost", "base", "unknown" };
     return std::string(details[std::to_underlying(armor_class)]);
 }
 
-inline std::string getStringByArmorKeyPointsIndex(int index) {
+inline std::string string_by_armor_key_points_index(int index) {
     constexpr const char* details[] = { "right_bottom", "right_top", "left_top",
                                         "left_bottom",  "left_mid",  "right_mid" };
     return std::string(details[index]);
@@ -293,10 +293,10 @@ struct Armor {
             bottom_center.y + text_size.height / 2
         );
 
-        cv::putText(img, text, text_org, font, scale, getCVColorByArmorClass(color), thickness);
+        cv::putText(img, text, text_org, font, scale, CV_color_by_armor_class(color), thickness);
     }
     std::string get_str() const noexcept {
-        return getStringByArmorColor(color) + "_" + getStringByArmorClass(number);
+        return string_by_armor_color(color) + "_" + string_by_armor_class(number);
     }
     Armor() = default;
 };

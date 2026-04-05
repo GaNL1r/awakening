@@ -7,6 +7,7 @@
 #include <ceres/ceres.h>
 #include <chrono>
 #include <optional>
+#include <vector>
 namespace awakening::armor_motion_model {
 
 enum class MotionModel { CONSTANT_VELOCITY, CONSTANT_ROTATION, CONSTANT_VEL_ROT };
@@ -102,7 +103,11 @@ struct Measure {
         assert(z.size() == Z_N);
         operator()(x.data(), z.data());
     }
-
+    template<typename T>
+    T get_armor_r(const T x[X_N]) const {
+        const bool use_lh = (ctx.armor_num == 4) && (ctx.id & 1);
+        return use_lh ? x[idx::R] + x[idx::L] : x[idx::R];
+    }
     template<typename T>
     void armor_pose(const T x[X_N], T& ax, T& ay, T& az, T& yaw) const {
         yaw = normalize_angle(x[idx::YAW] + T(ctx.id) * T(2.0 * M_PI / ctx.armor_num));
@@ -110,7 +115,7 @@ struct Measure {
         const bool outpost = (ctx.armor_num == 3);
         const bool use_lh = (ctx.armor_num == 4) && (ctx.id & 1);
 
-        const T r = use_lh ? x[idx::R] + x[idx::L] : x[idx::R];
+        const T r = get_armor_r(x);
 
         ax = x[idx::CX] - ceres::cos(yaw) * r;
         ay = x[idx::CY] - ceres::sin(yaw) * r;
@@ -131,18 +136,36 @@ struct State {
     int frame_id;
     std::optional<ISO3> oldest_in_new;
     double oldest_yaw;
+    std::vector<Vec4> get_armors_xyza(auto_aim::ArmorClass armor_number) const {
+        std::vector<Vec4> r;
+        int armor_num = armor_num_by_armor_class(armor_number);
+        r.reserve(armor_num);
+        for (int i = 0; i < armor_num; ++i) {
+            Measure::Ctx ctx;
+            ctx.id = i;
+            ctx.armor_num = armor_num;
+            Measure m {
+                .ctx = ctx,
+            };
+            double ax, ay, az, ayaw;
+            m.armor_pose(x.data(), ax, ay, az, ayaw);
+            ISO3 pose;
+            r.push_back({ ax, ay, az, ayaw });
+        }
+        return r;
+    }
 
     std::vector<ISO3> get_armors_pose(auto_aim::ArmorClass armor_number) const {
         std::vector<ISO3> r;
         const double armor_pitch = (armor_number == auto_aim::ArmorClass::OUTPOST)
             ? -auto_aim::FIFTTEN_DEGREE_RAD
             : auto_aim::FIFTTEN_DEGREE_RAD;
-        int armor_num = getArmorNumByArmorClass(armor_number);
+        int armor_num = armor_num_by_armor_class(armor_number);
+        r.reserve(armor_num);
         State tmp = *this;
         if (oldest_in_new) {
             tmp.transform(oldest_in_new.value().inverse(), frame_id);
             tmp.x[idx::YAW] = oldest_yaw;
-            // std::cout << tmp.vel().transpose() << "  " << vel().transpose() << std::endl;
         }
         for (int i = 0; i < armor_num; ++i) {
             Measure::Ctx ctx;
@@ -199,6 +222,16 @@ struct State {
         p.f(x, x);
         timestamp +=
             std::chrono::duration_cast<TimePoint::duration>(std::chrono::duration<double>(dt));
+    }
+    double get_armor_r(int id, auto_aim::ArmorClass armor_number) {
+        Measure::Ctx ctx {
+            .armor_num = armor_num_by_armor_class(armor_number),
+            .id = id,
+        };
+        Measure m {
+            .ctx = ctx,
+        };
+        return m.get_armor_r(x.data());
     }
 
     Vec3 pos() const noexcept {

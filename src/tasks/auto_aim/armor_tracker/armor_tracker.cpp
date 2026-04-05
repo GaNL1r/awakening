@@ -73,7 +73,7 @@ struct ArmorTracker::Impl {
         if (!found) {
             return false;
         }
-        AWAKENING_INFO("init target: {}", getStringByArmorClass(init_target.number));
+        AWAKENING_INFO("init target: {}", string_by_armor_class(init_target.number));
         target = ArmorTarget(init_target, cfg_, armors.timestamp, frame_id);
         target.track_state.tracker_state = ArmorTarget::TrackState::DETECTING;
         return true;

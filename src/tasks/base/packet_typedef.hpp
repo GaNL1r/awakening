@@ -12,20 +12,17 @@
 
 namespace awakening {
 
-// ===================== 常量 =====================
 constexpr const char* TARGET_TOPIC = "vision_target";
 constexpr const char* NAV_STATE_TOPIC = "rose_state";
 constexpr const char* MODE_TOPIC = "sentry_mode";
 constexpr const char* ROBO_STATE_TOPIC = "robo_state";
 constexpr const char* GOAL_TOPIC = "rose_goal";
 
-// ===================== packed 安全访问 =====================
 template<typename T>
 inline auto val(const T& v) {
-    return +v; // 强制值语义（避免 packed 引用问题）
+    return +v;
 }
 
-// ===================== 日志缓冲 =====================
 struct SerialLogBuffer {
     std::mutex mtx;
     nlohmann::json j;
@@ -39,7 +36,6 @@ inline SerialLogBuffer& getLogBuffer() {
     return buf;
 }
 
-// ===================== FPS =====================
 template<typename Tag>
 inline void updateFPS(nlohmann::json& j) {
     static int frame_count = 0;
@@ -60,7 +56,6 @@ inline void updateFPS(nlohmann::json& j) {
     j["fps"] = fps;
 }
 
-// ===================== flush =====================
 inline void flushSerialLog() {
     static auto last_flush = std::chrono::steady_clock::now();
     auto& buf = getLogBuffer();
@@ -146,7 +141,6 @@ struct ReceiveRobotData {
 
 } __attribute__((packed));
 
-// ----------- 接收：哨兵 -----------
 struct ReceiveSentryData {
     static constexpr uint8_t ID = 0x03;
 
@@ -187,7 +181,6 @@ struct ReceiveSentryData {
 
 } __attribute__((packed));
 
-// ----------- 发送：机器人 -----------
 struct SendRobotCmdData {
     static constexpr uint8_t ID = 0x01;
 
@@ -232,7 +225,6 @@ struct SendRobotCmdData {
 
 } __attribute__((packed));
 
-// ----------- 发送：导航 -----------
 struct SendNavCmdData {
     static constexpr uint8_t ID = 0x02;
 

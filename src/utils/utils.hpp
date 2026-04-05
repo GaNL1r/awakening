@@ -302,4 +302,8 @@ inline std::vector<cv::Point2f> reprojection(
     cv::projectPoints(object_points, rvec, tvec, camera_matrix, dist_coeffs, pts_2d);
     return pts_2d;
 }
+[[nodiscard]] inline double lerp_angle(double a0, double a1, double t) noexcept {
+    double d = std::remainder(a1 - a0, 2.0 * M_PI);
+    return a0 + t * d;
+}
 } // namespace awakening::utils

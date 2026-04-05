@@ -47,3 +47,36 @@ armor_tracker:
   yaw_r_base_side: 0.06
   yaw_r_log_ratio: 0.02
   esekf_iter_num: 5
+
+auto_aim_fsm:
+  single_whole_up: 1.5 
+  single_whole_down: 1.0
+  whole_pair_up: 7.5 
+  whole_pair_down: 6.5 #1s内至少换2次板子  2pi  否则轨迹规划无意义
+  pair_center_up: 16.5
+  pair_center_down: 15.0
+  transfer_thresh: 50
+
+
+very_aimer:
+  sample_total_time: 2.0
+  
+  sample_horizon: 500
+
+  control_delay: 0.2
+  
+  max_yaw_acc: 40
+  #全向yaw加速度测算37
+  max_pitch_acc: 25
+  
+
+  prediction_delay: 0.00
+  comming_angle: 55
+  leaving_angle: 20
+
+  yaw_limit_deg: 60
+  shooting_range_h: 0.12
+  shooting_range_w_small: 0.12
+  shooting_range_w_large: 0.24
+  min_enable_pitch_deg: 0.25
+  min_enable_yaw_deg: 0.25

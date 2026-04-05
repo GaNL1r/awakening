@@ -128,6 +128,12 @@ public:
     [[nodiscard]] bool empty() const noexcept {
         return cp_.empty();
     }
+    std::vector<PointT>& get_cp_vec() noexcept {
+        return cp_;
+    }
+    std::vector<TimeT> get_prefix() {
+        return prefix_;
+    }
 
 private:
     std::vector<PointT> cp_;

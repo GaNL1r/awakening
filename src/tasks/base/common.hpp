@@ -38,6 +38,21 @@ struct CameraInfo {
 };
 struct AimPoint {
     ISO3 pose;
+    double d_angle;
+    static AimPoint lerp(const AimPoint& a, const AimPoint& b, double t) {
+        AimPoint p;
+
+        Vec3 trans = (1.0 - t) * a.pose.translation() + t * b.pose.translation();
+        Quaternion qa(a.pose.rotation());
+        Quaternion qb(b.pose.rotation());
+        Quaternion q = qa.slerp(t, qb);
+
+        p.pose = ISO3::Identity();
+        p.pose.linear() = q.toRotationMatrix();
+        p.pose.translation() = trans;
+        p.d_angle = utils::lerp_angle(a.d_angle, b.d_angle, t);
+        return p;
+    }
 };
 struct GimbalCmd {
     std::chrono::steady_clock::time_point timestamp;

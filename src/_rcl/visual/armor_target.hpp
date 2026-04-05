@@ -109,7 +109,7 @@ inline void pub_armor_target_marker(
         armors_marker.header = position_marker.header;
         armors_marker.action = visualization_msgs::msg::Marker::ADD;
 
-        auto wh = getWH(auto_aim::getArmorTypebyArmorClass(target.target_number));
+        auto wh = getWH(auto_aim::armor_type_by_armor_class(target.target_number));
         armors_marker.scale.y = wh.first;
         armors_marker.scale.z = 0.135;
         auto armors_pose = target_state.get_armors_pose(target.target_number);

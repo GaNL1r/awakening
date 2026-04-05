@@ -3,11 +3,14 @@
 #include "_rcl/visual/armor.hpp"
 #include "_rcl/visual/armor_target.hpp"
 #include "param_deliver.h"
+#include "tasks/auto_aim/armor_control/very_aimer.hpp"
 #include "tasks/auto_aim/armor_detect/armor_detector.hpp"
 #include "tasks/auto_aim/armor_tracker/armor_target.hpp"
 #include "tasks/auto_aim/armor_tracker/armor_tracker.hpp"
+#include "tasks/auto_aim/auto_aim_fsm.hpp"
 #include "tasks/auto_aim/debug.hpp"
 #include "tasks/auto_aim/type.hpp"
+#include "tasks/base/common.hpp"
 #include "tasks/base/packet_typedef.hpp"
 #include "utils/buffer.hpp"
 #include "utils/common/image.hpp"
@@ -83,6 +86,7 @@ int main() {
     logger::init(spdlog::level::trace);
     Scheduler s;
     EnemyColor enemy_color = EnemyColor::RED;
+    double bullet_speed = 21.0;
     utils::SWMR<auto_aim::ArmorTarget> armor_target;
     rcl::RclcppNode rcl_node("auto_aim");
     auto camera_config = YAML::LoadFile(std::string(CAMERA_CONFIG_PATH));
@@ -97,6 +101,8 @@ int main() {
     camera_info.load(YAML::LoadFile(camera_config["camera_info_path"].as<std::string>()));
     auto_aim::ArmorDetector armor_detector(auto_aim_config["armor_detector"]);
     auto_aim::ArmorTracker armor_tracker(auto_aim_config["armor_tracker"]);
+    auto_aim::AutoAimFsmController auto_aim_fsm_controller(auto_aim_config["auto_aim_fsm"]);
+    auto_aim::VeryAimer very_aimer(auto_aim_config["very_aimer"]);
     utils::OrderedQueue<auto_aim::Armors> armors_queue;
     LogCtx log_ctx;
     auto_aim::AutoAimDebugCtx auto_aim_dbg { .camera_info_ = camera_info };
@@ -218,6 +224,10 @@ int main() {
             armors.frame_id = std::to_underlying(SimpleFrame::ODOM);
             auto __armor_target =
                 armor_tracker.track(armors, camera_info, camera_cv_in_odom, armors.frame_id);
+            auto_aim_fsm_controller.update(
+                __armor_target.get_target_state().vyaw(),
+                __armor_target.jumped
+            );
             armor_target.write(__armor_target);
             rcl::pub_armor_marker(rcl_node, SimpleFrame_to_str(armors.frame_id), armors);
             rcl::pub_armor_target_marker(
@@ -237,7 +247,35 @@ int main() {
             log_ctx.track_count++;
         }
     });
-    s.add_rate_source<0>("slover", 1000.0, [&]() { log_ctx.solve_count++; });
+    s.add_rate_source<0>("slover", 1000.0, [&]() {
+        log_ctx.solve_count++;
+        auto target = armor_target.read();
+        GimbalCmd cmd {
+            .appear = false,
+        };
+        if (target.check()) {
+            cmd = very_aimer.very_aim(target, bullet_speed, auto_aim_fsm_controller.get_state());
+        }
+        if (serial) {
+            SendRobotCmdData send;
+            send.cmd_ID = SendRobotCmdData::ID;
+            send.time_stamp = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                  std::chrono::steady_clock::now().time_since_epoch()
+            )
+                                  .count();
+            send.appear = cmd.appear;
+            send.detect_color = std::to_underlying(enemy_color);
+            send.yaw = cmd.yaw;
+            send.pitch = cmd.pitch;
+            send.v_yaw = cmd.v_yaw;
+            send.v_pitch = cmd.v_pitch;
+            send.a_yaw = cmd.a_yaw;
+            send.a_pitch = cmd.a_pitch;
+            send.enable_yaw_diff = cmd.enable_yaw_diff;
+            send.enable_pitch_diff = cmd.enable_pitch_diff;
+            serial->write(std::move(utils::to_vector(send)));
+        }
+    });
     s.add_rate_source<1>("logger", 1.0, [&]() {
         double avg_latency_ms = log_ctx.latency_ms_total / log_ctx.track_count;
         AWAKENING_INFO(

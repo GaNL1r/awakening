@@ -14,7 +14,7 @@ ArmorTarget::ArmorTarget(
     int frame_id
 ) {
     cfg = c;
-    measure_ctx.armor_num = getArmorNumByArmorClass(a.number);
+    measure_ctx.armor_num = armor_num_by_armor_class(a.number);
     measure_ctx.id = 0;
     double r_pre;
     Eigen::DiagonalMatrix<double, X_N> p0;
@@ -178,7 +178,9 @@ void ArmorTarget::predict_ekf(const TimePoint& timestamp) {
 bool ArmorTarget::update(const std::pair<int, Armor>& a, const TimePoint& timestamp) noexcept {
     const auto armor = a.second;
     const auto id = a.first;
-
+    if (id != 0) {
+        jumped = true;
+    }
     esekf.setUpdateR([&](const Eigen::Matrix<double, Z_N, 1>& z) {
         return measurement_covariance(z);
     });

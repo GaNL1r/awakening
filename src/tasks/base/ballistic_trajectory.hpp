@@ -10,6 +10,8 @@ class Bullet {
     double speed_shoot;
 };
 class BallisticTrajectory {
+public:
+    using Ptr = std::shared_ptr<BallisticTrajectory>;
     struct Params {
         double gravity = 9.8;
         double resistance = 0.092;
@@ -23,6 +25,9 @@ class BallisticTrajectory {
 
     BallisticTrajectory(const YAML::Node& config) {
         params_.load(config);
+    }
+    static Ptr create(const YAML::Node& config) {
+        return std::make_shared<BallisticTrajectory>(config);
     }
     std::optional<double> solve_pitch(const Vec3& target_pos, double v0) const {
         const double target_height = target_pos.z();
@@ -84,7 +89,7 @@ class BallisticTrajectory {
 
         return t;
     }
-    std::pair<double, double> solve_position(double pitch, double v0, double t) const {
+    std::pair<double, double> solve_distance_height(double pitch, double v0, double t) const {
         double r = params_.resistance < 1e-4 ? 1e-4 : params_.resistance;
         double g = params_.gravity;
 
@@ -101,9 +106,3 @@ class BallisticTrajectory {
     }
 };
 } // namespace awakening
-
-// class Bullet {
-//     TimePoint fire_time;
-//     ISO3 fire_time_shoot_in_odom;
-//     double speed_shoot;
-// };

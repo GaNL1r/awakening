@@ -64,7 +64,7 @@ pub_armor_marker(RclcppNode& node, std::string frame_id, const auto_aim::Armors&
         armor_marker.header.frame_id = frame_id;
         armor_marker.header.stamp = rclcpp::Clock().now();
         text_marker.header = armor_marker.header;
-        auto wh = getWH(auto_aim::getArmorTypebyArmorClass(armor.number));
+        auto wh = getWH(auto_aim::armor_type_by_armor_class(armor.number));
         armor_marker.scale.y = wh.first;
         armor_marker.scale.z = 0.135;
         const Eigen::Vector3d& t = armor.pose.translation();
