@@ -1,5 +1,7 @@
 enemy_color: red
+
 bullet_speed: 23.0
+
 serial:
   enable: true
   device_name: /dev/ttyACM0 
@@ -8,6 +10,14 @@ serial:
   read_buf_size: 4096
 
 camera: ${ROOT_DIR}/config/camera.yaml
+
+recorder:
+  enable: false
+player:
+  enable: false
+  path: ""
+
+
 
 auto_exposure:
   enable: true
@@ -81,6 +91,8 @@ auto_aim_fsm:
 
 
 very_aimer:
+  base_yaw_offset: 0.0
+  base_pitch_offset: 0.0
   sample_total_time: 2.0
   
   sample_horizon: 500
@@ -93,6 +105,7 @@ very_aimer:
   
 
   prediction_delay: 0.00
+  aim_center_more_prediction_time: 0.0
   comming_angle: 55
   leaving_angle: 20
 

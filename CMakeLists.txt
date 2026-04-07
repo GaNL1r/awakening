@@ -7,7 +7,7 @@ set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/bin)
-set(CMAKE_BUILD_TYPE "Release")
+set(CMAKE_BUILD_TYPE "Debug")
 
 message(STATUS "--------------------CMAKE_BUILD_TYPE: ${CMAKE_BUILD_TYPE}--------------------")
 
@@ -146,9 +146,11 @@ function(add_common_executable exe_name src_file)
     target_link_libraries(${exe_name}  ${PROJECT_NAME}_utils)
 endfunction()
 add_common_executable(auto_aim src/runtime/auto_aim.cpp)
+
 target_link_libraries(auto_aim
     ${PROJECT_NAME}_auto_aim
 )
+
 if(ROS2_FULL_FOUND)
 
 target_link_libraries(auto_aim

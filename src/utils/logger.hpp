@@ -26,20 +26,19 @@ static constexpr size_t MAX_LOG_FILE_SIZE = 10 * 1024 * 1024; // 10MB
 static constexpr size_t FOLDER_WARN_SIZE = 500 * 1024 * 1024; // 500MB
 
 // 日志宏（保持不变）
-#define AWAKENING_TRACE(...) ::awakening::logger::getLogger()->trace(__VA_ARGS__)
-#define AWAKENING_DEBUG(...) ::awakening::logger::getLogger()->debug(__VA_ARGS__)
-#define AWAKENING_INFO(...) ::awakening::logger::getLogger()->info(__VA_ARGS__)
-#define AWAKENING_WARN(...) ::awakening::logger::getLogger()->warn(__VA_ARGS__)
-#define AWAKENING_ERROR(...) ::awakening::logger::getLogger()->error(__VA_ARGS__)
-#define AWAKENING_CRITICAL(...) ::awakening::logger::getLogger()->critical(__VA_ARGS__)
-
-inline std::shared_ptr<spdlog::logger>& getLogger() {
+#define AWAKENING_TRACE(...) ::awakening::logger::get_logger()->trace(__VA_ARGS__)
+#define AWAKENING_DEBUG(...) ::awakening::logger::get_logger()->debug(__VA_ARGS__)
+#define AWAKENING_INFO(...) ::awakening::logger::get_logger()->info(__VA_ARGS__)
+#define AWAKENING_WARN(...) ::awakening::logger::get_logger()->warn(__VA_ARGS__)
+#define AWAKENING_ERROR(...) ::awakening::logger::get_logger()->error(__VA_ARGS__)
+#define AWAKENING_CRITICAL(...) ::awakening::logger::get_logger()->critical(__VA_ARGS__)
+inline std::shared_ptr<spdlog::logger>& get_logger() {
     static std::shared_ptr<spdlog::logger> logger = nullptr;
     return logger;
 }
 
-inline std::string getCurrentLogFilePath() {
-    auto& logger = getLogger();
+inline std::string get_current_log_file_path() {
+    auto& logger = get_logger();
     if (!logger) {
         return {};
     }
@@ -54,7 +53,7 @@ inline std::string getCurrentLogFilePath() {
 }
 
 inline void
-checkFolderSize(const std::string& folder_path, std::size_t warn_size = FOLDER_WARN_SIZE) {
+check_folder_size(const std::string& folder_path, std::size_t warn_size = FOLDER_WARN_SIZE) {
     if (!std::filesystem::exists(folder_path)) {
         return;
     }
@@ -76,7 +75,7 @@ checkFolderSize(const std::string& folder_path, std::size_t warn_size = FOLDER_W
     }
 }
 
-inline std::string generateLogFilename(const std::string& folder_path) {
+inline std::string generate_log_filename(const std::string& folder_path) {
     auto now = std::chrono::system_clock::now();
     auto t = std::chrono::system_clock::to_time_t(now);
     std::tm tm {};
@@ -93,7 +92,7 @@ inline std::string generateLogFilename(const std::string& folder_path) {
 }
 
 inline void init(spdlog::level::level_enum level = spdlog::level::info) {
-    if (getLogger()) {
+    if (get_logger()) {
         return;
     }
 
@@ -102,7 +101,7 @@ inline void init(spdlog::level::level_enum level = spdlog::level::info) {
             std::filesystem::create_directories(LOG_FOLDER_PATH);
         }
 
-        std::string file_path = generateLogFilename(std::string(LOG_FOLDER_PATH));
+        std::string file_path = generate_log_filename(std::string(LOG_FOLDER_PATH));
 
         auto console_sink = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();
         console_sink->set_pattern("[%H:%M:%S.%e] [%^%l%$] %v");
@@ -123,10 +122,10 @@ inline void init(spdlog::level::level_enum level = spdlog::level::info) {
         logger->set_level(level);
         logger->flush_on(level);
 
-        checkFolderSize(std::string(LOG_FOLDER_PATH));
+        check_folder_size(std::string(LOG_FOLDER_PATH));
 
         spdlog::register_logger(logger);
-        getLogger() = logger;
+        get_logger() = logger;
 
         logger->info("Logger initialized successfully. Current log file: {}", file_path);
         logger->info("Log folder: {}", LOG_FOLDER_PATH);

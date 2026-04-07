@@ -1,4 +1,6 @@
+#include <memory>
 #include <optional>
+#include <string>
 #ifdef USE_ROS2
     #include "_rcl/node.hpp"
     #include "_rcl/tf.hpp"
@@ -6,7 +8,6 @@
     #include "_rcl/visual/armor_target.hpp"
 #endif
 #include "param_deliver.h"
-#include "rerun.hpp"
 #include "tasks/auto_aim/armor_control/very_aimer.hpp"
 #include "tasks/auto_aim/armor_detect/armor_detector.hpp"
 #include "tasks/auto_aim/armor_tracker/armor_target.hpp"
@@ -16,6 +17,7 @@
 #include "tasks/auto_aim/type.hpp"
 #include "tasks/base/common.hpp"
 #include "tasks/base/packet_typedef.hpp"
+#include "tasks/base/recorder_player..hpp"
 #include "tasks/base/web.hpp"
 #include "utils/buffer.hpp"
 #include "utils/common/image.hpp"
@@ -42,11 +44,36 @@ std::string SimpleFrame_to_str(int frame) {
 std::string SimpleFrame_to_str(SimpleFrame frame) {
     return SimpleFrame_to_str(std::to_underlying(frame));
 }
-struct HikTag {};
+struct CameraTag {};
 struct SerialTag {};
 struct DetectTag {};
 struct FrameTag {};
-using HikIO = IOPair<HikTag, ImageFrame>;
+namespace awakening {
+template<>
+struct RecordTagTraits<CameraTag> {
+    static constexpr uint32_t id = 1;
+    using Type = ImageFrame;
+    static std::vector<uint8_t> serialize(const Type& img) {
+        return img.serialize();
+    }
+    static Type deserialize(const std::vector<uint8_t>& buf) {
+        return Type::deserialize(buf);
+    }
+};
+
+template<>
+struct RecordTagTraits<SerialTag> {
+    static constexpr uint32_t id = 2;
+    using Type = std::vector<uint8_t>;
+    static std::vector<uint8_t> serialize(const Type& obj) {
+        return obj;
+    }
+    static Type deserialize(const std::vector<uint8_t>& buf) {
+        return buf;
+    }
+};
+} // namespace awakening
+using CameraIO = IOPair<CameraTag, ImageFrame>;
 using SerialIO = IOPair<SerialTag, std::vector<uint8_t>>;
 using CommonFrameIo = IOPair<FrameTag, CommonFrame>;
 using DetIo = IOPair<DetectTag, std::vector<auto_aim::Armors>>;
@@ -68,8 +95,25 @@ struct LogCtx {
         latency_ms_total = 0.0;
     }
 };
+static constexpr auto RECORD_FOLDER_PATH_ARR = utils::concat(ROOT_DIR, "/record/auto_aim");
+static constexpr std::string_view RECORD_FOLDER_PATH(RECORD_FOLDER_PATH_ARR.data());
+inline std::string generate_log_filename(const std::string& folder_path) {
+    auto now = std::chrono::system_clock::now();
+    auto t = std::chrono::system_clock::to_time_t(now);
+    std::tm tm {};
 
+#ifdef _WIN32
+    localtime_s(&tm, &t);
+#else
+    localtime_r(&t, &tm);
+#endif
+
+    std::ostringstream oss;
+    oss << folder_path << "/" << std::put_time(&tm, "%Y-%m-%d_%H-%M-%S") << ".bin";
+    return oss.str();
+}
 int main(int argc, char** argv) {
+    auto& signal = utils::SignalGuard::instance();
     logger::init(spdlog::level::trace);
     auto get_arg = [&](int i) -> std::optional<std::string> {
         if (i < argc) {
@@ -91,6 +135,17 @@ int main(int argc, char** argv) {
         debug = second_arg.value() == "true";
     }
     auto config = YAML::LoadFile(config_path);
+    std::unique_ptr<Recorder> recorder;
+    if (config["recorder"]["enable"].as<bool>()) {
+        recorder =
+            std::make_unique<Recorder>(generate_log_filename(std::string(RECORD_FOLDER_PATH)));
+    }
+    std::unique_ptr<Player> player;
+    if (!recorder) {
+        if (config["player"]["enable"].as<bool>()) {
+            player = std::make_unique<Player>(config["player"]["path"].as<std::string>());
+        }
+    }
 
     Scheduler s;
     EnemyColor enemy_color = enemy_color_from_string(config["enemy_color"].as<std::string>());
@@ -101,11 +156,26 @@ int main(int argc, char** argv) {
 #endif
 
     std::unique_ptr<SerialDriver> serial;
-    if (config["serial"]["enable"].as<bool>()) {
-        serial = std::make_unique<SerialDriver>(config["serial"], s);
+    if (!player) {
+        if (config["serial"]["enable"].as<bool>()) {
+            serial = std::make_unique<SerialDriver>(config["serial"], s);
+        }
     }
+
     auto camera_config = YAML::LoadFile(replace_root_dir(config["camera"].as<std::string>()));
-    HikCamera camera(camera_config["hik_camera"], s);
+    std::unique_ptr<HikCamera> camera;
+    utils::SignalGuard::add_callback([&]() {
+        if (camera) {
+            camera->stop();
+        }
+    });
+    if (!player) {
+        camera = std::make_unique<HikCamera>(camera_config["hik_camera"], s);
+        camera->init();
+        if (!camera->running_) {
+            return 0;
+        }
+    }
     CameraInfo camera_info;
     camera_info.load(camera_config["camera_info"]);
     auto_aim::ArmorDetector armor_detector(config["armor_detector"]);
@@ -143,9 +213,18 @@ int main(int argc, char** argv) {
         tf->push(SimpleFrame::ODOM, SimpleFrame::GIMBAL_ODOM, Clock::now(), gimbal_odom_in_odom);
     }
 
-    s.register_task<HikIO, CommonFrameIo>("push_common_frame", [&](HikIO::second_type&& f) {
+    s.register_task<CameraIO, CommonFrameIo>("push_common_frame", [&](CameraIO::second_type&& f) {
         static int current_id = 0;
         log_ctx.camera_count++;
+        if (recorder) {
+            utils::dt_once(
+                [&]() {
+                    recorder->record<CameraTag>(f);
+                    std::cout << "record" << std::endl;
+                },
+                std::chrono::milliseconds(100)
+            );
+        }
         CommonFrame frame {
             .img_frame = std::move(f),
             .id = current_id++,
@@ -157,6 +236,12 @@ int main(int argc, char** argv) {
     });
     if (serial) {
         s.register_task<SerialIO>("receive_serial", [&](SerialIO::second_type&& data) {
+            if (recorder) {
+                utils::dt_once(
+                    [&]() { recorder->record<SerialTag>(data); },
+                    std::chrono::milliseconds(10)
+                );
+            }
             auto robo_opt = ReceiveRobotData::create(data);
             log_ctx.serial_count++;
             if (robo_opt.has_value()) {
@@ -178,60 +263,63 @@ int main(int argc, char** argv) {
             }
         });
     }
-    s.register_task<CommonFrameIo>("auto_exposure", [&](CommonFrameIo::second_type&& frame) {
-        struct AutoExposureCfg {
-            bool enable = false;
-            double ttarget_brightness;
-            double step_gain;
-            double decay_step;
-            double tolerance;
-            double exposure_min;
-            double exposure_max;
-            double control_interval_ms;
-            void load(const YAML::Node& c) {
-                ttarget_brightness = c["target_brightness"].as<double>();
-                step_gain = c["step_gain"].as<double>();
-                decay_step = c["decay_step"].as<double>();
-                tolerance = c["tolerance"].as<double>();
-                exposure_min = c["exposure_min"].as<double>();
-                exposure_max = c["exposure_max"].as<double>();
-                control_interval_ms = c["control_interval_ms"].as<double>();
+    if (camera) {
+        s.register_task<CommonFrameIo>("auto_exposure", [&](CommonFrameIo::second_type&& frame) {
+            struct AutoExposureCfg {
+                bool enable = false;
+                double ttarget_brightness;
+                double step_gain;
+                double decay_step;
+                double tolerance;
+                double exposure_min;
+                double exposure_max;
+                double control_interval_ms;
+                void load(const YAML::Node& c) {
+                    ttarget_brightness = c["target_brightness"].as<double>();
+                    step_gain = c["step_gain"].as<double>();
+                    decay_step = c["decay_step"].as<double>();
+                    tolerance = c["tolerance"].as<double>();
+                    exposure_min = c["exposure_min"].as<double>();
+                    exposure_max = c["exposure_max"].as<double>();
+                    control_interval_ms = c["control_interval_ms"].as<double>();
+                }
+            };
+            static std::optional<AutoExposureCfg> auto_exposure_cfg;
+            if (config["auto_exposure"]["enable"].as<bool>()) {
+                auto_exposure_cfg.emplace();
+                auto_exposure_cfg.value().load(config["auto_exposure"]);
             }
-        };
-        static std::optional<AutoExposureCfg> auto_exposure_cfg;
-        if (config["auto_exposure"]["enable"].as<bool>()) {
-            auto_exposure_cfg.emplace();
-            auto_exposure_cfg.value().load(config["auto_exposure"]);
-        }
-        if (auto_exposure_cfg) {
-            auto& cfg = auto_exposure_cfg.value();
-            utils::dt_once(
-                [&]() {
-                    cv::Mat img = frame.img_frame.src_img;
-                    cv::Mat gray;
-                    cv::cvtColor(img, gray, cv::COLOR_BGR2GRAY);
-                    const double brightness = cv::mean(gray)[0];
+            if (auto_exposure_cfg) {
+                auto& cfg = auto_exposure_cfg.value();
+                utils::dt_once(
+                    [&]() {
+                        cv::Mat img = frame.img_frame.src_img;
+                        cv::Mat gray;
+                        cv::cvtColor(img, gray, cv::COLOR_BGR2GRAY);
+                        const double brightness = cv::mean(gray)[0];
 
-                    const double diff = brightness - cfg.ttarget_brightness;
-                    const double exposure_min = cfg.exposure_min;
-                    const double exposure_max = cfg.exposure_max;
-                    double exposure_time = camera.get_ExposureTime();
-                    static double last_exposure_time = 0.0;
-                    if (std::fabs(diff) > cfg.tolerance && exposure_time > 0.0) {
-                        exposure_time -= diff * cfg.step_gain;
-                    } else {
-                        exposure_time -= cfg.decay_step;
-                    }
-                    exposure_time = std::clamp(exposure_time, exposure_min, exposure_max);
-                    if (std::abs(exposure_time - last_exposure_time) > 10) {
-                        camera.set_ExposureTime(exposure_time);
-                        last_exposure_time = exposure_time;
-                    }
-                },
-                std::chrono::milliseconds((int)cfg.control_interval_ms)
-            );
-        }
-    });
+                        const double diff = brightness - cfg.ttarget_brightness;
+                        const double exposure_min = cfg.exposure_min;
+                        const double exposure_max = cfg.exposure_max;
+                        double exposure_time = camera->get_ExposureTime();
+                        static double last_exposure_time = 0.0;
+                        if (std::fabs(diff) > cfg.tolerance && exposure_time > 0.0) {
+                            exposure_time -= diff * cfg.step_gain;
+                        } else {
+                            exposure_time -= cfg.decay_step;
+                        }
+                        exposure_time = std::clamp(exposure_time, exposure_min, exposure_max);
+                        if (std::abs(exposure_time - last_exposure_time) > 10) {
+                            camera->set_ExposureTime(exposure_time);
+                            last_exposure_time = exposure_time;
+                        }
+                    },
+                    std::chrono::milliseconds((int)cfg.control_interval_ms)
+                );
+            }
+        });
+    }
+
     s.register_task<CommonFrameIo, DetIo>("detector", [&](CommonFrameIo::second_type&& frame) {
         static std::unique_ptr<std::counting_semaphore<>> detector_sem;
         if (!detector_sem) {
@@ -423,9 +511,27 @@ int main(int argc, char** argv) {
 #endif
     }
 
-    camera.start<HikTag>("hik");
+    if (camera) {
+        camera->start<CameraTag>("hik");
+    }
+
     if (serial) {
         serial->start<SerialTag>("serial");
+    }
+
+    if (player) {
+        auto cam = s.register_source<CameraIO>("hik");
+        auto serial = s.register_source<SerialIO>("serial");
+        player->subscribe<CameraTag>([&](ImageFrame& f) {
+            s.runtime_push_source<CameraIO>(cam, [&, _f = std::move(f)]() {
+                return std::make_tuple(std::optional<CameraIO::second_type>(std::move(_f)));
+            });
+        });
+        player->subscribe<SerialTag>([&](std::vector<uint8_t>& buf) {
+            s.runtime_push_source<SerialIO>(serial, [&, __buf = std::move(buf)]() {
+                return std::make_tuple(std::optional<SerialIO::second_type>(std::move(__buf)));
+            });
+        });
     }
     s.build();
     s.run();

@@ -23,6 +23,8 @@ public:
     HikCamera(const YAML::Node& config, Scheduler& scheduler): scheduler_(scheduler) {
         config_ = config;
         running_ = true;
+    }
+    void init() {
         load(config_);
     }
     ~HikCamera() {

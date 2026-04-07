@@ -25,19 +25,18 @@ struct ReceiveRobotData {
     uint8_t cmd_ID;
     uint32_t time_stamp;
 
-    float yaw, pitch, roll;
-    float CheckSum;
+    float yaw, pitch,
+        roll; //坐标系定义： +x:前，+y:左，+z：上，旋转角绕轴逆时针正，顺时针负，旋转顺序ZYX
     float yaw_vel, pitch_vel, roll_vel;
     float v_x, v_y, v_z;
 
     float bullet_speed;
-    float controller_delay; //s
-    uint8_t manual_reset_count;
-    uint8_t detect_color; //0 r
+    uint8_t detect_color; //0 r 1 b
+    uint32_t bullet_count; //发出弹+1
 
     static std::optional<ReceiveRobotData> create(const std::vector<uint8_t>& data) {
-        // if (data.size() != sizeof(ReceiveRobotData) || data[0] != ID)
-        //     return std::nullopt;
+        if (data.size() != sizeof(ReceiveRobotData) || data[0] != ID)
+            return std::nullopt;
 
         ReceiveRobotData out;
         std::memcpy(&out, data.data(), sizeof(out));
@@ -63,6 +62,7 @@ struct ReceiveRobotData {
 
             j["bullet_speed"] = val(bullet_speed);
             j["detect_color"] = (detect_color == 0 ? "Red" : "Blue");
+            j["bullet_count"] = val(bullet_count);
         });
     }
 
@@ -114,7 +114,6 @@ struct SendRobotCmdData {
     uint32_t time_stamp;
 
     uint8_t appear;
-    uint8_t shoot_rate = 3;
 
     float pitch, yaw;
     float target_yaw, target_pitch;

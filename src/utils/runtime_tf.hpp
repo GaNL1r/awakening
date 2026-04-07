@@ -33,7 +33,6 @@ public:
         return std::make_shared<RobotTF>();
     }
 
-    // 添加父子边
     void add_edge(FrameEnum parent, FrameEnum child) {
         edges_.push_back({ parent, child });
         adjacency_[parent].push_back(child);
@@ -41,7 +40,6 @@ public:
         directed_edge_[size_t(parent)][size_t(child)] = true;
     }
 
-    // 推送 pose: child 在 parent 中的位姿
     bool push(FrameEnum parent, FrameEnum child, const TimePoint& t, const ISO3& pose_in_parent) {
         if (!has_direct_edge(parent, child)) {
             if constexpr (Static) {
@@ -58,7 +56,7 @@ public:
         return true;
     }
     ISO3 pose_a_in_b(FrameEnum a, FrameEnum b, const TimePoint& t) const {
-        auto path = find_path(b, a); // 查 a->b 的路径
+        auto path = find_path(b, a);
         if (!path) {
             if constexpr (Static) {
                 throw std::runtime_error(
