@@ -13,7 +13,7 @@ app = Flask(__name__)
 STREAM_FPS = 60
 FRAME_INTERVAL = 1.0 / STREAM_FPS
 
-shared_memory_path = "/dev/shm/awaking_frame"
+shared_memory_path = "/dev/shm/awakening_frame"
 shared_size = 2 * 1024 * 1024  # 2MB
 
 

@@ -27,12 +27,12 @@ struct ArmorTracker::Impl {
         dt = std::clamp(dt, 1e-3, 0.1);
         last_track = armors.timestamp;
         lost_thres_ = std::abs(static_cast<int>(cfg_.lost_time_thres / dt));
-        pose_solve(armors, camera_info, camera_cv_in_odom);
+        // pose_solve(armors, camera_info, camera_cv_in_odom);
         auto process = [&](int idx) {
             bool found =
                 (target_buf_[idx].track_state.tracker_state == ArmorTarget::TrackState::LOST)
-                ? init_target(idx, armors, frame_id)
-                : update_target(idx, armors);
+                ? init_target(idx, armors, frame_id, camera_info, camera_cv_in_odom)
+                : update_target(idx, armors, camera_info, camera_cv_in_odom);
             update_fsm(found, idx);
             return found;
         };
@@ -53,7 +53,13 @@ struct ArmorTracker::Impl {
         }
         return target_buf_[cur_target_idx_];
     }
-    bool init_target(size_t i, const Armors& armors, int frame_id) noexcept {
+    bool init_target(
+        size_t i,
+        const Armors& armors,
+        int frame_id,
+        const CameraInfo& camera_info,
+        const ISO3& camera_cv_in_odom
+    ) noexcept {
         if (armors.armors.empty()) {
             return false;
         }
@@ -74,11 +80,23 @@ struct ArmorTracker::Impl {
             return false;
         }
         AWAKENING_INFO("init target: {}", string_by_armor_class(init_target.number));
-        target = ArmorTarget(init_target, cfg_, armors.timestamp, frame_id);
+        target = ArmorTarget(
+            init_target,
+            cfg_,
+            armors.timestamp,
+            frame_id,
+            camera_info,
+            camera_cv_in_odom
+        );
         target.track_state.tracker_state = ArmorTarget::TrackState::DETECTING;
         return true;
     }
-    bool update_target(size_t i, const Armors& armors) noexcept {
+    bool update_target(
+        size_t i,
+        const Armors& armors,
+        const CameraInfo& camera_info,
+        const ISO3& camera_cv_in_odom
+    ) noexcept {
         if (armors.armors.empty())
             return false;
         auto& target = target_buf_[i];
@@ -109,7 +127,7 @@ struct ArmorTracker::Impl {
             return false;
 
         int updated = 0;
-        const auto matches = target.match(candidates);
+        const auto matches = target.match(candidates, camera_info, camera_cv_in_odom);
 
         for (const auto& m: matches) {
             if (m.second.color == ArmorColor::NONE || m.second.color == ArmorColor::PURPLE) {
@@ -119,7 +137,7 @@ struct ArmorTracker::Impl {
                 is_none_purple_count_ = 0;
             }
 
-            if (target.update(m, armors.timestamp))
+            if (target.update(m, armors.timestamp, camera_info, camera_cv_in_odom))
                 ++updated;
         }
 
@@ -191,9 +209,9 @@ struct ArmorTracker::Impl {
             cv::cv2eigen(tvec, t_eigen_armor_in_camera_cv);
             armor.pose.translation() = t_eigen_armor_in_camera_cv;
             armor.pose.linear() = R_eigen_armor_in_camera_cv;
-            auto armor_R_in_odom = opt_R(armor, camera_info, camera_cv_in_odom);
+            // auto armor_R_in_odom = opt_R(armor, camera_info, camera_cv_in_odom);
             auto armor_in_odom = camera_cv_in_odom * armor.pose;
-            armor_in_odom.linear() = armor_R_in_odom;
+            // armor_in_odom.linear() = armor_R_in_odom;
             armor.pose = armor_in_odom;
         }
     }
@@ -276,8 +294,8 @@ struct ArmorTracker::Impl {
         const double armor_pitch =
             (armor.number == ArmorClass::OUTPOST) ? -FIFTTEN_DEGREE_RAD : FIFTTEN_DEGREE_RAD;
         double init_yaw = raw_ypr[0];
-        double roll = raw_ypr[2];
-        // double roll = 0.0;
+        // double roll = raw_ypr[2];
+        double roll = 0.0;
         auto fin_yaw = search_yaw(
             init_yaw,
             armor_pitch,

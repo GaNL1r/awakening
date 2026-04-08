@@ -22,10 +22,15 @@ tf:
     t: [0.14,0.05,0.0]
     R: [1.0,0.0,0.0,0.0,1.0,0.0,0.0,0.0,1.0]
   shoot_in_gimbal:
-    t: [0.0,0.0,0.0]
+    t: [0.2,0.0,0.0]
     R: [1.0,0.0,0.0,0.0,1.0,0.0,0.0,0.0,1.0]
 
-
+bullet_pick_up:
+  ballistic_trajectory:
+    gravity: 9.8
+    resistance:  0.092
+    max_iter: 10
+  
 auto_exposure:
   enable: true
   target_brightness: 25.0
@@ -65,11 +70,11 @@ armor_detector:
     diff_threshold: 20.0
 
 armor_tracker:
-  lost_time_thres: 2.0
+  lost_time_thres: 0.5
   tracking_thres: 10
   max_yaw_diff_deg: 60.0
   max_dis_diff: 3.0
-  match_gate: 10.0
+  match_gate: 1000.0
   qxyz_common: [20.0, 20.0, 1.0]
   qyaw_common: 10.0
   qxyz_output: [10.0, 10.0, 0.5]
@@ -78,13 +83,14 @@ armor_tracker:
   q_l: 0.0000001
   q_h: 0.0000001
   q_outpost_dz: 0.5
-  yp_r: 2e-3
-  dis_r_front: 0.5
-  dis_r_side: 2.5
-  dis2_r_ratio: 0.1
-  yaw_r_base_front: 0.2
-  yaw_r_base_side: 0.06
-  yaw_r_log_ratio: 0.02
+  # yp_r: 2e-3
+  # dis_r_front: 0.5
+  # dis_r_side: 2.5
+  # dis2_r_ratio: 0.1
+  # yaw_r_base_front: 0.2
+  # yaw_r_base_side: 0.06
+  # yaw_r_log_ratio: 0.02
+  r_uv: 100.0
   esekf_iter_num: 5
 
 auto_aim_fsm:
@@ -99,12 +105,14 @@ auto_aim_fsm:
 
 very_aimer:
   base_yaw_offset: -1.0
-  base_pitch_offset: -2.0
+  base_pitch_offset: -3.0
+  # base_yaw_offset: -0.0
+  # base_pitch_offset: -0.0
   sample_total_time: 2.0
   
   sample_horizon: 500
 
-  control_delay: 0.1
+  control_delay: 0.2
   
   max_yaw_acc: 40
   #全向yaw加速度测算37
@@ -113,7 +121,7 @@ very_aimer:
 
   prediction_delay: 0.00
   aim_center_more_prediction_time: 0.0
-  comming_angle: 65
+  comming_angle: 55
   leaving_angle: 20
 
   yaw_limit_deg: 60

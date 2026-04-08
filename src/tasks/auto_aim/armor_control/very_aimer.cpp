@@ -507,21 +507,21 @@ struct VeryAimer::Impl {
         if (armor_num > 0) {
             int best_idx = -1;
 
-            if (auto_aim_fsm == AutoAimFsm::AIM_WHOLE_CAR_ARMOR
-                && target.target_number != ArmorClass::OUTPOST) {
-                const double coming_angle = params_.comming_angle * M_PI / 180.0;
-                const double leaving_angle = params_.leaving_angle * M_PI / 180.0;
+            // if (auto_aim_fsm == AutoAimFsm::AIM_WHOLE_CAR_ARMOR
+            //     && target.target_number != ArmorClass::OUTPOST) {
+            //     const double coming_angle = params_.comming_angle * M_PI / 180.0;
+            //     const double leaving_angle = params_.leaving_angle * M_PI / 180.0;
 
-                for (int i = 0; i < armor_num; ++i) {
-                    if (std::abs(delta_angles[i]) > coming_angle)
-                        continue;
+            //     for (int i = 0; i < armor_num; ++i) {
+            //         if (std::abs(delta_angles[i]) > coming_angle)
+            //             continue;
 
-                    if (target_state.vyaw() > 0 && delta_angles[i] < leaving_angle)
-                        best_idx = i;
-                    if (target_state.vyaw() < 0 && delta_angles[i] > -leaving_angle)
-                        best_idx = i;
-                }
-            }
+            //         if (target_state.vyaw() > 0 && delta_angles[i] < leaving_angle)
+            //             best_idx = i;
+            //         if (target_state.vyaw() < 0 && delta_angles[i] > -leaving_angle)
+            //             best_idx = i;
+            //     }
+            // }
 
             if (auto_aim_fsm == AutoAimFsm::AIM_WHOLE_CAR_PAIR
                 && target.target_number != ArmorClass::OUTPOST) {
@@ -566,7 +566,7 @@ struct VeryAimer::Impl {
         }
         cp.valid = true;
         cp.yaw = angles::normalize_angle(control_yaw + base_yaw_offset_rad_);
-        cp.pitch = angles::normalize_angle(pitch_opt.value() + base_pitch_offset_rad_);
+        cp.pitch = pitch_opt.value() + base_pitch_offset_rad_;
         cp.aim_point.pose = ISO3::Identity();
         cp.aim_point.pose.translation() = p;
         cp.aim_point.d_angle = angles::shortest_angular_distance(control_yaw, armor_xyza[3]);
@@ -601,7 +601,7 @@ struct VeryAimer::Impl {
     very_aim(ArmorTarget target, double bullet_speed, const AutoAimFsm& fsm) const noexcept {
         GimbalCmd cmd;
         const int roughly_select = select_armor(target, fsm);
-        target.set_target_state([&](armor_motion_model::State& state) {
+        target.set_target_state([&](armor_point_motion_model::State& state) {
             state.predict(Clock::now());
         });
         const auto __armors_xyza = target.get_target_state().get_armors_xyza(target.target_number);
@@ -612,7 +612,7 @@ struct VeryAimer::Impl {
         std::vector<ArmorTarget> iteration_target(10, target);
         for (int iter = 0; iter < iteration_target.size(); ++iter) {
             auto& i_target = iteration_target[iter];
-            i_target.set_target_state([&](armor_motion_model::State& state) {
+            i_target.set_target_state([&](armor_point_motion_model::State& state) {
                 state.predict(prev_fly_time);
             });
             auto iter_select = select_armor(i_target, fsm);
@@ -626,7 +626,7 @@ struct VeryAimer::Impl {
         const double predict_time = prev_fly_time + params_.prediction_delay
             + (fsm == AutoAimFsm::AIM_WHOLE_CAR_CENTER ? params_.aim_center_more_prediction_time : 0
             );
-        target.set_target_state([&](armor_motion_model::State& state) {
+        target.set_target_state([&](armor_point_motion_model::State& state) {
             state.predict(predict_time);
         });
         auto cp0 = select_and_get_control_point(target, bullet_speed, fsm);
@@ -648,7 +648,7 @@ struct VeryAimer::Impl {
             for (int i = half_horizon; i >= 1; --i) {
                 double t = 0 - i * dt;
                 auto tmp_target = target;
-                tmp_target.set_target_state([&](armor_motion_model::State& state) {
+                tmp_target.set_target_state([&](armor_point_motion_model::State& state) {
                     state.predict(t);
                 });
                 auto cp = select_and_get_control_point(tmp_target, bullet_speed, fsm);
@@ -673,7 +673,7 @@ struct VeryAimer::Impl {
             for (int i = 1; i <= half_horizon; ++i) {
                 double t = 0 + i * dt;
                 auto tmp_target = target;
-                tmp_target.set_target_state([&](armor_motion_model::State& state) {
+                tmp_target.set_target_state([&](armor_point_motion_model::State& state) {
                     state.predict(t);
                 });
                 auto cp = select_and_get_control_point(tmp_target, bullet_speed, fsm);
@@ -698,7 +698,7 @@ struct VeryAimer::Impl {
             for (int i = half_horizon; i >= 1; --i) {
                 double t = 0 - i * dt;
                 auto tmp_target = target;
-                tmp_target.set_target_state([&](armor_motion_model::State& state) {
+                tmp_target.set_target_state([&](armor_point_motion_model::State& state) {
                     state.predict(t);
                 });
                 auto cp = select_and_get_control_point(
@@ -727,7 +727,7 @@ struct VeryAimer::Impl {
             for (int i = 1; i <= half_horizon; ++i) {
                 double t = 0 + i * dt;
                 auto tmp_target = target;
-                tmp_target.set_target_state([&](armor_motion_model::State& state) {
+                tmp_target.set_target_state([&](armor_point_motion_model::State& state) {
                     state.predict(t);
                 });
                 auto cp = select_and_get_control_point(
@@ -846,5 +846,8 @@ VeryAimer::~VeryAimer() noexcept {
 }
 GimbalCmd VeryAimer::very_aim(ArmorTarget target, double bullet_speed, const AutoAimFsm& fsm) {
     return _impl->very_aim(target, bullet_speed, fsm);
+}
+std::pair<double, double> VeryAimer::get_yaw_pitch_offset() {
+    return std::make_pair(_impl->base_yaw_offset_rad_, _impl->base_pitch_offset_rad_);
 }
 } // namespace awakening::auto_aim

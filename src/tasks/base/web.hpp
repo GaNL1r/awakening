@@ -62,7 +62,7 @@ inline void write_shm(const cv::Mat& img) {
         int fd_ { -1 };
         void* ptr_ { nullptr };
     };
-    static writer w("/awaking_frame");
+    static writer w("/awakening_frame");
     w.write(img);
 }
 struct LogBuffer {

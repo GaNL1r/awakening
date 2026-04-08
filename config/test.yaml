@@ -14,7 +14,7 @@ camera: ${ROOT_DIR}/config/camera.yaml
 recorder:
   enable: false
 player:
-  enable: false
+  enable: true
   path: /home/hy/awakening/record/auto_aim/2026-04-08_00-43-38.bin
 
 tf:
@@ -25,6 +25,12 @@ tf:
     t: [0.0,0.0,0.0]
     R: [1.0,0.0,0.0,0.0,1.0,0.0,0.0,0.0,1.0]
 
+bullet_pick_up:
+  ballistic_trajectory:
+    gravity: 9.8
+    resistance: 0.092
+    max_iter: 10
+  
 
 auto_exposure:
   enable: true
@@ -98,8 +104,8 @@ auto_aim_fsm:
 
 
 very_aimer:
-  base_yaw_offset: -1.0
-  base_pitch_offset: -2.0
+  base_yaw_offset: -0.0
+  base_pitch_offset: -5.5
   sample_total_time: 2.0
   
   sample_horizon: 500

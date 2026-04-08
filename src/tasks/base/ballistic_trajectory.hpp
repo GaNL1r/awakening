@@ -1,14 +1,13 @@
 #pragma once
 #include "traj.hpp"
 #include "utils/common/type_common.hpp"
+#include "utils/utils.hpp"
+#include <deque>
 #include <optional>
+#include <vector>
 #include <yaml-cpp/node/node.h>
 namespace awakening {
-class Bullet {
-    TimePoint fire_time;
-    ISO3 fire_time_shoot_in_odom;
-    double speed_shoot;
-};
+
 class BallisticTrajectory {
 public:
     using Ptr = std::shared_ptr<BallisticTrajectory>;
@@ -105,5 +104,62 @@ public:
 
         return { distance, height };
     }
+};
+struct Bullet {
+    TimePoint fire_time;
+    ISO3 fire_time_shoot_in_odom;
+    double speed_in_odom;
+    std::optional<Vec3>
+    get_pos_at(TimePoint t, BallisticTrajectory::Ptr b, const std::pair<double, double>& offset)
+        const {
+        double dt = std::chrono::duration<double>(t - fire_time).count();
+        if (dt <= 0) {
+            return std::nullopt;
+        }
+        auto euler = utils::matrix2euler(fire_time_shoot_in_odom.linear(), utils::EulerOrder::ZYX);
+        double yaw = euler[0] - offset.first;
+        double pitch = -euler[1] - offset.second;
+        auto [dis, height] = b->solve_distance_height(pitch, speed_in_odom, dt);
+        double x = dis * std::cos(yaw);
+        double y = dis * std::sin(yaw);
+        double z = height;
+        return fire_time_shoot_in_odom.translation() + Vec3(x, y, z);
+    }
+};
+class BulletPickUp {
+public:
+    mutable std::mutex mtx;
+    std::deque<Bullet> bullets;
+    BulletPickUp(const YAML::Node& config) {
+        b = BallisticTrajectory::create(config["ballistic_trajectory"]);
+    }
+    void push_back(const Bullet& bullet) {
+        std::lock_guard<std::mutex> lock(mtx);
+        bullets.push_back(std::move(bullet));
+    }
+    void update(TimePoint t, double max_fly_time) {
+        if (bullets.empty())
+            return;
+        std::lock_guard<std::mutex> lock(mtx);
+        while (!bullets.empty()
+               && std::chrono::duration<double>(t - bullets.front().fire_time).count()
+                   > max_fly_time)
+        {
+            bullets.pop_front();
+        }
+    }
+    std::vector<Vec3>
+    get_bullet_positions(TimePoint t, const std::pair<double, double>& offset) const {
+        std::lock_guard<std::mutex> lock(mtx);
+        std::vector<Vec3> positions;
+        for (const auto& bullet: bullets) {
+            auto p_opt = bullet.get_pos_at(t, b, offset);
+            if (p_opt) {
+                positions.push_back(*p_opt);
+            }
+        }
+        return positions;
+    }
+    BallisticTrajectory::Ptr b;
 };
 } // namespace awakening

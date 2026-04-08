@@ -1,3 +1,5 @@
+#include "tasks/base/ballistic_trajectory.hpp"
+#include <cstdint>
 #include <memory>
 #include <optional>
 #include <string>
@@ -188,6 +190,7 @@ int main(int argc, char** argv) {
     auto_aim::VeryAimer very_aimer(config["very_aimer"]);
     utils::OrderedQueue<auto_aim::Armors> armors_queue;
     utils::SWMR<auto_aim::ArmorTarget> armor_target;
+    BulletPickUp bullet_pick_up(config["bullet_pick_up"]);
     LogCtx log_ctx;
     std::optional<auto_aim::AutoAimDebugCtx> auto_aim_dbg;
     if (debug) {
@@ -235,7 +238,7 @@ int main(int argc, char** argv) {
                 SimpleFrame(target.get_target_state().frame_id),
                 frame.img_frame.timestamp
             );
-            target.set_target_state([&](armor_motion_model::State& state) {
+            target.set_target_state([&](armor_point_motion_model::State& state) {
                 state.predict(frame.img_frame.timestamp);
             });
             auto bbox = target.expanded(
@@ -277,6 +280,16 @@ int main(int argc, char** argv) {
                     gimbal_2_gimbal_odom
                 );
                 robo.update_log();
+                static uint32_t last_bullet_count = 0;
+                if (robo.bullet_count > last_bullet_count) {
+                    auto shoot_in_odom =
+                        tf->pose_a_in_b(SimpleFrame::SHOOT, SimpleFrame::ODOM, Clock::now());
+                    Bullet b { .fire_time = Clock::now(),
+                               .fire_time_shoot_in_odom = shoot_in_odom,
+                               .speed_in_odom = bullet_speed };
+                    bullet_pick_up.push_back(std::move(b));
+                }
+                last_bullet_count = robo.bullet_count;
             }
         });
     }
@@ -358,7 +371,7 @@ int main(int argc, char** argv) {
         armors_queue.enqueue(armors);
         auto batch_armors = armors_queue.dequeue_batch();
         if (auto_aim_dbg) {
-            auto_aim_dbg->expanded_buffer.write(frame.expanded);
+            auto_aim_dbg->set_expanded(frame.expanded);
             auto_aim_dbg->set_img_frame(std::move(frame.img_frame.clone()));
         }
 
@@ -396,7 +409,7 @@ int main(int argc, char** argv) {
             log_ctx.found_count += armor_tracker.get_count();
             armor_tracker.reset_count();
             if (auto_aim_dbg) {
-                auto_aim_dbg->armors_buffer.write(armors);
+                auto_aim_dbg->set_armors(armors);
 #ifdef USE_ROS2
                 rcl::pub_armor_marker(rcl_node, SimpleFrame_to_str(armors.frame_id), armors);
                 rcl::pub_armor_target_marker(
@@ -418,7 +431,7 @@ int main(int argc, char** argv) {
             SimpleFrame::GIMBAL_ODOM,
             target.get_target_state().timestamp
         );
-        target.set_target_state([&](armor_motion_model::State& state) {
+        target.set_target_state([&](armor_point_motion_model::State& state) {
             state.transform(old_in_gimbal_odom, std::to_underlying(SimpleFrame::GIMBAL_ODOM));
         }); // todo : kill gimbal_odom_vel in odom
         GimbalCmd cmd {
@@ -456,7 +469,7 @@ int main(int argc, char** argv) {
         );
         cmd.aim_point.transform(old_in_camera_cv, std::to_underlying(SimpleFrame::CAMERA_CV));
         if (auto_aim_dbg) {
-            auto_aim_dbg->gimbal_cmd_buffer.write(cmd);
+            auto_aim_dbg->set_gimbal_cmd(cmd);
         }
     });
     s.add_rate_source<>("logger", 1.0, [&]() {
@@ -472,7 +485,7 @@ int main(int argc, char** argv) {
             avg_latency_ms
         );
         if (auto_aim_dbg) {
-            auto_aim_dbg->avg_latency_ms_buffer.write(avg_latency_ms);
+            auto_aim_dbg->set_avg_latency_ms(avg_latency_ms);
         }
         log_ctx.reset();
     });
@@ -480,29 +493,46 @@ int main(int argc, char** argv) {
         s.add_rate_source<>("debug", 60.0, [&]() {
             auto target = armor_target.read();
             target.write_log();
+            auto now = auto_aim_dbg->img_frame().timestamp;
             auto old_in_camera_cv = tf->pose_a_in_b(
                 SimpleFrame(target.get_target_state().frame_id),
                 SimpleFrame::CAMERA_CV,
-                target.get_target_state().timestamp
+                now
             );
-            target.set_target_state([&](armor_motion_model::State& state) {
+            target.set_target_state([&](armor_point_motion_model::State& state) {
                 state.transform(old_in_camera_cv, std::to_underlying(SimpleFrame::CAMERA_CV));
             });
 
-            auto_aim_dbg->armor_target_buffer.write(target);
-            auto_aim_dbg->fsm_state_buffer.write(auto_aim_fsm_controller.get_state());
+            auto_aim_dbg->set_armor_target(target);
+            auto_aim_dbg->set_fsm_state(auto_aim_fsm_controller.get_state());
             auto gimbal_in_gimbal_odom =
                 tf->pose_a_in_b(SimpleFrame::GIMBAL, SimpleFrame::GIMBAL_ODOM, Clock::now());
             auto euler =
                 utils::matrix2euler(gimbal_in_gimbal_odom.linear(), utils::EulerOrder::ZYX);
             auto gimbal_yaw_pitch =
-                std::make_pair(angles::to_degrees(euler[0]), angles::to_degrees(euler[1]));
-            auto_aim_dbg->gimbal_yaw_pitch_buffer.write(gimbal_yaw_pitch);
+                std::make_pair(angles::to_degrees(euler[0]), -angles::to_degrees(euler[1]));
+            auto_aim_dbg->set_gimbal_yaw_pitch(gimbal_yaw_pitch);
             write_debug_data(auto_aim_dbg.value());
+            bullet_pick_up.update(
+                Clock::now(),
+                auto_aim_dbg->gimbal_cmd().appear ? auto_aim_dbg->gimbal_cmd().fly_time : 0.4
+            );
+            auto bullet_poss =
+                bullet_pick_up.get_bullet_positions(now, very_aimer.get_yaw_pitch_offset());
+            auto odom_in_camera_cv =
+                tf->pose_a_in_b(SimpleFrame::ODOM, SimpleFrame::CAMERA_CV, now);
+            for (auto& pos: bullet_poss) {
+                pos = odom_in_camera_cv * pos;
+            }
+            auto_aim_dbg->set_bullet_positions(bullet_poss);
             auto debug_img = auto_aim_dbg->img_frame().src_img;
             if (!debug_img.empty()) {
-                auto_aim::draw_auto_aim(debug_img, auto_aim_dbg.value());
-                web::write_shm(debug_img);
+                static cv::Mat last_draw;
+                if (debug_img.data != last_draw.data) {
+                    auto_aim::draw_auto_aim(debug_img, auto_aim_dbg.value());
+                    web::write_shm(debug_img);
+                }
+                last_draw = debug_img;
             }
         });
 #ifdef USE_ROS2

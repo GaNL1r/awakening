@@ -1,6 +1,7 @@
 #pragma once
 #include "angles.h"
 #include "motion_model.hpp"
+#include "motion_model_point.hpp"
 #include "tasks/auto_aim/type.hpp"
 #include "tasks/base/web.hpp"
 #include "utils/common/type_common.hpp"
@@ -8,7 +9,7 @@
 #include <string>
 #include <vector>
 namespace awakening::auto_aim {
-using namespace armor_motion_model;
+using namespace armor_point_motion_model;
 struct ArmorTrackerCfg {
     int esekf_iter_num;
     double lost_time_thres;
@@ -24,13 +25,14 @@ struct ArmorTrackerCfg {
     double q_l;
     double q_h;
     double q_outpost_dz;
-    double yp_r;
-    double dis_r_front;
-    double dis_r_side;
-    double dis2_r_ratio;
-    double yaw_r_base_front;
-    double yaw_r_base_side;
-    double yaw_r_log_ratio;
+    // double yp_r;
+    // double dis_r_front;
+    // double dis_r_side;
+    // double dis2_r_ratio;
+    // double yaw_r_base_front;
+    // double yaw_r_base_side;
+    // double yaw_r_log_ratio;
+    double r_uv;
     void load(const YAML::Node& config) {
         esekf_iter_num = config["esekf_iter_num"].as<int>();
         lost_time_thres = config["lost_time_thres"].as<double>();
@@ -48,13 +50,14 @@ struct ArmorTrackerCfg {
         q_l = config["q_l"].as<double>();
         q_h = config["q_h"].as<double>();
         q_outpost_dz = config["q_outpost_dz"].as<double>();
-        yp_r = config["yp_r"].as<double>();
-        dis_r_front = config["dis_r_front"].as<double>();
-        dis_r_side = config["dis_r_side"].as<double>();
-        dis2_r_ratio = config["dis2_r_ratio"].as<double>();
-        yaw_r_base_front = config["yaw_r_base_front"].as<double>();
-        yaw_r_base_side = config["yaw_r_base_side"].as<double>();
-        yaw_r_log_ratio = config["yaw_r_log_ratio"].as<double>();
+        // yp_r = config["yp_r"].as<double>();
+        // dis_r_front = config["dis_r_front"].as<double>();
+        // dis_r_side = config["dis_r_side"].as<double>();
+        // dis2_r_ratio = config["dis2_r_ratio"].as<double>();
+        // yaw_r_base_front = config["yaw_r_base_front"].as<double>();
+        // yaw_r_base_side = config["yaw_r_base_side"].as<double>();
+        // yaw_r_log_ratio = config["yaw_r_log_ratio"].as<double>();
+        r_uv = config["r_uv"].as<double>();
     }
 };
 class ArmorTarget {
@@ -79,7 +82,14 @@ public:
     };
 
     ArmorTarget() = default;
-    ArmorTarget(const Armor& a, const ArmorTrackerCfg& c, const TimePoint& timestamp, int frame_id);
+    ArmorTarget(
+        const Armor& a,
+        const ArmorTrackerCfg& c,
+        const TimePoint& timestamp,
+        int frame_id,
+        const CameraInfo& camera_info,
+        const ISO3& camera_cv_in_odom
+    );
     [[nodiscard]] cv::Rect expanded(
         const TimePoint& timestamp,
         const ISO3& camera_cv_in_odom,
@@ -89,10 +99,19 @@ public:
     [[nodiscard]] Eigen::Matrix<double, Z_N, Z_N>
     measurement_covariance(const Eigen::Matrix<double, Z_N, 1>& z) const noexcept;
     [[nodiscard]] Eigen::Matrix<double, X_N, X_N> process_noise(double dt) const noexcept;
-    [[nodiscard]] Eigen::Matrix<double, Z_N, 1> get_measurement(const Armor& a) noexcept;
+    [[nodiscard]] Eigen::Matrix<double, Z_N, 1> get_measurement(Armor& a) noexcept;
     void predict_ekf(const TimePoint& timestamp);
-    bool update(const std::pair<int, Armor>& a, const TimePoint& timestamp) noexcept;
-    std::vector<std::pair<int, Armor>> match(const std::vector<Armor>& armors) noexcept;
+    bool update(
+        const std::pair<int, Armor>& a,
+        const TimePoint& timestamp,
+        const CameraInfo& camera_info,
+        const ISO3& camera_cv_in_odom
+    ) noexcept;
+    std::vector<std::pair<int, Armor>> match(
+        std::vector<Armor>& armors,
+        const CameraInfo& camera_info,
+        const ISO3& camera_cv_in_odom
+    ) noexcept;
     Measure::Ctx measure_ctx;
     RobotStateESEKF esekf;
     ArmorTrackerCfg cfg;

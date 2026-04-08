@@ -20,6 +20,7 @@ void draw_auto_aim(cv::Mat& img, const AutoAimDebugCtx& ctx) {
     auto camera_info = ctx.camera_info();
     auto cmd = ctx.gimbal_cmd();
     auto fsm = ctx.fsm_state();
+    auto bullet_poss = ctx.bullet_positions();
     const cv::Rect img_rect(0, 0, img.cols, img.rows);
     const cv::Rect roi = ctx.expanded() & img_rect;
     if (roi.width > 0 && roi.height > 0) {
@@ -124,6 +125,25 @@ void draw_auto_aim(cv::Mat& img, const AutoAimDebugCtx& ctx) {
             const cv::Scalar color_x = cv::Scalar(0, 215, 255);
 
             cv::arrowedLine(img, start_pt, end_pt, color_x, 4, cv::LINE_AA, 0, 0.2);
+        }
+    }
+    {
+        for (auto& p: bullet_poss) {
+            ISO3 pose = ISO3::Identity();
+            pose.translation() = p;
+            if (p.z() > 0.2) {
+                auto bullet_img_points = utils::reprojection(
+                    camera_info.camera_matrix,
+                    camera_info.distortion_coefficients,
+                    { cv::Point3f(0, 0, 0) },
+                    pose
+                );
+                constexpr double R = 0.017 / 2.0;
+                cv::Point2f center = bullet_img_points[0];
+                double r =
+                    camera_info.camera_matrix.at<double>(0, 0) * R / pose.translation().norm();
+                cv::circle(img, center, r, cv::Scalar(100, 255, 100), 3);
+            }
         }
     }
     if (cmd.fire_advice) {
