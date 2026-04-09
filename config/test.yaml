@@ -1,4 +1,4 @@
-enemy_color: red
+enemy_color: blue
 max_infer_num: 5
 bullet_speed: 23.0
 
@@ -10,7 +10,7 @@ serial:
   read_buf_size: 4096
 
 
-
+use_sim: true
 recorder:
   enable: false
 player:

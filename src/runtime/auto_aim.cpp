@@ -2,6 +2,7 @@
 #include <cstdint>
 #include <memory>
 #include <optional>
+#include <rclcpp/qos.hpp>
 #include <string>
 #ifdef USE_ROS2
     #include "_rcl/node.hpp"
@@ -34,6 +35,8 @@
 #include "utils/utils.hpp"
 
 #include "backward-cpp/backward.hpp"
+#include "sensor_msgs/msg/camera_info.hpp"
+#include "sensor_msgs/msg/image.hpp"
 namespace backward {
 static backward::SignalHandling sh;
 }
@@ -142,13 +145,17 @@ int main(int argc, char** argv) {
         debug = second_arg.value() == "true";
     }
     auto config = YAML::LoadFile(config_path);
+    bool use_sim = false;
+#ifdef USE_ROS2
+    use_sim = config["use_sim"].as<bool>();
+#endif
     std::unique_ptr<Recorder> recorder;
     if (config["recorder"]["enable"].as<bool>()) {
         recorder =
             std::make_unique<Recorder>(generate_record_filename(std::string(RECORD_FOLDER_PATH)));
     }
     std::unique_ptr<Player> player;
-    if (!recorder) {
+    if (!recorder && !use_sim) {
         if (config["player"]["enable"].as<bool>()) {
             player = std::make_unique<Player>(config["player"]["path"].as<std::string>());
         }
@@ -162,7 +169,7 @@ int main(int argc, char** argv) {
 #endif
 
     std::unique_ptr<SerialDriver> serial;
-    if (!player) {
+    if (!player && !use_sim) {
         if (config["serial"]["enable"].as<bool>()) {
             serial = std::make_unique<SerialDriver>(config["serial"], s);
         }
@@ -175,13 +182,14 @@ int main(int argc, char** argv) {
             camera->stop();
         }
     });
-    if (!player) {
+    if (!player && !use_sim) {
         camera = std::make_unique<HikCamera>(camera_config["hik_camera"], s);
         camera->init();
         if (!camera->running_) {
             return 0;
         }
     }
+
     CameraInfo camera_info;
     camera_info.load(camera_config["camera_info"]);
     auto_aim::ArmorDetector armor_detector(config["armor_detector"]);
@@ -214,7 +222,81 @@ int main(int argc, char** argv) {
         ISO3 shoot_in_gimbal = utils::load_isometry3(config["tf"]["shoot_in_gimbal"]);
         tf->push(SimpleFrame::GIMBAL, SimpleFrame::SHOOT, Clock::now(), shoot_in_gimbal);
     }
+#ifdef USE_ROS2
+    if (use_sim) {
+        auto camera_info_sub = rcl_node.make_sub<sensor_msgs::msg::CameraInfo>(
+            "/camera_info",
+            rclcpp::SensorDataQoS(),
+            [&](sensor_msgs::msg::CameraInfo::ConstSharedPtr _camera_info) {
+                static bool has = false;
+                if (!has) {
+                    auto& msg = *_camera_info;
 
+                    cv::Mat K(3, 3, CV_64F);
+                    std::memcpy(K.data, msg.k.data(), 9 * sizeof(double));
+
+                    cv::Mat D(1, msg.d.size(), CV_64F);
+                    std::memcpy(D.data, msg.d.data(), msg.d.size() * sizeof(double));
+                    camera_info.camera_matrix = K;
+                    camera_info.distortion_coefficients = D;
+                    if (debug) {
+                        auto_aim_dbg.emplace();
+                        auto_aim_dbg->camera_info_ = camera_info;
+                    }
+                    has = true;
+                    AWAKENING_INFO("camera info loaded");
+                }
+            }
+
+        );
+        rcl_node.push_sub(camera_info_sub);
+        auto sim_cam = s.register_source<CameraIO>("sim_cam");
+        auto img_sub = rcl_node.make_sub<sensor_msgs::msg::Image>(
+            "/image_raw",
+            rclcpp::SensorDataQoS(),
+            [&](const sensor_msgs::msg::Image::ConstSharedPtr img_msg) {
+                s.runtime_push_source<CameraIO>(sim_cam, [&, i = std::move(img_msg)]() {
+                    if (!i->data.data()) {
+                        return std::make_tuple(std::optional<CameraIO::second_type>(std::nullopt));
+                    }
+                    ImageFrame img_frame {
+                        .src_img =
+                            std::move(cv::Mat(
+                                          i->height,
+                                          i->width,
+                                          CV_8UC3,
+                                          const_cast<unsigned char*>(i->data.data()), // raw pointer
+                                          i->step
+                            )
+                                          .clone()),
+                        .format = PixelFormat::RGB,
+                        .timestamp = rcl_node.form_ros_time(i->header.stamp),
+                    };
+                    return std::make_tuple(std::optional<CameraIO::second_type>(std::move(img_frame)
+                    ));
+                });
+            }
+        );
+        rcl_node.push_sub(img_sub);
+        s.add_rate_source<>("get_sim_tf", 200.0, [&]() {
+            if (use_sim) {
+                auto ros_now = rcl_node.rclcpp->now();
+                auto __tf = rcl_tf.lookup_transform("gimbal_link", "odom", ros_now);
+                if (__tf) {
+                    ISO3 gimbal_in_gimbal_odom = ISO3::Identity();
+                    gimbal_in_gimbal_odom.translation() = Vec3(0, 0, 0);
+                    gimbal_in_gimbal_odom.linear() = __tf->linear();
+                    tf->push(
+                        SimpleFrame::GIMBAL_ODOM,
+                        SimpleFrame::GIMBAL,
+                        rcl_node.form_ros_time(ros_now),
+                        gimbal_in_gimbal_odom.inverse()
+                    );
+                }
+            }
+        });
+    }
+#endif
     s.register_task<CameraIO, CommonFrameIo>("push_common_frame", [&](CameraIO::second_type&& f) {
         static int current_id = 0;
         log_ctx.camera_count++;
@@ -525,7 +607,11 @@ int main(int argc, char** argv) {
                 pos = odom_in_camera_cv * pos;
             }
             auto_aim_dbg->set_bullet_positions(bullet_poss);
-            auto debug_img = auto_aim_dbg->img_frame().src_img;
+            auto img = auto_aim_dbg->img_frame();
+            auto debug_img = img.src_img;
+            if (img.format == PixelFormat::RGB) {
+                cv::cvtColor(debug_img, debug_img, cv::COLOR_RGB2BGR);
+            }
             if (!debug_img.empty()) {
                 static cv::Mat last_draw;
                 if (debug_img.data != last_draw.data) {

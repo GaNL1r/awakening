@@ -75,9 +75,9 @@ __global__ void nchw_float_to_hwc_uchar4(
             g = g < 0.f ? 0.f : (g > 255.f ? 255.f : g);
             b = b < 0.f ? 0.f : (b > 255.f ? 255.f : b);
             if constexpr (SwapRB) {
-                dst[pidx] = make_uchar4((unsigned char)r, (unsigned char)g, (unsigned char)b, 255);
-            } else {
                 dst[pidx] = make_uchar4((unsigned char)b, (unsigned char)g, (unsigned char)r, 255);
+            } else {
+                dst[pidx] = make_uchar4((unsigned char)r, (unsigned char)g, (unsigned char)b, 255);
             }
         }
     }
@@ -251,7 +251,7 @@ float* LetterBox::letterbox_pitched(
 
     const int GRID_SIZE = (config_.target_w * config_.target_h + BLOCK_SIZE - 1) / BLOCK_SIZE;
 
-    if (pixel_format == config_.target_format) {
+    if (pixel_format != config_.target_format) {
         letterbox_kernel_pitched<true, PIX_PER_THREAD><<<GRID_SIZE, BLOCK_SIZE, 0, stream>>>(
             d_input_bgr_pitched_,
             input_pitch_bytes_,

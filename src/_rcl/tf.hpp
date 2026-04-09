@@ -5,15 +5,42 @@
 #include <cstddef>
 #include <functional>
 #include <memory>
+#include <optional>
+#include <rclcpp/clock.hpp>
 #include <rclcpp/node.hpp>
 #include <string>
+#include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
+#include <tf2_ros/buffer.h>
 #include <tf2_ros/transform_broadcaster.h>
+#include <tf2_ros/transform_listener.h>
 namespace awakening::rcl {
 class TF {
 public:
     TF(RclcppNode& node) {
         node_ = node.get_node();
+        tf_buffer_ = std::make_unique<tf2_ros::Buffer>(node_->get_clock());
+        tf_listener_ = std::make_unique<tf2_ros::TransformListener>(*tf_buffer_, node_);
         tf_broadcaster_ = std::make_shared<tf2_ros::TransformBroadcaster>(node_);
+    }
+    std::optional<ISO3> lookup_transform(
+        const std::string& target_frame,
+        const std::string& source_frame,
+        rclcpp::Time time
+    ) {
+        ISO3 pose;
+        try {
+            auto tf =
+                tf_buffer_
+                    ->lookupTransform(target_frame, source_frame, time, tf2::durationFromSec(0.1));
+            pose.translation() << tf.transform.translation.x, tf.transform.translation.y,
+                tf.transform.translation.z;
+            auto q = tf.transform.rotation;
+            Eigen::Quaterniond Q(q.w, q.x, q.y, q.z);
+            pose.linear() = Q.toRotationMatrix();
+        } catch (tf2::TransformException& ex) {
+            return std::nullopt;
+        }
+        return pose;
     }
     template<typename FrameEnum, size_t N, bool Static, typename F>
     void pub_robot_tf(const utils::tf::RobotTF<FrameEnum, N, Static>& r_tf, F&& get_frame_name) {
@@ -49,5 +76,7 @@ public:
 
     std::shared_ptr<rclcpp::Node> node_;
     std::shared_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
+    std::unique_ptr<tf2_ros::Buffer> tf_buffer_;
+    std::unique_ptr<tf2_ros::TransformListener> tf_listener_;
 };
 } // namespace awakening::rcl
