@@ -26,7 +26,6 @@ namespace idx {
     constexpr int H = P2;
     constexpr int OUTPOST01DZ = P1;
     constexpr int OUTPOST02DZ = P2;
-    // enum { YPD_Y, YPD_P, YPD_D, ORI_YAW };
     enum {
         LEFT_TOP_X,
         LEFT_TOP_Y,
@@ -92,30 +91,21 @@ struct Predict {
 };
 
 template<typename T>
-inline double jet_to_double(const T& x) {
-    return x.a;
-}
-
-// 支持 Jet 的相机投影函数（替代 cv::projectPoints）
-template<typename T>
 void project_points_jets(
     const std::vector<cv::Point3f>& obj_pts,
     const Eigen::Transform<T, 3, Eigen::Isometry>& pose_cam,
-    const cv::Mat& K, // double 相机内参
-    const cv::Mat& dist_coeffs, // double 畸变参数
+    const cv::Mat& K,
+    const cv::Mat& dist_coeffs,
     std::vector<Eigen::Matrix<T, 2, 1>>& img_pts_jet
 ) {
-    // --- 位姿 ---
     const Eigen::Matrix<T, 3, 3>& R = pose_cam.linear();
     const Eigen::Matrix<T, 3, 1>& t = pose_cam.translation();
 
-    // --- 相机内参 ---
     const T fx = T(K.at<double>(0, 0));
     const T fy = T(K.at<double>(1, 1));
     const T cx = T(K.at<double>(0, 2));
     const T cy = T(K.at<double>(1, 2));
 
-    // --- 畸变参数读取（兼容 Nx1 / 1xN）---
     auto get_dist = [&](int i) -> double {
         return (dist_coeffs.rows == 1) ? dist_coeffs.at<double>(0, i)
                                        : dist_coeffs.at<double>(i, 0);
@@ -133,26 +123,21 @@ void project_points_jets(
     img_pts_jet.reserve(obj_pts.size());
 
     for (const auto& pt3: obj_pts) {
-        // --- 世界点 ---
         Eigen::Matrix<T, 3, 1> Pw(T(pt3.x), T(pt3.y), T(pt3.z));
 
-        // --- 相机坐标 ---
         Eigen::Matrix<T, 3, 1> Pc = R * Pw + t;
 
         T Xc = Pc(0);
         T Yc = Pc(1);
         T Zc = Pc(2);
 
-        // --- 数值安全 ---
         if (ceres::abs(Zc) < T(1e-8)) {
-            continue; // 或者填默认值
+            continue;
         }
 
-        // --- 归一化 ---
         T xp = Xc / Zc;
         T yp = Yc / Zc;
 
-        // --- 畸变 ---
         T r2 = xp * xp + yp * yp;
         T r4 = r2 * r2;
         T r6 = r4 * r2;
@@ -163,7 +148,6 @@ void project_points_jets(
 
         T yd = yp * radial + p1 * (r2 + T(2) * yp * yp) + T(2) * p2 * xp * yp;
 
-        // --- 投影 ---
         T u = fx * xd + cx;
         T v = fy * yd + cy;
 

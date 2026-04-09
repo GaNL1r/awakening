@@ -3,6 +3,9 @@
 #include "tasks/auto_aim/type.hpp"
 #include "utils/logger.hpp"
 #include "utils/net_detector/net_detector_base.hpp"
+#include <opencv2/core.hpp>
+#include <opencv2/core/mat.hpp>
+#include <opencv2/opencv.hpp>
 #if USE_OPENVINO
     #include "utils/net_detector/openvino/net_detector_openvino.hpp"
 #endif
@@ -200,7 +203,7 @@ struct ArmorDetector::Impl {
             // M = cv::getRotationMatrix2D(rect.center, rect.angle, 1.0);
             // cv::warpAffine(src, rotated, M, src.size(), cv::INTER_LINEAR);
             // cv::getRectSubPix(rotated, rect.size, rect.center, cropped);
-            //  return cropped;
+            // return cropped;
             cv::Rect bbox = rect.boundingRect();
             bbox &= cv::Rect(0, 0, src.cols, src.rows);
             if (bbox.width <= 0 || bbox.height <= 0)
@@ -211,7 +214,6 @@ struct ArmorDetector::Impl {
         auto judgeColor = [&](const cv::Mat& roi) {
             if (roi.empty() || roi.channels() < 3)
                 return ArmorColor::NONE;
-
             cv::Scalar mean_val = cv::mean(roi);
             float R = 0.f, B = 0.f;
             switch (pixel_format) {
@@ -354,6 +356,7 @@ struct ArmorDetector::Impl {
             armor.transform(net_output.transform_matrix);
             armor.add_offset(frame.offset);
         }
+
         return result;
     }
 

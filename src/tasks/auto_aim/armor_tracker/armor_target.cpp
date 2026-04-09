@@ -35,7 +35,7 @@ ArmorTarget::ArmorTarget(
         r_pre = 0.3205;
     } else {
         p0.diagonal() << 1, 64, 1, 64, 1, 64, 0.4, 100, 1, 1, 1;
-        r_pre = 0.2;
+        r_pre = 0.26;
     }
     const auto u_q = [this]() {
         Eigen::Matrix<double, X_N, X_N> q;
@@ -57,12 +57,6 @@ ArmorTarget::ArmorTarget(
                               const Eigen::Matrix<double, Z_N, 1>& z
                           ) {
         Eigen::Matrix<double, Z_N, 1> r = z - z_pred;
-        // r[idx::YPD_Y] = angles::shortest_angular_distance(z_pred[idx::YPD_Y],
-        //                                                   z[idx::YPD_Y]); // yaw
-        // r[idx::ORI_YAW] = angles::shortest_angular_distance(
-        //     z_pred[idx::ORI_YAW],
-        //     z[idx::ORI_YAW]
-        // ); // ori_yaw
         return r;
     });
     esekf.setIterationNum(cfg.esekf_iter_num);
@@ -123,36 +117,12 @@ ArmorTarget::ArmorTarget(
 Eigen::Matrix<double, Z_N, Z_N>
 ArmorTarget::measurement_covariance(const Eigen::Matrix<double, Z_N, 1>& z) const noexcept {
     Eigen::Matrix<double, Z_N, Z_N> r;
-    // const double delta_angle = angles::normalize_angle(z[idx::ORI_YAW] - z[idx::YPD_Y]);
-    // const double abs_delta = std::abs(delta_angle);
 
-    // // sin插值函数，小值慢、大值快
-    // const auto sinInterp = [](double x, double x0, double x1, double y0, double y1) -> double {
-    //     double t = (x - x0) / (x1 - x0);
-    //     if (t < 0)
-    //         t = 0;
-    //     if (t > 1)
-    //         t = 1;
-    //     double s = std::sin(t * M_PI / 2.0);
-    //     return y0 + s * (y1 - y0);
-    // };
-    // // clang-format off
-    //     r <<cfg.yp_r, 0, 0, 0,
-    //             0, cfg.yp_r, 0, 0,
-    //             0, 0, sinInterp(abs_delta, 0.0, M_PI/2.0, cfg.dis_r_front, cfg.dis_r_side)+z[2]*z[2]*cfg.dis2_r_ratio, 0,
-    //             0, 0, 0,log(std::abs(z[2]) + 1) *cfg.yaw_r_log_ratio + sinInterp(M_PI/2.0-abs_delta, 0.0, M_PI/2.0, cfg.yaw_r_base_side, cfg.yaw_r_base_front);
-    // // clang-format on
     double u_r = cfg.r_uv;
-    // clang-format off
-    r << u_r, 0, 0, 0, 0, 0, 0, 0,
-        0, u_r, 0, 0, 0, 0, 0, 0,
-        0, 0, u_r, 0, 0, 0, 0, 0,
-        0, 0, 0, u_r, 0, 0, 0, 0,
-        0, 0, 0, 0, u_r, 0, 0, 0,
-        0, 0, 0, 0, 0, u_r, 0, 0,
-        0, 0, 0, 0, 0, 0, u_r, 0,
-        0, 0, 0, 0, 0, 0, 0, u_r;
-    // clang-format on
+
+    r << u_r, 0, 0, 0, 0, 0, 0, 0, 0, u_r, 0, 0, 0, 0, 0, 0, 0, 0, u_r, 0, 0, 0, 0, 0, 0, 0, 0, u_r,
+        0, 0, 0, 0, 0, 0, 0, 0, u_r, 0, 0, 0, 0, 0, 0, 0, 0, u_r, 0, 0, 0, 0, 0, 0, 0, 0, u_r, 0, 0,
+        0, 0, 0, 0, 0, 0, u_r;
     return r;
 }
 Eigen::Matrix<double, X_N, X_N> ArmorTarget::process_noise(double dt) const noexcept {
@@ -200,15 +170,6 @@ Eigen::Matrix<double, X_N, X_N> ArmorTarget::process_noise(double dt) const noex
 }
 
 [[nodiscard]] Eigen::Matrix<double, Z_N, 1> ArmorTarget::get_measurement(Armor& a) noexcept {
-    // const auto p = a.pose.translation();
-    // const double measured_yaw = utils::R2yaw<ArmorTarget>(a.pose.linear());
-    // double ypd_y = std::atan2(p.y(), p.x());
-    // static double last_ypd_y = 0;
-    // ypd_y = last_ypd_y + angles::shortest_angular_distance(last_ypd_y, ypd_y);
-    // last_ypd_y = ypd_y;
-    // const double ypd_p = std::atan2(p.z(), std::sqrt(p.x() * p.x() + p.y() * p.y()));
-    // const double ypd_d = std::sqrt(p.x() * p.x() + p.y() * p.y() + p.z() * p.z());
-    // return Eigen::Vector4d(ypd_y, ypd_p, ypd_d, measured_yaw);
     Eigen::Matrix<double, Z_N, 1> z;
     auto key_points = a.key_points.landmarks();
     z[idx::LEFT_TOP_X] = key_points[std::to_underlying(ArmorKeyPointsIndex::LEFT_TOP)].x;
@@ -219,6 +180,48 @@ Eigen::Matrix<double, X_N, X_N> ArmorTarget::process_noise(double dt) const noex
     z[idx::RIGHT_BOTTOM_Y] = key_points[std::to_underlying(ArmorKeyPointsIndex::RIGHT_BOTTOM)].y;
     z[idx::RIGHT_TOP_X] = key_points[std::to_underlying(ArmorKeyPointsIndex::RIGHT_TOP)].x;
     z[idx::RIGHT_TOP_Y] = key_points[std::to_underlying(ArmorKeyPointsIndex::RIGHT_TOP)].y;
+    return z;
+}
+[[nodiscard]] Eigen::Matrix<double, Z_N, 1>
+ArmorTarget::get_measurement(Armor& a, const VecZ& z_pred, MeasureType mt) noexcept {
+    Eigen::Matrix<double, Z_N, 1> z;
+    switch (mt) {
+        case ARMOR: {
+            z = get_measurement(a);
+            break;
+        }
+
+        case L_LIGHT: {
+            auto key_points = a.key_points.landmarks();
+            z[idx::LEFT_TOP_X] = key_points[std::to_underlying(ArmorKeyPointsIndex::LEFT_TOP)].x;
+            z[idx::LEFT_TOP_Y] = key_points[std::to_underlying(ArmorKeyPointsIndex::LEFT_TOP)].y;
+            z[idx::LEFT_BOTTOM_X] =
+                key_points[std::to_underlying(ArmorKeyPointsIndex::LEFT_BOTTOM)].x;
+            z[idx::LEFT_BOTTOM_Y] =
+                key_points[std::to_underlying(ArmorKeyPointsIndex::LEFT_BOTTOM)].y;
+            z[idx::RIGHT_BOTTOM_X] = z_pred[idx::RIGHT_BOTTOM_X];
+            z[idx::RIGHT_BOTTOM_Y] = z_pred[idx::RIGHT_BOTTOM_Y];
+            z[idx::RIGHT_TOP_X] = z_pred[idx::RIGHT_TOP_X];
+            z[idx::RIGHT_TOP_Y] = z_pred[idx::RIGHT_TOP_Y];
+            break;
+        }
+
+        case R_LIGHT: {
+            auto key_points = a.key_points.landmarks();
+            z[idx::RIGHT_TOP_X] = key_points[std::to_underlying(ArmorKeyPointsIndex::RIGHT_TOP)].x;
+            z[idx::RIGHT_TOP_Y] = key_points[std::to_underlying(ArmorKeyPointsIndex::RIGHT_TOP)].y;
+            z[idx::RIGHT_BOTTOM_X] =
+                key_points[std::to_underlying(ArmorKeyPointsIndex::RIGHT_BOTTOM)].x;
+            z[idx::RIGHT_BOTTOM_Y] =
+                key_points[std::to_underlying(ArmorKeyPointsIndex::RIGHT_BOTTOM)].y;
+            z[idx::LEFT_BOTTOM_X] = z_pred[idx::LEFT_BOTTOM_X];
+            z[idx::LEFT_BOTTOM_Y] = z_pred[idx::LEFT_BOTTOM_Y];
+            z[idx::LEFT_TOP_X] = z_pred[idx::LEFT_TOP_X];
+            z[idx::LEFT_TOP_Y] = z_pred[idx::LEFT_TOP_Y];
+        }
+
+        break;
+    }
     return z;
 }
 void ArmorTarget::predict_ekf(const TimePoint& timestamp) {
@@ -242,14 +245,27 @@ bool ArmorTarget::update(
     if (id != 0) {
         jumped = true;
     }
+    MeasureType mt = MeasureType::ARMOR;
+    if (armor.color_classifier) {
+        auto l = armor.color_classifier->light_colors[Armor::ColorClassifierCtx::LEFT];
+        auto r = armor.color_classifier->light_colors[Armor::ColorClassifierCtx::RIGHT];
+        if (l == ArmorColor::NONE && r != ArmorColor::NONE) {
+            mt = MeasureType::R_LIGHT;
+        } else if (r == ArmorColor::NONE && l != ArmorColor::NONE) {
+            mt = MeasureType::L_LIGHT;
+        }
+    }
     esekf.setUpdateR([&](const Eigen::Matrix<double, Z_N, 1>& z) {
         return measurement_covariance(z);
     });
-    auto measurement = get_measurement(armor);
 
     measure_ctx.id = id;
     measure_ctx.camera_cv_in_odom = camera_cv_in_odom;
-    esekf.setMeasureFunc(Measure { .ctx = measure_ctx });
+    Measure measure { .ctx = measure_ctx };
+    VecZ z_pred;
+    measure.h(target_state.x, z_pred);
+    auto measurement = get_measurement(armor);
+    esekf.setMeasureFunc(measure);
 
     target_state.x = esekf.update(measurement);
     target_state.timestamp = timestamp;
@@ -264,10 +280,6 @@ std::vector<std::pair<int, Armor>> ArmorTarget::match(
     std::vector<std::pair<int, Armor>> result;
     const int n_obs = static_cast<int>(armors.size());
     const int armors_num = armor_num();
-    // auto armors_xyza = target_state.get_armors_xyza(target_number);
-    // for (int i = 0; i < armors_num; ++i) {
-    //     // Process each armor
-    // }
     const double GATE = cfg.match_gate;
     const double max_cost = 1e9;
     std::vector<std::vector<double>> cost(n_obs, std::vector<double>(armors_num, max_cost + 1));
@@ -292,9 +304,6 @@ std::vector<std::pair<int, Armor>> ArmorTarget::match(
             measure.h(target_state.x, z_pred);
 
             VecZ nu = meas_list[j] - z_pred;
-            // nu[idx::YPD_Y] = angles::normalize_angle(nu[idx::YPD_Y]);
-            // nu[idx::YPD_P] = angles::normalize_angle(nu[idx::YPD_P]);
-            // nu[idx::ORI_YAW] = angles::normalize_angle(nu[idx::ORI_YAW]);
             auto R = measurement_covariance(z_pred);
             double d2 = nu.transpose() * R.ldlt().solve(nu);
 
@@ -343,7 +352,7 @@ std::vector<std::pair<int, Armor>> ArmorTarget::match(
     }
     return result;
 }
-[[nodiscard]] cv::Rect ArmorTarget::expanded(
+[[nodiscard]] cv::Rect ArmorTarget::expanded_one_one(
     const TimePoint& timestamp,
     const ISO3& camera_cv_in_odom,
     const CameraInfo& camera_info,

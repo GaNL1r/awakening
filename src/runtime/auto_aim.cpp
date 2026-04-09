@@ -168,7 +168,7 @@ int main(int argc, char** argv) {
         }
     }
 
-    auto camera_config = YAML::LoadFile(replace_root_dir(config["camera"].as<std::string>()));
+    auto camera_config = config["camera"];
     std::unique_ptr<HikCamera> camera;
     utils::SignalGuard::add_callback([&]() {
         if (camera) {
@@ -241,7 +241,7 @@ int main(int argc, char** argv) {
             target.set_target_state([&](armor_point_motion_model::State& state) {
                 state.predict(frame.img_frame.timestamp);
             });
-            auto bbox = target.expanded(
+            auto bbox = target.expanded_one_one(
                 frame.img_frame.timestamp,
                 camera_cv_in_old,
                 camera_info,

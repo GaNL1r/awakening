@@ -25,13 +25,6 @@ struct ArmorTrackerCfg {
     double q_l;
     double q_h;
     double q_outpost_dz;
-    // double yp_r;
-    // double dis_r_front;
-    // double dis_r_side;
-    // double dis2_r_ratio;
-    // double yaw_r_base_front;
-    // double yaw_r_base_side;
-    // double yaw_r_log_ratio;
     double r_uv;
     void load(const YAML::Node& config) {
         esekf_iter_num = config["esekf_iter_num"].as<int>();
@@ -50,13 +43,6 @@ struct ArmorTrackerCfg {
         q_l = config["q_l"].as<double>();
         q_h = config["q_h"].as<double>();
         q_outpost_dz = config["q_outpost_dz"].as<double>();
-        // yp_r = config["yp_r"].as<double>();
-        // dis_r_front = config["dis_r_front"].as<double>();
-        // dis_r_side = config["dis_r_side"].as<double>();
-        // dis2_r_ratio = config["dis2_r_ratio"].as<double>();
-        // yaw_r_base_front = config["yaw_r_base_front"].as<double>();
-        // yaw_r_base_side = config["yaw_r_base_side"].as<double>();
-        // yaw_r_log_ratio = config["yaw_r_log_ratio"].as<double>();
         r_uv = config["r_uv"].as<double>();
     }
 };
@@ -80,6 +66,7 @@ public:
             return tracker_state == TRACKING || tracker_state == TEMP_LOST;
         }
     };
+    enum MeasureType { ARMOR, R_LIGHT, L_LIGHT };
 
     ArmorTarget() = default;
     ArmorTarget(
@@ -90,7 +77,7 @@ public:
         const CameraInfo& camera_info,
         const ISO3& camera_cv_in_odom
     );
-    [[nodiscard]] cv::Rect expanded(
+    [[nodiscard]] cv::Rect expanded_one_one(
         const TimePoint& timestamp,
         const ISO3& camera_cv_in_odom,
         const CameraInfo& camera_info,
@@ -100,6 +87,8 @@ public:
     measurement_covariance(const Eigen::Matrix<double, Z_N, 1>& z) const noexcept;
     [[nodiscard]] Eigen::Matrix<double, X_N, X_N> process_noise(double dt) const noexcept;
     [[nodiscard]] Eigen::Matrix<double, Z_N, 1> get_measurement(Armor& a) noexcept;
+    [[nodiscard]] Eigen::Matrix<double, Z_N, 1>
+    get_measurement(Armor& a, const VecZ& z_pred, MeasureType mt) noexcept;
     void predict_ekf(const TimePoint& timestamp);
     bool update(
         const std::pair<int, Armor>& a,
