@@ -1,16 +1,15 @@
 enemy_color: blue
 max_infer_num: 5
 bullet_speed: 23.0
+serial_type: sim
 
 serial:
-  enable: false
-  device_name: /dev/ttyACM0 
   baud_rate: 115200
-  char_size: 8
-  read_buf_size: 4096
+  device_name: /dev/ttyACM0
 
+gimbal:
+  enable: false
 
-use_sim: true
 recorder:
   enable: false
 player:
@@ -154,7 +153,7 @@ camera:
     exposure_time: 1500
     gain: 16.9
     gamma: 0.7 #Bayer用不了
-    trigger_mode: Off
+    trigger_mode: false
     trigger_source: ""
     trigger_activation: ""
     format: "bgr" 

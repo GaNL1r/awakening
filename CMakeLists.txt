@@ -12,8 +12,8 @@ set(CMAKE_BUILD_TYPE "Release")
 message(STATUS "--------------------CMAKE_BUILD_TYPE: ${CMAKE_BUILD_TYPE}--------------------")
 
 
-option(BUILD_WITH_TRT      "Enable TensorRT backend"   ON)
-option(BUILD_WITH_OPENVINO "Enable OpenVINO backend"   ON)
+option(BUILD_WITH_TRT      "Enable TensorRT backend"   OFF)
+option(BUILD_WITH_OPENVINO "Enable OpenVINO backend"   OFF)
 
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} ${PROJECT_SOURCE_DIR}/cmake)
 
@@ -84,6 +84,15 @@ target_link_libraries(${PROJECT_NAME}_utils
     ${OpenCV_LIBS}
     ${BUILD_LIBS}
 )
+file(GLOB_RECURSE IO_SOURCES CONFIGURE_DEPENDS src/io/*.cpp)
+add_library(${PROJECT_NAME}_io SHARED ${IO_SOURCES})
+target_link_libraries(${PROJECT_NAME}_io
+    ${PROJECT_NAME}_utils
+    yaml-cpp
+    Eigen3::Eigen
+    ${BUILD_LIBS}
+)
+
 file(GLOB_RECURSE AUTO_AIM_SOURCES CONFIGURE_DEPENDS src/tasks/auto_aim/*.cpp)
 add_library(${PROJECT_NAME}_auto_aim SHARED ${AUTO_AIM_SOURCES})
 target_link_libraries(${PROJECT_NAME}_auto_aim
@@ -149,6 +158,7 @@ add_common_executable(auto_aim src/runtime/auto_aim.cpp)
 
 target_link_libraries(auto_aim
     ${PROJECT_NAME}_auto_aim
+    ${PROJECT_NAME}_io
 )
 
 if(ROS2_FULL_FOUND)

@@ -1,0 +1,57 @@
+[1;33mLoaded bashrc from /home/ganl1r/.bashrc[0m
+[1;33m<--- Start CMake (Ninja) --->[0m
+-- --------------------CMAKE_BUILD_TYPE: Release--------------------
+-- Found AMD headers in: /usr/include/suitesparse
+-- Found AMD library: /usr/lib/x86_64-linux-gnu/libamd.so
+-- Found CAMD headers in: /usr/include/suitesparse
+-- Found CAMD library: /usr/lib/x86_64-linux-gnu/libcamd.so
+-- Found CCOLAMD headers in: /usr/include/suitesparse
+-- Found CCOLAMD library: /usr/lib/x86_64-linux-gnu/libccolamd.so
+-- Found CHOLMOD headers in: /usr/include/suitesparse
+-- Found CHOLMOD library: /usr/lib/x86_64-linux-gnu/libcholmod.so
+-- Found COLAMD headers in: /usr/include/suitesparse
+-- Found COLAMD library: /usr/lib/x86_64-linux-gnu/libcolamd.so
+-- Found SPQR headers in: /usr/include/suitesparse
+-- Found SPQR library: /usr/lib/x86_64-linux-gnu/libspqr.so
+-- Found Config headers in: /usr/include/suitesparse
+-- Found Config library: /usr/lib/x86_64-linux-gnu/libsuitesparseconfig.so
+-- Found Intel Thread Building Blocks (TBB) library (2021.11 / ) include location: . Assuming SuiteSparseQR was compiled with TBB.
+-- Adding librt to SuiteSparse_config libraries (required on Linux & Unix [not OSX] if SuiteSparse is compiled with timing).
+-- Could NOT find METIS (missing: METIS_INCLUDE_DIR METIS_LIBRARY) 
+-- Found required Ceres dependency: Eigen version 3.4.0 in /usr/share/eigen3/cmake
+-- Found required Ceres dependency: glog
+-- Found required Ceres dependency: gflags
+-- Found Ceres version: 2.2.0 installed in: /usr/local with components: [EigenSparse, SparseLinearAlgebraLibrary, LAPACK, SuiteSparse, SchurSpecializations]
+-- HikSDK found:
+--   Include dir : /opt/MVS/include
+--   Library     : /opt/MVS/lib/64/libMvCameraControl.so
+-- Using all available rosidl_typesupport_c: rosidl_typesupport_fastrtps_c;rosidl_typesupport_introspection_c
+-- Using all available rosidl_typesupport_cpp: rosidl_typesupport_fastrtps_cpp;rosidl_typesupport_introspection_cpp
+-- Found rmw_implementation_cmake: 7.8.2 (/opt/ros/kilted/share/rmw_implementation_cmake/cmake)
+-- Found rmw_fastrtps_cpp: 9.3.3 (/opt/ros/kilted/share/rmw_fastrtps_cpp/cmake)
+-- Using RMW implementation 'rmw_fastrtps_cpp' as default
+-- Found eigen3_cmake_module: 0.4.0 (/opt/ros/kilted/share/eigen3_cmake_module/cmake)
+-- Ensuring Eigen3 include directory is part of orocos-kdl CMake target
+-- ROS2 full environment found, compiling ROS2 targets ...
+-- Configuring done (6.1s)
+-- Generating done (0.0s)
+-- Build files have been written to: /home/ganl1r/awakening/build
+[1;33m
+<--- Start Ninja Build --->[0m
+ninja: Entering directory `/home/ganl1r/awakening/build'
+[0/2] Re-checking globbed directories...
+ninja: no work to do.
+[1;34m
+<--- Build Time --->
+        00:00 (mm:ss)
+[0m[1;33m
+<--- Total Lines --->[0m
+[1;34m        26186[0m
+[1;33m
+<--- Running awakening --->[0m
+[10:51:25.803] [info] Logger initialized successfully. Current log file: /home/ganl1r/awakening/log/2026-04-10_10-51-25.log
+[10:51:25.803] [info] Log folder: /home/ganl1r/awakening/log
+[1;31m
+--- Program crashed, running guard.sh ---[0m
+[1;33mStarting guard.sh ...[0m
+[1;33m<----- OVER ----->[0m

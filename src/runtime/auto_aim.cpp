@@ -10,6 +10,7 @@
     #include "_rcl/visual/armor.hpp"
     #include "_rcl/visual/armor_target.hpp"
 #endif
+#include "io/gimbal/gimbal.hpp"
 #include "param_deliver.h"
 #include "tasks/auto_aim/armor_control/very_aimer.hpp"
 #include "tasks/auto_aim/armor_detect/armor_detector.hpp"
@@ -26,7 +27,6 @@
 #include "utils/common/image.hpp"
 #include "utils/common/type_common.hpp"
 #include "utils/drivers/hik_camera.hpp"
-#include "utils/drivers/serial_driver.hpp"
 #include "utils/logger.hpp"
 #include "utils/runtime_tf.hpp"
 #include "utils/scheduler/scheduler.hpp"
@@ -168,10 +168,10 @@ int main(int argc, char** argv) {
     rcl::TF rcl_tf(rcl_node);
 #endif
 
-    std::unique_ptr<SerialDriver> serial;
-    if (!player && !use_sim) {
-        if (config["serial"]["enable"].as<bool>()) {
-            serial = std::make_unique<SerialDriver>(config["serial"], s);
+    std::unique_ptr<io::Gimbal> gimbal;
+    if (!player) {
+        if (config["gimbal"]["enable"].as<bool>()) {
+            gimbal = std::make_unique<io::Gimbal>(config_path);
         }
     }
 
@@ -336,45 +336,6 @@ int main(int argc, char** argv) {
         }
         return std::make_tuple(std::optional<CommonFrameIo::second_type>(std::move(frame)));
     });
-    if (serial || player) {
-        s.register_task<SerialIO>("receive_serial", [&](SerialIO::second_type&& data) {
-            if (recorder) {
-                utils::dt_once(
-                    [&]() { recorder->record<SerialTag>(data); },
-                    std::chrono::milliseconds(10)
-                );
-            }
-            auto robo_opt = ReceiveRobotData::create(data);
-            log_ctx.serial_count++;
-            if (robo_opt.has_value()) {
-                auto robo = robo_opt.value();
-                double yaw = angles::from_degrees(robo.yaw);
-                double pitch = angles::from_degrees(robo.pitch);
-                double roll = angles::from_degrees(robo.roll);
-                ISO3 gimbal_2_gimbal_odom = ISO3::Identity();
-                gimbal_2_gimbal_odom.translation() = Vec3(0, 0, 0);
-                gimbal_2_gimbal_odom.linear() =
-                    utils::euler2matrix(Vec3(yaw, pitch, roll), utils::EulerOrder::ZYX);
-                tf->push(
-                    SimpleFrame::GIMBAL_ODOM,
-                    SimpleFrame::GIMBAL,
-                    Clock::now(),
-                    gimbal_2_gimbal_odom
-                );
-                robo.update_log();
-                static uint32_t last_bullet_count = 0;
-                if (robo.bullet_count > last_bullet_count) {
-                    auto shoot_in_odom =
-                        tf->pose_a_in_b(SimpleFrame::SHOOT, SimpleFrame::ODOM, Clock::now());
-                    Bullet b { .fire_time = Clock::now(),
-                               .fire_time_shoot_in_odom = shoot_in_odom,
-                               .speed_in_odom = bullet_speed };
-                    bullet_pick_up.push_back(std::move(b));
-                }
-                last_bullet_count = robo.bullet_count;
-            }
-        });
-    }
     if (camera) {
         s.register_task<CommonFrameIo>("auto_exposure", [&](CommonFrameIo::second_type&& frame) {
             struct AutoExposureCfg {
@@ -507,6 +468,46 @@ int main(int argc, char** argv) {
     });
     s.add_rate_source<>("solver", 1000.0, [&]() {
         log_ctx.solve_count++;
+        
+        // 从 gimbal 读取状态并更新 TF
+        if (gimbal) {
+            auto state = gimbal->state();
+            auto q = gimbal->q(Clock::now());
+            ISO3 gimbal_2_gimbal_odom = ISO3::Identity();
+            gimbal_2_gimbal_odom.translation() = Vec3(0, 0, 0);
+            gimbal_2_gimbal_odom.linear() = q.toRotationMatrix();
+            tf->push(
+                SimpleFrame::GIMBAL_ODOM,
+                SimpleFrame::GIMBAL,
+                Clock::now(),
+                gimbal_2_gimbal_odom
+            );
+            
+            // 更新弹速
+            bullet_speed = state.bullet_speed;
+            
+            // 统计
+            log_ctx.serial_count++;
+            
+            // 记录子弹发射
+            static uint16_t last_bullet_count = 0;
+            if (state.bullet_count > last_bullet_count) {
+                auto shoot_in_odom =
+                    tf->pose_a_in_b(SimpleFrame::SHOOT, SimpleFrame::ODOM, Clock::now());
+                Bullet b { .fire_time = Clock::now(),
+                           .fire_time_shoot_in_odom = shoot_in_odom,
+                           .speed_in_odom = bullet_speed };
+                bullet_pick_up.push_back(std::move(b));
+            }
+            last_bullet_count = state.bullet_count;
+            
+            // 更新 enemy_color
+            auto mode = gimbal->mode();
+            if (mode == io::GimbalMode::AUTO_AIM) {
+                enemy_color = EnemyColor::RED;
+            }
+        }
+        
         auto target = armor_target.read();
         auto old_in_gimbal_odom = tf->pose_a_in_b(
             SimpleFrame(target.get_target_state().frame_id),
@@ -523,26 +524,17 @@ int main(int argc, char** argv) {
             cmd = very_aimer.very_aim(target, bullet_speed, auto_aim_fsm_controller.get_state());
         }
 
-        if (serial) {
-            SendRobotCmdData send;
-            send.cmd_ID = SendRobotCmdData::ID;
-            send.time_stamp = std::chrono::duration_cast<std::chrono::milliseconds>(
-                                  std::chrono::steady_clock::now().time_since_epoch()
-            )
-                                  .count();
-            send.appear = cmd.appear;
-            send.detect_color = std::to_underlying(enemy_color);
-            send.yaw = cmd.yaw;
-            send.pitch = cmd.pitch;
-            send.v_yaw = cmd.v_yaw;
-            send.target_yaw = cmd.target_yaw;
-            send.target_pitch = cmd.target_pitch;
-            send.v_pitch = cmd.v_pitch;
-            send.a_yaw = cmd.a_yaw;
-            send.a_pitch = cmd.a_pitch;
-            send.enable_yaw_diff = cmd.enable_yaw_diff;
-            send.enable_pitch_diff = cmd.enable_pitch_diff;
-            serial->write(std::move(utils::to_vector(send)));
+        if (gimbal) {
+            gimbal->send(
+                cmd.appear,
+                cmd.appear,
+                cmd.yaw,
+                cmd.v_yaw,
+                cmd.a_yaw,
+                cmd.pitch,
+                cmd.v_pitch,
+                cmd.a_pitch
+            );
         }
         auto old_in_camera_cv = tf->pose_a_in_b(
             SimpleFrame(cmd.aim_point.frame_id),
@@ -630,25 +622,15 @@ int main(int argc, char** argv) {
 
     if (player) {
         auto cam = s.register_source<CameraIO>("hik");
-        auto serial = s.register_source<SerialIO>("serial");
         player->subscribe<CameraTag>([&](ImageFrame&& f) {
             s.runtime_push_source<CameraIO>(cam, [&, _f = std::move(f)]() {
                 return std::make_tuple(std::optional<CameraIO::second_type>(std::move(_f)));
-            });
-        });
-        player->subscribe<SerialTag>([&](std::vector<uint8_t>&& buf) {
-            s.runtime_push_source<SerialIO>(serial, [&, __buf = std::move(buf)]() {
-                return std::make_tuple(std::optional<SerialIO::second_type>(std::move(__buf)));
             });
         });
 
     } else {
         if (camera) {
             camera->start<CameraTag>("hik");
-        }
-
-        if (serial) {
-            serial->start<SerialTag>("serial");
         }
     }
     s.build();

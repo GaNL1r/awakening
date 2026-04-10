@@ -28,4 +28,10 @@ __pycache__
 bin
 
 model/at.onnx
-model/at.engine
+model/at.enginewust_vl/
+
+.idea/
+wust_vl/
+cmake-build-*/
+build/
+[debug]
