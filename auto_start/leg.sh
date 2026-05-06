@@ -100,7 +100,7 @@ case "$ACTION" in
         sudo systemctl status "${SERVICE_NAME}.service"
         ;;
     journal)
-        sudo journalctl -u "${SERVICE_NAME}.service" -f
+        sudo journalctl -u "${SERVICE_NAME}.service" --no-pager
         ;;
     *)
         echo "❌ 参数错误: $0 [install|uninstall|start|stop|restart|status|journal]"

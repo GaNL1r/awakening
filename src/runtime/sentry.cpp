@@ -355,11 +355,11 @@ int main(int argc, char** argv) {
                     packet_time,
                     gimbal_2_gimbal_odom
                 );
-                double vx = robo.v_x;
-                double vy = robo.v_y;
-                double vz = robo.v_z;
-                wheel_odometry.predict_ekf(packet_time);
-                wheel_odometry.update(Vec3(vx, vy, vz), packet_time);
+                // double vx = robo.v_x;
+                // double vy = robo.v_y;
+                // double vz = robo.v_z;
+                // wheel_odometry.predict_ekf(packet_time);
+                // wheel_odometry.update(Vec3(vx, vy, vz), packet_time);
                 ISO3 gimbal_odom_in_odom = ISO3::Identity();
                 gimbal_odom_in_odom.translation() = wheel_odometry.state.pos();
                 tf->push(
@@ -369,7 +369,6 @@ int main(int argc, char** argv) {
                     gimbal_odom_in_odom
                 );
                 enemy_color = EnemyColor(robo.detect_color);
-                bullet_speed = robo.bullet_speed;
                 robo.update_log();
                 static uint32_t last_bullet_count = 0;
                 if (robo.bullet_count > last_bullet_count) {
@@ -642,27 +641,7 @@ int main(int argc, char** argv) {
         common_frame.img_frame = std::move(img_frame);
         common_frame.frame_id = one.cv_frame_id;
         common_frame.id = one.order_id++;
-        auto target = one.target;
-        if (target.check()) {
-            auto camera_cv_in_old = tf->pose_a_in_b(
-                SentryFrame(common_frame.frame_id),
-                SentryFrame(target.get_target_state().frame_id),
-                common_frame.img_frame.timestamp
-            );
-            target.set_target_state([&](armor_point_motion_model::State& state) {
-                state.predict(common_frame.img_frame.timestamp, target.target_number);
-            });
-            auto bbox = target.expanded_one_one(
-                common_frame.img_frame.timestamp,
-                camera_cv_in_old,
-                camera_info,
-                common_frame.img_frame.src_img.size()
-            );
-            if (bbox.area() > 200) {
-                common_frame.expanded = bbox;
-                common_frame.offset = cv::Point2f(bbox.x, bbox.y);
-            }
-        }
+
         s.runtime_push_source<>(armor_omni_task, [&, f = std::move(common_frame)]() {
             static std::unique_ptr<std::counting_semaphore<>> detector_sem;
             if (!detector_sem) {
@@ -703,6 +682,8 @@ int main(int argc, char** argv) {
                     _armors.timestamp
                 );
                 _armors.frame_id = std::to_underlying(SentryFrame::ODOM);
+
+                
                 one.target =
                     one.tracker->track(_armors, camera_info, camera_cv_in_odom, _armors.frame_id);
                 if (!one.target.check()) {

@@ -96,6 +96,7 @@ armor_tracker:
   q_h: 0.0000001
   q_outpost_dz: 0.5
   r_uv_at_1m: 70.0
+  r_uv_min: 30.0
   esekf_iter_num: 5
 
 auto_aim_fsm:

@@ -389,11 +389,11 @@ int main(int argc, char** argv) {
                 );
                 operator_offset.first = angles::from_degrees(robo.operator_yaw_offset);
                 operator_offset.second = angles::from_degrees(robo.operator_pitch_offset);
-                double vx = robo.v_x;
-                double vy = robo.v_y;
-                double vz = robo.v_z;
-                wheel_odometry.predict_ekf(packet_time);
-                wheel_odometry.update(Vec3(vx, vy, vz), packet_time);
+                // double vx = robo.v_x;
+                // double vy = robo.v_y;
+                // double vz = robo.v_z;
+                // wheel_odometry.predict_ekf(packet_time);
+                // wheel_odometry.update(Vec3(vx, vy, vz), packet_time);
                 ISO3 gimbal_odom_in_odom = ISO3::Identity();
                 gimbal_odom_in_odom.translation() = wheel_odometry.state.pos();
                 tf->push(

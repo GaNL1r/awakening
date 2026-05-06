@@ -26,6 +26,7 @@ struct ArmorTrackerCfg {
     double q_h;
     double q_outpost_dz;
     double r_uv_at_1m;
+    double r_uv_min;
     void load(const YAML::Node& config) {
         esekf_iter_num = config["esekf_iter_num"].as<int>();
         lost_time_thres = config["lost_time_thres"].as<double>();
@@ -43,6 +44,7 @@ struct ArmorTrackerCfg {
         q_h = config["q_h"].as<double>();
         q_outpost_dz = config["q_outpost_dz"].as<double>();
         r_uv_at_1m = config["r_uv_at_1m"].as<double>();
+        r_uv_min = config["r_uv_min"].as<double>();
     }
 };
 static inline int GOBAL_ID = 0;
@@ -73,8 +75,9 @@ public:
     };
     enum MeasureType { ARMOR, R_LIGHT, L_LIGHT };
     ArmorTarget() = default;
-    void armor_pnp(Armor& a, const CameraInfo& camera_info, const ISO3& camera_cv_in_odom)
-        const noexcept;
+    static void armor_pnp(Armor& a, const CameraInfo& camera_info, const ISO3& camera_cv_in_odom)
+         noexcept;
+        
     void reset(
         Armor& a,
         const ArmorTrackerCfg& c,

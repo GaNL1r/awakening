@@ -4,6 +4,7 @@
 #include "tasks/base/common.hpp"
 #include "tasks/base/web.hpp"
 #include "utils/common/type_common.hpp"
+#include "utils/logger.hpp"
 #include "utils/utils.hpp"
 #include <Eigen/src/Core/Matrix.h>
 #include <algorithm>
@@ -153,6 +154,7 @@ public:
         esekf.value().setState(state.x);
         is_inited = true;
         last_update = t;
+        AWAKENING_INFO("wheel odometry reset");
     }
     inline Eigen::Matrix<double, wheel_motion_model::X_N, wheel_motion_model::X_N>
     process_noise(double dt) const noexcept {
@@ -217,7 +219,7 @@ public:
 
         last_update = t;
         state.timestamp = t;
-        if (state.vel().norm() > 10.0) {
+        if (state.vel().norm() > 10.0||state.pos().norm() > 10.0) {
             reset(t);
         }
     }
