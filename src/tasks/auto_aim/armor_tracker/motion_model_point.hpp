@@ -131,7 +131,7 @@ inline void project_points_jets(
 
     img_pts_jet.clear();
     img_pts_jet.reserve(obj_pts.size());
-
+ 
     for (const auto& pt3: obj_pts) {
         Eigen::Matrix<T, 3, 1> Pw(T(pt3.x), T(pt3.y), T(pt3.z));
 
