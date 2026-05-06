@@ -141,9 +141,6 @@ inline void project_points_jets(
         T Yc = Pc(1);
         T Zc = Pc(2);
 
-        if (ceres::abs(Zc) < T(1e-8)) {
-            continue;
-        }
 
         T xp = Xc / Zc;
         T yp = Yc / Zc;

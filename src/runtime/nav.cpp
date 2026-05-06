@@ -36,7 +36,23 @@ int main(int argc, char** argv) {
     SerialDriver serial(config["serial"], s);
     rcl::RclcppNode rcl_node("auto_aim");
     s.register_task<SerialIO>("receive_serial", [&](SerialIO::second_type&& data) {
+        auto robo_opt = ReceiveRobotData::create(data);
 
+            if (robo_opt.has_value()) {
+                auto robo = robo_opt.value();
+                
+                robo.update_log();
+               
+            }
+            auto joint_opt = SentryJointState::create(data);
+            if (joint_opt.has_value()) {
+                auto joint = joint_opt.value();
+                joint.update_log();
+            }   
+            auto referee_opt = SentryRefereeReceive::create(data);
+            if (referee_opt) {
+                referee_opt->update_log();
+            }
     });
     auto cmd_sub = rcl_node.make_sub<geometry_msgs::msg::Twist>(
         "cmd_vel",
@@ -48,6 +64,7 @@ int main(int argc, char** argv) {
             send.vx = msg->linear.x;
             send.vy = msg->linear.y;
             send.wz = msg->angular.z;
+            send.turtle_state = (msg->linear.z > 0) ? true : false;
             serial.write(utils::to_vector(send));
         }
     );

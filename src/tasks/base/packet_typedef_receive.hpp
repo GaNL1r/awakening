@@ -77,6 +77,7 @@ struct SentryJointState {
 
     uint8_t cmd_ID;
     float big_yaw_in_world;
+    uint8_t turtle_state;
     static std::optional<SentryJointState> create(const std::vector<uint8_t>& data) {
         if (data.size() != sizeof(SentryJointState) || data[0] != ID)
             return std::nullopt;
@@ -84,6 +85,13 @@ struct SentryJointState {
         SentryJointState out;
         std::memcpy(&out, data.data(), sizeof(out));
         return out;
+    }
+    void update_log() {
+        using namespace web;
+        write_log("referee", [&](auto& j) {
+            j["big_yaw_in_world"] = val(big_yaw_in_world);
+            j["turtle_state"] = val(turtle_state);
+        });
     }
 } __attribute__((packed));
 struct SentryRefereeReceive {

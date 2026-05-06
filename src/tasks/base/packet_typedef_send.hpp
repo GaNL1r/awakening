@@ -44,6 +44,7 @@ struct SendNavCmdData {
 
     uint8_t cmd_ID = ID;
     float vx, vy, wz;
+    uint8_t turtle_state;
 
 } __attribute__((packed));
 

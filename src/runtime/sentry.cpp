@@ -383,8 +383,8 @@ int main(int argc, char** argv) {
             }
             auto joint_opt = SentryJointState::create(data);
             if (joint_opt.has_value()) {
-                auto sentry = joint_opt.value();
-                double big_yaw_in_world = sentry.big_yaw_in_world;
+                auto joint = joint_opt.value();
+                double big_yaw_in_world = joint.big_yaw_in_world;
                 auto gimbal_2_gimbal_odom =
                     tf->pose_a_in_b(SentryFrame::GIMBAL, SentryFrame::GIMBAL_ODOM, Clock::now());
                 auto ypr =
@@ -810,6 +810,7 @@ int main(int argc, char** argv) {
             send.vx = msg->linear.x;
             send.vy = msg->linear.y;
             send.wz = msg->angular.z;
+            send.turtle_state = (msg->linear.z > 0) ? true : false;
             if (serial) {
                 serial->write(utils::to_vector(send));
             }
