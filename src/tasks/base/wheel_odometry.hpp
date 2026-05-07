@@ -219,7 +219,7 @@ public:
 
         last_update = t;
         state.timestamp = t;
-        if (state.vel().norm() > 10.0||state.pos().norm() > 10.0) {
+        if (state.vel().norm() > 10.0 || state.pos().norm() > 10.0) {
             reset(t);
         }
     }

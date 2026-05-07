@@ -683,7 +683,6 @@ int main(int argc, char** argv) {
                 );
                 _armors.frame_id = std::to_underlying(SentryFrame::ODOM);
 
-                
                 one.target =
                     one.tracker->track(_armors, camera_info, camera_cv_in_odom, _armors.frame_id);
                 if (!one.target.check()) {

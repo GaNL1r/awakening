@@ -1,6 +1,8 @@
 #pragma once
 #include "rclcpp/rclcpp.hpp"
 #include "tasks/radar_detect/target.hpp"
+#include "utils/buffer.hpp"
+#include "utils/common/image.hpp"
 #include "utils/common/type_common.hpp"
 #include "utils/utils.hpp"
 #include <Eigen/src/Core/Matrix.h>
@@ -72,11 +74,13 @@ enum class CarClass : int {
     R2 = 2,
     R3 = 3,
     R4 = 4,
+    R6 = 6,
     R7 = 7,
     B1 = 101,
     B2 = 102,
     B3 = 103,
     B4 = 104,
+    B6 = 106,
     B7 = 107,
     UNKNOWN = -10,
 };
@@ -90,6 +94,8 @@ inline std::string CarClass_to_str(CarClass c) {
             return "R3";
         case CarClass::R4:
             return "R4";
+        case CarClass::R6:
+            return "R6";
         case CarClass::R7:
             return "R7";
         case CarClass::B1:
@@ -100,6 +106,8 @@ inline std::string CarClass_to_str(CarClass c) {
             return "B3";
         case CarClass::B4:
             return "B4";
+        case CarClass::B6:
+            return "B6";
         case CarClass::B7:
             return "B7";
         case CarClass::UNKNOWN:
@@ -195,7 +203,7 @@ struct Car {
         auto max_class_it = std::max_element(class_scores.begin(), class_scores.end());
         number = static_cast<ArmorClass>(std::distance(class_scores.begin(), max_class_it));
     }
-    void draw(cv::Mat& img) const {
+    void draw(cv::Mat& img) const noexcept {
         cv::rectangle(img, bbox, armor_color_to_cv_scalar(color), 5);
         cv::putText(
             img,
@@ -277,4 +285,40 @@ inline cv::Point2f uwb_to_image(const Image& image, const Eigen::Vector2d& uwb_p
     }
     return img_point;
 }
+struct RoboPositionMsg {
+    int enemy_no1_x;
+    int enemy_no1_y;
+    int enemy_no2_x;
+    int enemy_no2_y;
+    int enemy_no3_x;
+    int enemy_no3_y;
+    int enemy_no4_x;
+    int enemy_no4_y;
+    int enemy_no6_x;
+    int enemy_no6_y;
+    int enemy_no7_x;
+    int enemy_no7_y;
+
+    int self_no1_x;
+    int self_no1_y;
+    int self_no2_x;
+    int self_no2_y;
+    int self_no3_x;
+    int self_no3_y;
+    int self_no4_x;
+    int self_no4_y;
+    int self_no6_x;
+    int self_no6_y;
+    int self_no7_x;
+    int self_no7_y;
+} __attribute__((packed));
+struct ToSentryMsg {
+    uint8_t enemy_outpost_active;
+} __attribute__((packed));
+struct RadarDebugCtx {
+    Image map;
+    utils::Locked<ImageFrame> img_frame;
+    utils::Locked<std::vector<Car>> cars;
+    utils::Locked<std::vector<Armor>> outpost;
+};
 } // namespace awakening::radar_detect

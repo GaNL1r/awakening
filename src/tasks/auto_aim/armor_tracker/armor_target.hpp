@@ -75,9 +75,9 @@ public:
     };
     enum MeasureType { ARMOR, R_LIGHT, L_LIGHT };
     ArmorTarget() = default;
-    static void armor_pnp(Armor& a, const CameraInfo& camera_info, const ISO3& camera_cv_in_odom)
-         noexcept;
-        
+    static void
+    armor_pnp(Armor& a, const CameraInfo& camera_info, const ISO3& camera_cv_in_odom) noexcept;
+
     void reset(
         Armor& a,
         const ArmorTrackerCfg& c,

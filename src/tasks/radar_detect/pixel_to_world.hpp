@@ -36,28 +36,26 @@ public:
         AWAKENING_INFO("Mesh加载成功, 顶点数: {}", mesh_->vertices_.size());
     }
     std::optional<Eigen::Vector3d> pixel_to_world(const cv::Point2f& pixel) {
-        double fx = camera_info_.camera_matrix.at<double>(0, 0); // focal length x
-        double fy = camera_info_.camera_matrix.at<double>(1, 1); // focal length y
-        double cx = camera_info_.camera_matrix.at<double>(0, 2); // principal point x
-        double cy = camera_info_.camera_matrix.at<double>(1, 2); // principal point y
+        double fx = camera_info_.camera_matrix.at<double>(0, 0);
+        double fy = camera_info_.camera_matrix.at<double>(1, 1);
+        double cx = camera_info_.camera_matrix.at<double>(0, 2);
+        double cy = camera_info_.camera_matrix.at<double>(1, 2);
 
-        double x = (pixel.x - cx) / fx;
-        double y = (pixel.y - cy) / fy;
+        float x = (pixel.x - cx) / fx;
+        float y = (pixel.y - cy) / fy;
 
-        Eigen::Vector3d ray_direction(x, y, 1.0);
+        Eigen::Vector3f ray_direction(x, y, 1.0);
         ray_direction.normalize(); // 单位化射线方向
+        ray_direction = camera_cv_in_target_map_.linear().cast<float>() * ray_direction;
+        Eigen::Vector3f ray_origin = camera_cv_in_target_map_.translation().cast<float>();
 
-        Eigen::Matrix4d transformation_matrix = camera_cv_in_target_map_.matrix(); // 变换矩阵
-        Eigen::Vector3d ray_origin =
-            transformation_matrix.block<3, 1>(0, 3); // 相机位置（世界坐标系中的位置）
-
-        std::vector<double> ray_data = { ray_origin.x(),    ray_origin.y(),    ray_origin.z(),
-                                         ray_direction.x(), ray_direction.y(), ray_direction.z() };
+        std::vector<float> ray_data = { ray_origin.x(),    ray_origin.y(),    ray_origin.z(),
+                                        ray_direction.x(), ray_direction.y(), ray_direction.z() };
 
         open3d::core::Tensor rays_tensor(
             ray_data.data(),
             { 1, 6 },
-            open3d::core::Dtype::Float64
+            open3d::core::Dtype::Float32
         ); // {1, 6} shape means 1 ray with origin (3) and direction (3)
 
         auto raycast_result = raycasting_scene_->CastRays(rays_tensor);
@@ -69,14 +67,14 @@ public:
 
         auto t_hit_vec = t_hit.ToFlatVector<float>();
 
-        if (t_hit_vec.empty() || t_hit_vec[0] < 0.0f) {
+        if (t_hit_vec.empty()) {
             return std::nullopt;
         }
 
         auto t = t_hit_vec[0];
 
-        Eigen::Vector3d pt_intersect = ray_origin + t * ray_direction;
-        return pt_intersect;
+        Eigen::Vector3f pt_intersect = ray_origin + t * ray_direction;
+        return pt_intersect.cast<double>();
     }
     ISO3 camera_cv_in_target_map_;
     CameraInfo camera_info_;

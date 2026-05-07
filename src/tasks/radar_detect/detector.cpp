@@ -117,6 +117,56 @@ struct Detector::Impl {
         }
         return result;
     }
+    std::vector<Armor> detect_armors(const CommonFrame& frame) {
+        std::vector<Armor> armors;
+        if (frame.img_frame.src_img.empty()) {
+            return armors;
+        }
+        const auto& src_img = frame.img_frame.src_img;
+
+        cv::Rect src_rect(0, 0, src_img.cols, src_img.rows);
+        cv::Rect safe_expanded = frame.expanded & src_rect;
+        if (safe_expanded.area() <= 0) {
+            return armors;
+        }
+
+        const auto roi = src_img(safe_expanded);
+        cv::Rect roi_safe_bounds(0, 0, roi.cols, roi.rows);
+        auto armor_output = armor_trt_->detect(roi, frame.img_frame.format);
+        armors = armor_post_process(armor_output.output);
+        for (auto& armor: armors) {
+            armor.bbox = utils::transform_rect(armor_output.transform_matrix, armor.bbox);
+            cv::Rect safe_armor_bbox = cv::Rect(armor.bbox) & roi_safe_bounds;
+
+            if (safe_armor_bbox.area() > 0) {
+                cv::Scalar mean_val = cv::mean(roi(safe_armor_bbox));
+                float R = 0.f, B = 0.f;
+                switch (frame.img_frame.format) {
+                    case PixelFormat::BGR:
+                        R = mean_val[2];
+                        B = mean_val[0];
+                        break;
+                    case PixelFormat::RGB:
+                        B = mean_val[2];
+                        R = mean_val[0];
+                        break;
+                    case PixelFormat::GRAY:
+                        break;
+                }
+                if (R - B > params_.armor_color_diff_threshold)
+                    armor.color = ArmorColor::RED;
+                else if (B - R > params_.armor_color_diff_threshold)
+                    armor.color = ArmorColor::BLUE;
+                else
+                    armor.color = ArmorColor::NONE;
+            } else {
+                armor.color = ArmorColor::NONE;
+            }
+            armor.bbox += frame.offset;
+        }
+        // Implementation for detecting armors
+        return armors;
+    }
     std::vector<Car> detect(const CommonFrame& frame) {
         std::vector<Car> cars;
         if (frame.img_frame.src_img.empty()) {
@@ -275,5 +325,8 @@ Detector::~Detector() noexcept {
 }
 std::vector<Car> Detector::detect(const CommonFrame& frame) {
     return _impl->detect(frame);
+}
+std::vector<Armor> Detector::detect_armors(const CommonFrame& frame) {
+    return _impl->detect_armors(frame);
 }
 } // namespace awakening::radar_detect

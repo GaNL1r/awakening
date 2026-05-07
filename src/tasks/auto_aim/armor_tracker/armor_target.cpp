@@ -113,8 +113,11 @@ void ArmorTarget::reset(
     update_count++;
 }
 
-void ArmorTarget::armor_pnp(Armor& a, const CameraInfo& camera_info, const ISO3& camera_cv_in_odom)
-    noexcept {
+void ArmorTarget::armor_pnp(
+    Armor& a,
+    const CameraInfo& camera_info,
+    const ISO3& camera_cv_in_odom
+) noexcept {
     cv::Mat rvec, tvec;
     if (!cv::solvePnP(
             getArmorKeyPoints3D<cv::Point3f>(a.number),
@@ -147,7 +150,8 @@ Eigen::Matrix<double, Z_N, Z_N>
 ArmorTarget::measurement_covariance(const Eigen::Matrix<double, Z_N, 1>& z) const noexcept {
     Eigen::Matrix<double, Z_N, Z_N> r;
 
-    double u_r = std::max(cfg.r_uv_at_1m * log((1.0 / target_state.pos().norm()) + 1),cfg.r_uv_min);
+    double u_r =
+        std::max(cfg.r_uv_at_1m * log((1.0 / target_state.pos().norm()) + 1), cfg.r_uv_min);
 
     r << u_r, 0, 0, 0, 0, 0, 0, 0, 0, u_r, 0, 0, 0, 0, 0, 0, 0, 0, u_r, 0, 0, 0, 0, 0, 0, 0, 0, u_r,
         0, 0, 0, 0, 0, 0, 0, 0, u_r, 0, 0, 0, 0, 0, 0, 0, 0, u_r, 0, 0, 0, 0, 0, 0, 0, 0, u_r, 0, 0,

@@ -29,11 +29,13 @@ public:
         SingleRobotGuess self_2(image, guess_config["self_2"]);
         SingleRobotGuess self_3(image, guess_config["self_3"]);
         SingleRobotGuess self_4(image, guess_config["self_4"]);
+        SingleRobotGuess self_6(image, guess_config["self_6"]);
         SingleRobotGuess self_7(image, guess_config["self_7"]);
         SingleRobotGuess enemy_1(image, guess_config["enemy_1"]);
         SingleRobotGuess enemy_2(image, guess_config["enemy_2"]);
         SingleRobotGuess enemy_3(image, guess_config["enemy_3"]);
         SingleRobotGuess enemy_4(image, guess_config["enemy_4"]);
+        SingleRobotGuess enemy_6(image, guess_config["enemy_6"]);
         SingleRobotGuess enemy_7(image, guess_config["enemy_7"]);
         if (self_color == SelfColor::RED) {
             self_1.set_car_class(CarClass::R1);
@@ -44,6 +46,8 @@ public:
             robot_guesses[std::to_underlying(CarClass::R3)] = self_3;
             self_4.set_car_class(CarClass::R4);
             robot_guesses[std::to_underlying(CarClass::R4)] = self_4;
+            self_6.set_car_class(CarClass::R6);
+            robot_guesses[std::to_underlying(CarClass::R6)] = self_6;
             self_7.set_car_class(CarClass::R7);
             robot_guesses[std::to_underlying(CarClass::R7)] = self_7;
             enemy_1.set_car_class(CarClass::B1);
@@ -54,6 +58,8 @@ public:
             robot_guesses[std::to_underlying(CarClass::B3)] = enemy_3;
             enemy_4.set_car_class(CarClass::B4);
             robot_guesses[std::to_underlying(CarClass::B4)] = enemy_4;
+            enemy_6.set_car_class(CarClass::B6);
+            robot_guesses[std::to_underlying(CarClass::B6)] = enemy_6;
             enemy_7.set_car_class(CarClass::B7);
             robot_guesses[std::to_underlying(CarClass::B7)] = enemy_7;
         } else {
@@ -65,6 +71,8 @@ public:
             robot_guesses[std::to_underlying(CarClass::R3)] = enemy_3;
             enemy_4.set_car_class(CarClass::R4);
             robot_guesses[std::to_underlying(CarClass::R4)] = enemy_4;
+            enemy_6.set_car_class(CarClass::R6);
+            robot_guesses[std::to_underlying(CarClass::R6)] = enemy_6;
             enemy_7.set_car_class(CarClass::R7);
             robot_guesses[std::to_underlying(CarClass::R7)] = enemy_7;
             self_1.set_car_class(CarClass::B1);
@@ -115,35 +123,41 @@ public:
         SingleRobotGuess self_2;
         SingleRobotGuess self_3;
         SingleRobotGuess self_4;
+        SingleRobotGuess self_6;
         SingleRobotGuess self_7;
         SingleRobotGuess enemy_1;
         SingleRobotGuess enemy_2;
         SingleRobotGuess enemy_3;
         SingleRobotGuess enemy_4;
+        SingleRobotGuess enemy_6;
         SingleRobotGuess enemy_7;
         if (image.self_color == SelfColor::RED) {
             self_1 = robot_guesses.at(std::to_underlying(CarClass::R1));
             self_2 = robot_guesses.at(std::to_underlying(CarClass::R2));
             self_3 = robot_guesses.at(std::to_underlying(CarClass::R3));
             self_4 = robot_guesses.at(std::to_underlying(CarClass::R4));
+            self_6 = robot_guesses.at(std::to_underlying(CarClass::R6));
             self_7 = robot_guesses.at(std::to_underlying(CarClass::R7));
 
             enemy_1 = robot_guesses.at(std::to_underlying(CarClass::B1));
             enemy_2 = robot_guesses.at(std::to_underlying(CarClass::B2));
             enemy_3 = robot_guesses.at(std::to_underlying(CarClass::B3));
             enemy_4 = robot_guesses.at(std::to_underlying(CarClass::B4));
+            enemy_6 = robot_guesses.at(std::to_underlying(CarClass::B6));
             enemy_7 = robot_guesses.at(std::to_underlying(CarClass::B7));
         } else {
             enemy_1 = robot_guesses.at(std::to_underlying(CarClass::R1));
             enemy_2 = robot_guesses.at(std::to_underlying(CarClass::R2));
             enemy_3 = robot_guesses.at(std::to_underlying(CarClass::R3));
             enemy_4 = robot_guesses.at(std::to_underlying(CarClass::R4));
+            enemy_6 = robot_guesses.at(std::to_underlying(CarClass::R6));
             enemy_7 = robot_guesses.at(std::to_underlying(CarClass::R7));
 
             self_1 = robot_guesses.at(std::to_underlying(CarClass::B1));
             self_2 = robot_guesses.at(std::to_underlying(CarClass::B2));
             self_3 = robot_guesses.at(std::to_underlying(CarClass::B3));
             self_4 = robot_guesses.at(std::to_underlying(CarClass::B4));
+            self_6 = robot_guesses.at(std::to_underlying(CarClass::B6));
             self_7 = robot_guesses.at(std::to_underlying(CarClass::B7));
         }
 
@@ -174,6 +188,7 @@ public:
         out << "enemy_7:\n";
         insert(enemy_7);
     }
+
     struct SingleRobotGuess {
         SingleRobotGuess() {}
         SingleRobotGuess(const Image& image, const YAML::Node& config) {
@@ -347,6 +362,7 @@ public:
         Image display_;
         int selected_index_ = 0;
     };
+
     std::unordered_map<int, SingleRobotGuess> robot_guesses;
     Image image;
     double d_factor_;

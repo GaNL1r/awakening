@@ -1,23 +1,25 @@
-max_infer_num: 1
+max_infer_num: 3
 self_color: red
 tf:
-  mid70_in_target_map:
-    t: [0.0,0.0,0.0]
+  # mid70_in_target_map:
+  #   t: [0.0,0.0,0.0]
+  #   R: [1.0,0.0,0.0,0.0,1.0,0.0,0.0,0.0,1.0]
+  #   # t: [-0.44,-2.46168,1.65378]
+  #   # R: [0.999943,  0.00847229,  0.00645632,
+  #   #   -0.00841243 ,   0.999922 ,-0.00924399,
+  #   #   -0.00653414 , 0.00918915,    0.999936]
+  # camera_cv_in_mid70:
+  #   t: [0.2612205549, -0.0012553169, 0.1117908554]
+  #   R: [-0.007474, 0.014602, -0.999875, 
+  #       -0.999968, -0.007126, 0.007589, 
+  #       0.007157, 0.999877, 0.014633]
+  camera_in_target_map:
+    t: [0.0, -5.0, 3.0]
     R: [1.0,0.0,0.0,0.0,1.0,0.0,0.0,0.0,1.0]
-    # t: [-0.44,-2.46168,1.65378]
-    # R: [0.999943,  0.00847229,  0.00645632,
-    #   -0.00841243 ,   0.999922 ,-0.00924399,
-    #   -0.00653414 , 0.00918915,    0.999936]
-  camera_cv_in_mid70:
-    t: [0.2612205549, -0.0012553169, 0.1117908554]
-    R: [-0.007474, 0.014602, -0.999875, 
-        -0.999968, -0.007126, 0.007589, 
-        0.007157, 0.999877, 0.014633]
-  camera_target_map:
-    t: [0.2612205549, -0.0012553169, 0.1117908554]
-    R: [-0.007474, 0.014602, -0.999875, 
-        -0.999968, -0.007126, 0.007589, 
-        0.007157, 0.999877, 0.014633]
+    # R: [0.99530147, -0.03039188, -0.09193101,
+    #   -0.01339114, -0.98354371, 0.18017339,
+    #   -0.09589397, -0.17809578, -0.97932948,]
+    # t: [-0.68605672, 1.13893625, 15.32698638]
 
 detector:
   car_confidence_threshold: 0.2
@@ -33,7 +35,9 @@ detector:
     copy_context_num: 3
     min_free_mem_ratio: 0.1
     use_cuda_preproces: true
-
+pixel_to_world:
+  mesh_path: /home/hy/radar_data/radar.stl
+  # mesh_path: /home/hy/opensourcelearn/RM2025-Radar-Algorithm/field/RMUC2025_National.PLY
 map:
   map_path: /home/hy/awakening/config/rmuc2026.png
   d_factor: 0.01
@@ -50,8 +54,18 @@ tracker:
   w_dist: 5.5
   w_iou: 2.0
   w_id: 7.0
-
+  p_target:
+    esekf_iter_num: 3
+    yp_r: 0.0015
+    dis_r: 0.05
+    qxyz: [1.0, 1.0, 1.0]
+outpost_bbox:
+  x: 1761
+  y: 1324
+  w: 308
+  h: 256
 camera: 
+  type: video
   hik_camera:
     target_sn: 00J14461534
     adc_bit_depth: Bits_8
@@ -72,6 +86,11 @@ camera:
     trigger_activation: ""
     format: "bgr" 
     use_cuda_cvt: true
+  video:
+    path: /home/hy/data/ENTERPRIZE战队RM2025开源第一视角/7.27-华东理工.mp4
+    fps: 30
+    start_frame: 7000
+    loop: true
   mv_camera:
     frame_speed: 0
     exposure_time: 2000
@@ -81,42 +100,16 @@ camera:
     # analog_gain: 100.0
     # gamma: 120
   camera_info:
-    # image_width: 1440
-    # image_height: 1080
-    # camera_name: narrow_stereo
-    # camera_matrix:
-    #   rows: 3
-    #   cols: 3
-    #   data: [1814.19888,    0.     ,  730.27359,
-    #             0.     , 1807.37177,  529.57031,
-    #             0.     ,    0.     ,    1.     ]
-    # distortion_model: plumb_bob
-    # distortion_coefficients:
-    #   rows: 1
-    #   cols: 5
-    #   data: [-0.089138, 0.114766, 0.000034, 0.000238, 0.000000]
-    # rectification_matrix:
-    #   rows: 3
-    #   cols: 3
-    #   data: [1., 0., 0.,
-    #         0., 1., 0.,
-    #         0., 0., 1.]
-    # projection_matrix:
-    #   rows: 3
-    #   cols: 4
-    #   data: [1793.54229,    0.     ,  730.67194,    0.     ,
-    #             0.     , 1794.48784,  529.46193,    0.     ,
-    #             0.     ,    0.     ,    1.     ,    0.     ]
-
     image_width: 4000
     image_height: 3036
     camera_name: camera1
     camera_matrix:
       rows: 3
       cols: 3
-      data: [4505.44779,    0.     , 1990.47019,
-                0.     , 4507.4661 , 1572.4761 ,
-                0.     ,    0.     ,    1.     ]
+      # data: [4505.44779,    0.     , 1990.47019,
+      #           0.     , 4507.4661 , 1572.4761 ,
+      #           0.     ,    0.     ,    1.     ]
+      data: [5033.78027, 0., 2829.23462, 0., 5036.14014, 929.489563, 0., 0., 1.]
     distortion_model: plumb_bob
     distortion_coefficients:
       rows: 1

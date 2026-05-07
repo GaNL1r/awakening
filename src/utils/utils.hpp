@@ -2,6 +2,7 @@
 #include "angles.h"
 #include "utils/common/type_common.hpp"
 #include <opencv2/core/eigen.hpp>
+#include <opencv2/core/types.hpp>
 #include <pwd.h>
 #include <regex>
 namespace awakening::utils {
@@ -327,5 +328,12 @@ inline std::vector<cv::Point2f> reprojection(
     result.translation() = trans;
     result.linear() = rot;
     return result;
+}
+[[nodiscard]] inline cv::Rect2f load_rect2f(const YAML::Node& node) {
+    auto x = node["x"].as<double>();
+    auto y = node["y"].as<double>();
+    auto w = node["w"].as<double>();
+    auto h = node["h"].as<double>();
+    return cv::Rect2f(x, y, w, h);
 }
 } // namespace awakening::utils
