@@ -10,16 +10,18 @@
 #include <opencv2/core/mat.hpp>
 #include <opencv2/highgui.hpp>
 #include <opencv2/opencv.hpp>
-#include <array>
-#include <cstring>
-#include <yaml-cpp/node/parse.h>
-#include "video_stream.pb.h"
-#include <mqtt/async_client.h>
 #include <string>
+#include <mutex>
+#include <deque>
+#include <yaml-cpp/node/parse.h>
 using namespace awakening;
+
 struct CameraTag {};
+struct SerialTag {};
 
 using CameraIO = IOPair<CameraTag, ImageFrame>;
+using SerialIO = IOPair<SerialTag, std::vector<uint8_t>>;
+
 int main(int argc, char** argv) {
     print_banner();
     auto& signal = utils::SignalGuard::instance();
@@ -31,7 +33,7 @@ int main(int argc, char** argv) {
         }
         return std::nullopt;
     };
-    bool debug = false;
+    
     std::string config_path;
     auto first_arg = get_arg(1);
     if (first_arg) {
@@ -39,35 +41,13 @@ int main(int argc, char** argv) {
     } else {
         return 1;
     }
+
     Scheduler s;
     auto config = YAML::LoadFile(config_path);
     std::unique_ptr<SerialDriver> serial;
 
     if (config["serial"]["enable"].as<bool>()) {
         serial = std::make_unique<SerialDriver>(config["serial"], s);
-    }
-
-    // 本地MQTT(测试用)
-    std::unique_ptr<mqtt::async_client> mqtt_client;
-    std::string mqtt_topic;
-    bool use_mqtt = false;
-    if (config["mqtt"]["enable"].as<bool>(false)) {
-        use_mqtt = true;
-        std::string server = config["mqtt"]["server"].as<std::string>("tcp://localhost:1883");
-        std::string client_id = config["mqtt"]["client_id"].as<std::string>("eyes_blind_encoder");
-        mqtt_topic = config["mqtt"]["topic"].as<std::string>("CustomByteBlock");
-
-        mqtt_client = std::make_unique<mqtt::async_client>(server, client_id);
-        mqtt::connect_options opts;
-        opts.set_keep_alive_interval(20);
-        opts.set_clean_session(true);
-        try {
-            mqtt_client->connect(opts)->wait();
-            AWAKENING_INFO("MQTT connected to {} as {}", server, client_id);
-        } catch (const mqtt::exception& e) {
-            AWAKENING_ERROR("MQTT connection failed: {}", e.what());
-            use_mqtt = false;
-        }
     }
 
     auto camera_config = config["camera"];
@@ -83,9 +63,21 @@ int main(int argc, char** argv) {
     if (!camera->running_) {
         return 0;
     }
+
     eyes_of_blind::Encoder encoder(config["encoder"]);
-    // eyes_of_blind::Decoder decoder;
-    s.register_task<CameraIO>("blind", [&](CameraIO::second_type&& f) {
+    
+    // ===== 线程安全的包缓冲队列 =====
+    static std::mutex send_queue_mutex;
+    static std::deque<std::vector<uint8_t>> send_queue;
+    static std::atomic<size_t> send_queue_max_size{0};
+    // =================================
+
+    // 验证结构体大小
+    AWAKENING_INFO("BlindSend size: {}", sizeof(eyes_of_blind::BlindSend));
+    AWAKENING_INFO("SerialSendPacket size: {}", sizeof(eyes_of_blind::SerialSendPacket));
+
+    // 任务1：编码（在相机回调中运行）
+    s.register_task<CameraIO>("blind_encoder", [&](CameraIO::second_type&& f) {
         if (f.src_img.empty()) {
             return;
         }
@@ -100,76 +92,54 @@ int main(int argc, char** argv) {
             if (got) {
                 encoder.push_frame(f.src_img);
                 eyes_of_blind::BlindSend pkg;
-                while (true) {
-                    if (encoder.try_pop_packet(pkg)) {
-                        cv::Mat out;
-                        if (serial && config["serial"]["enable"].as<bool>()) {
-                            // 将整个 BlindSend (300字节) 封装进 Protobuf
-                            std::array<uint8_t, eyes_of_blind::MAX_PACKET_SIZE> raw{};
-                            std::memcpy(raw.data(), &pkg, eyes_of_blind::MAX_PACKET_SIZE);
+                
+                while (encoder.try_pop_packet(pkg)) {
+                                                if (serial && config["serial"]["enable"].as<bool>()) {
+                            // ===== 直接封装到 SerialSendPacket，不做 Proto 序列化 =====
+                        eyes_of_blind::SerialSendPacket send;
+                        std::memset(send.data, 0, sizeof(send.data));
+                        
+                        // 将 BlindSend 的 300 bytes 直接拷贝到 send.data
+                        std::memcpy(send.data, &pkg, sizeof(eyes_of_blind::BlindSend));
 
-                            doorlock_sniper::CustomByteBlock block;
-                            block.set_data(raw.data(), eyes_of_blind::MAX_PACKET_SIZE);
+                        auto* raw = reinterpret_cast<const uint8_t*>(send.data);
 
-                            std::string serialized;
-                            if (!block.SerializeToString(&serialized)) {
-                                AWAKENING_ERROR("Protobuf serialization failed");
-                                continue;
-                            }
-                            serial->write(std::vector<uint8_t>(serialized.begin(), serialized.end()));
-                        }
-                        else if(use_mqtt && mqtt_client && mqtt_client->is_connected()){
-                            // MQTT 发送
-                            std::array<uint8_t, eyes_of_blind::MAX_PACKET_SIZE> raw{};
-                            std::memcpy(raw.data(), &pkg, eyes_of_blind::MAX_PACKET_SIZE);
-                            doorlock_sniper::CustomByteBlock block;
-                            block.set_data(raw.data(), eyes_of_blind::MAX_PACKET_SIZE);
-                            std::string serialized;
-                            if (block.SerializeToString(&serialized)) {
-                                auto msg = mqtt::make_message(mqtt_topic, serialized);
-                                msg->set_qos(0);
-                                mqtt_client->publish(msg);
-                            } else {
-                                AWAKENING_ERROR("Protobuf serialization failed");
-                            }
-                        }
-                        // decoder.push_packet(pkg);
-                        // while (true) {
-                        //     if (decoder.try_pop_frame(out)) {
-                        //         cv::namedWindow("Decoded Frame", cv::WINDOW_NORMAL);
-                        //         cv::imshow("Decoded Frame", out);
-                        //         cv::waitKey(1);
-                        //     } else {
-                        //         break;
-                        //     }
-                        // }
+                        size_t actual_size = sizeof(eyes_of_blind::BlindSend);  // 或 sizeof(send.data)
+                        AWAKENING_INFO(
+                            "Encoder seq={}, first 24: {:02X} {:02X} {:02X} {:02X} {:02X} {:02X} {:02X} {:02X} "
+                            "{:02X} {:02X} {:02X} {:02X} {:02X} {:02X} {:02X} {:02X} "
+                            "{:02X} {:02X} {:02X} {:02X} {:02X} {:02X} {:02X} {:02X}",
+                            pkg.header.sequence_id,
+                            raw[0], raw[1], raw[2], raw[3], raw[4], raw[5], raw[6], raw[7],
+                            raw[8], raw[9], raw[10], raw[11], raw[12], raw[13], raw[14], raw[15],
+                            raw[16], raw[17], raw[18], raw[19], raw[20], raw[21], raw[22], raw[23]);
 
-                    } else {
-                        break;
+                        AWAKENING_INFO(
+                            "Encoder seq={}, last 8: {:02X} {:02X} {:02X} {:02X} {:02X} {:02X} {:02X} {:02X}",
+                            pkg.header.sequence_id,
+                            raw[292], raw[293], raw[294], raw[295], raw[296], raw[297], raw[298], raw[299]);
+                        
+
+                        serial->write(std::move(utils::to_vector(send)));
                     }
                 }
             }
         }
     });
+// 启动驱动
     if (camera) {
         camera->start<CameraTag>("hik");
     }
 
+    if (serial) {
+        serial->start<SerialTag>("serial");
+    }
+
     s.build();
     s.run();
-    // encoder.start();
+    
     utils::SignalGuard::spin(std::chrono::milliseconds(1000));
     s.stop();
-
-    // --- 清理 MQTT ---
-    if (mqtt_client && mqtt_client->is_connected()) {
-        try {
-            mqtt_client->disconnect()->wait();
-            AWAKENING_INFO("MQTT disconnected");
-        } catch (const std::exception& e) {
-            AWAKENING_ERROR("MQTT disconnect error: {}", e.what());
-        }
-    }
 
     for (int i = 0; i < 10; ++i) {
         AWAKENING_CRITICAL("改了东西记得同步其他有关的exe的src");

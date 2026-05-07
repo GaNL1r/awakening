@@ -41,7 +41,7 @@ struct Encoder::Impl {
     struct TokenBucket {
         double tokens = 0.0;
         double rate = 30.0;
-        double capacity = 60.0;
+        double capacity = 40.0;
         int64_t last_ns = 0;
 
         static int64_t now_ns() {
@@ -196,18 +196,30 @@ struct Encoder::Impl {
         // );
         
         // 延迟较低，清晰度较差
-        g_object_set(encoder,
-            "bitrate",         params_.target_bitrate,               // 目标码率
-            "speed-preset",     9,                 // veryslow
-            "tune",             1,                 // zerolatency:0x00000004
-            "bframes",          0,
-            "ref",              5,
-            "key-int-max",      60,               
-            "rc-lookahead",     3,
-            "sync-lookahead",   0,
-            "sliced-threads",   FALSE,             
-            "byte-stream",      TRUE,
-            "aud",              TRUE,
+        g_object_set(
+            encoder,
+            "bitrate",
+            params_.target_bitrate, // 目标码率
+            "speed-preset",
+            9, // veryslow
+            "tune",
+            1, // zerolatency:0x00000004
+            "bframes",
+            0,
+            "ref",
+            5,
+            "key-int-max",
+            30,               
+            "rc-lookahead",
+            3,
+            "sync-lookahead",
+            0,
+            "sliced-threads",
+            FALSE,             
+            "byte-stream",
+            TRUE,
+            "aud",
+            TRUE,
             "option-string",
             "repeat-headers=1:"
             "force-cfr=1:"
@@ -227,7 +239,7 @@ struct Encoder::Impl {
             nullptr
         );
 
-        g_object_set(parser, "config-interval", -1, "disable-passthrough", TRUE, nullptr);
+        g_object_set(parser, "config-interval", 1, "disable-passthrough", TRUE, nullptr);
 
         GstCaps* h264_caps = gst_caps_new_simple(
             "video/x-h264",
