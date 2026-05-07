@@ -8,6 +8,7 @@ namespace awakening {
 DEFINE_CONFIG_PATH(OMNI_CONFIG_PATH, "/config/omni.yaml")
 DEFINE_CONFIG_PATH(SENTRY_CONFIG_PATH, "/config/sentry.yaml")
 DEFINE_CONFIG_PATH(LEG_CONFIG_PATH, "/config/leg.yaml")
+DEFINE_CONFIG_PATH(HERO_CONFIG_PATH, "/config/hero.yaml")
 inline std::optional<std::string> get_robot_config_path(std::string name) {
     auto key = utils::to_upper(name);
     if (key == "OMNI") {
@@ -16,6 +17,8 @@ inline std::optional<std::string> get_robot_config_path(std::string name) {
         return std::string(SENTRY_CONFIG_PATH);
     } else if (key == "LEG") {
         return std::string(LEG_CONFIG_PATH);
+    } else if (key == "HERO") {
+        return std::string(HERO_CONFIG_PATH);
     }
     return std::nullopt;
 }

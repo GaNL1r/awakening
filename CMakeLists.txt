@@ -204,6 +204,12 @@ if(ROS2_FULL_FOUND)
         ${PROJECT_NAME}_rcl
         Open3D::Open3D
     )
+    file(GLOB_RECURSE RADAR_IO_SOURCES CONFIGURE_DEPENDS src/tasks/radar_io/*.cpp)
+    add_library(${PROJECT_NAME}_radar_io SHARED ${RADAR_IO_SOURCES})
+    target_link_libraries(${PROJECT_NAME}_radar_io
+        ${PROJECT_NAME}_utils
+        ${PROJECT_NAME}_rcl
+    )
     endif()
 else()
     message(WARNING "ROS2 dependencies incomplete, skipping ROS2 targets ...")
@@ -228,11 +234,18 @@ add_common_executable(blind_test src/runtime/test/blind_test.cpp)
 target_link_libraries(blind_test
     ${PROJECT_NAME}_eyes_of_blind
 )
+add_common_executable(hero src/runtime/hero.cpp)
+target_link_libraries(hero
+    ${PROJECT_NAME}_eyes_of_blind
+    ${PROJECT_NAME}_utils
+    ${PROJECT_NAME}_auto_aim
+)
 endif()
 if(BUILD_RADAR)
 add_common_executable(radar_detect src/runtime/radar_detect.cpp)
 target_link_libraries(radar_detect
     ${PROJECT_NAME}_radar_detect
+    ${PROJECT_NAME}_radar_io
 )
 add_common_executable(livox_v1_driver src/runtime/livox_v1_driver.cpp)
 target_link_libraries(livox_v1_driver
@@ -247,6 +260,12 @@ if(ROS2_FULL_FOUND)
 target_link_libraries(auto_aim
     ${PROJECT_NAME}_rcl
 )
+if(BUILD_HERO)
+
+target_link_libraries(hero
+    ${PROJECT_NAME}_rcl
+)
+endif()
 if(BUILD_SENTRY)
 add_common_executable(nav src/runtime/nav.cpp)
 add_common_executable(sentry src/runtime/sentry.cpp)
@@ -262,5 +281,6 @@ target_link_libraries(sentry
     ${PROJECT_NAME}_auto_aim
     ${PROJECT_NAME}_sentry_brain
 )
+
 endif()
 endif()

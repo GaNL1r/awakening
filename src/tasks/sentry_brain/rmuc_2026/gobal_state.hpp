@@ -3,6 +3,8 @@
 #include "utils/logger.hpp"
 #include <algorithm>
 #include <cstdlib>
+#include <unordered_map>
+#include <utility>
 
 namespace awakening::sentry_brain {
 
@@ -10,6 +12,13 @@ class GobalState {
 public:
     enum class SelfColor : bool { Red = 0, Blue = 1 } self_color;
     enum class Pose : uint8_t { UNKNOWEN, Attack, Defend, Move } pose;
+    std::unordered_map<uint8_t, int> pose_acc_time;
+    GobalState() {
+        pose_acc_time[std::to_underlying(Pose::UNKNOWEN)] = 0;
+        pose_acc_time[std::to_underlying(Pose::Attack)] = 0;
+        pose_acc_time[std::to_underlying(Pose::Defend)] = 0;
+        pose_acc_time[std::to_underlying(Pose::Move)] = 0;
+    }
     void update(const SentryRefereeReceive& d) {
         self_color = (d.robo_id > 100) ? SelfColor::Blue : SelfColor::Red;
         current_hp = d.current_hp;
@@ -19,7 +28,7 @@ public:
         }
 
         current_game_time_ = d.game_time;
-
+        enemy_outpost_active_ = d.enemy_outpost_active;
         fort_allowance_bullets_ = d.fort_allowance_bullets;
         current_bullets_ = d.allowance_bullets;
         ally_outpost_hp_ = d.ally_outpost_hp;
@@ -29,17 +38,22 @@ public:
             update_pose(Pose(d.current_pose), current_game_time_);
             update_home_bullets(current_game_time_);
             update_remain_build_outpost_chance(ally_outpost_hp_, ally_base_hp_);
+        } else {
+            pose_acc_time[std::to_underlying(Pose::UNKNOWEN)] = 0;
+            pose_acc_time[std::to_underlying(Pose::Attack)] = 0;
+            pose_acc_time[std::to_underlying(Pose::Defend)] = 0;
+            pose_acc_time[std::to_underlying(Pose::Move)] = 0;
         }
     }
 
     void update_pose(Pose new_pose, int game_time) {
-        if (new_pose != pose) {
-            pose = new_pose;
-            last_change_pose_time_ = game_time;
+        pose_acc_time.at(std::to_underlying(new_pose))++;
+        if (pose_acc_time.at(std::to_underlying(new_pose)) > 170) {
+            AWAKENING_WARN("need change pose");
         }
-        if (std::abs(last_change_pose_time_ - game_time) > 170) {
-            AWAKENING_INFO("need change pose");
-        }
+    }
+    bool pose_active(Pose pose) {
+        return pose_acc_time.at(std::to_underlying(pose)) < 170;
     }
 
     void update_home_bullets(int game_time) {
@@ -100,6 +114,7 @@ public:
     int remain_rebuild_outpost_chance_ = 0;
     int ally_base_hp_ = 0;
     int ally_outpost_hp_ = 0;
+    bool enemy_outpost_active_ = false;
 
 private:
     int last_min_ = 0;

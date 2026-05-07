@@ -107,106 +107,107 @@ public:
     std::unordered_map<int, TheOnlyCar> get_fin_cars() const noexcept {
         return cars_;
     }
-    RoboPositionMsg to_msg(SelfColor self_color) const {
+    static RoboPositionMsg
+    to_msg(SelfColor self_color, const std::unordered_map<int, TheOnlyCar>& cars) {
         RoboPositionMsg msg;
         if (self_color == SelfColor::RED) {
             msg.self_no1_x =
-                cars_.at(std::to_underlying(CarClass::R1)).uwb_state.state.pos().x() * 100.0;
+                cars.at(std::to_underlying(CarClass::R1)).uwb_state.state.pos().x() * 100.0;
             msg.self_no1_y =
-                cars_.at(std::to_underlying(CarClass::R1)).uwb_state.state.pos().y() * 100.0;
+                cars.at(std::to_underlying(CarClass::R1)).uwb_state.state.pos().y() * 100.0;
             msg.self_no2_x =
-                cars_.at(std::to_underlying(CarClass::R2)).uwb_state.state.pos().x() * 100.0;
+                cars.at(std::to_underlying(CarClass::R2)).uwb_state.state.pos().x() * 100.0;
             msg.self_no2_y =
-                cars_.at(std::to_underlying(CarClass::R2)).uwb_state.state.pos().y() * 100.0;
+                cars.at(std::to_underlying(CarClass::R2)).uwb_state.state.pos().y() * 100.0;
             msg.self_no3_x =
-                cars_.at(std::to_underlying(CarClass::R3)).uwb_state.state.pos().x() * 100.0;
+                cars.at(std::to_underlying(CarClass::R3)).uwb_state.state.pos().x() * 100.0;
             msg.self_no3_y =
-                cars_.at(std::to_underlying(CarClass::R3)).uwb_state.state.pos().y() * 100.0;
+                cars.at(std::to_underlying(CarClass::R3)).uwb_state.state.pos().y() * 100.0;
             msg.self_no4_x =
-                cars_.at(std::to_underlying(CarClass::R4)).uwb_state.state.pos().x() * 100.0;
+                cars.at(std::to_underlying(CarClass::R4)).uwb_state.state.pos().x() * 100.0;
             msg.self_no4_y =
-                cars_.at(std::to_underlying(CarClass::R4)).uwb_state.state.pos().y() * 100.0;
+                cars.at(std::to_underlying(CarClass::R4)).uwb_state.state.pos().y() * 100.0;
             msg.self_no6_x =
-                cars_.at(std::to_underlying(CarClass::R6)).uwb_state.state.pos().x() * 100.0;
+                cars.at(std::to_underlying(CarClass::R6)).uwb_state.state.pos().x() * 100.0;
             msg.self_no6_y =
-                cars_.at(std::to_underlying(CarClass::R6)).uwb_state.state.pos().y() * 100.0;
+                cars.at(std::to_underlying(CarClass::R6)).uwb_state.state.pos().y() * 100.0;
             msg.self_no7_x =
-                cars_.at(std::to_underlying(CarClass::R7)).uwb_state.state.pos().x() * 100.0;
+                cars.at(std::to_underlying(CarClass::R7)).uwb_state.state.pos().x() * 100.0;
             msg.self_no7_y =
-                cars_.at(std::to_underlying(CarClass::R7)).uwb_state.state.pos().y() * 100.0;
+                cars.at(std::to_underlying(CarClass::R7)).uwb_state.state.pos().y() * 100.0;
             msg.enemy_no1_x =
-                cars_.at(std::to_underlying(CarClass::B1)).uwb_state.state.pos().x() * 100.0;
+                cars.at(std::to_underlying(CarClass::B1)).uwb_state.state.pos().x() * 100.0;
             msg.enemy_no1_y =
-                cars_.at(std::to_underlying(CarClass::B1)).uwb_state.state.pos().y() * 100.0;
+                cars.at(std::to_underlying(CarClass::B1)).uwb_state.state.pos().y() * 100.0;
             msg.enemy_no2_x =
-                cars_.at(std::to_underlying(CarClass::B2)).uwb_state.state.pos().x() * 100.0;
+                cars.at(std::to_underlying(CarClass::B2)).uwb_state.state.pos().x() * 100.0;
             msg.enemy_no2_y =
-                cars_.at(std::to_underlying(CarClass::B2)).uwb_state.state.pos().y() * 100.0;
+                cars.at(std::to_underlying(CarClass::B2)).uwb_state.state.pos().y() * 100.0;
             msg.enemy_no3_x =
-                cars_.at(std::to_underlying(CarClass::B3)).uwb_state.state.pos().x() * 100.0;
+                cars.at(std::to_underlying(CarClass::B3)).uwb_state.state.pos().x() * 100.0;
             msg.enemy_no3_y =
-                cars_.at(std::to_underlying(CarClass::B3)).uwb_state.state.pos().y() * 100.0;
+                cars.at(std::to_underlying(CarClass::B3)).uwb_state.state.pos().y() * 100.0;
             msg.enemy_no4_x =
-                cars_.at(std::to_underlying(CarClass::B4)).uwb_state.state.pos().x() * 100.0;
+                cars.at(std::to_underlying(CarClass::B4)).uwb_state.state.pos().x() * 100.0;
             msg.enemy_no4_y =
-                cars_.at(std::to_underlying(CarClass::B4)).uwb_state.state.pos().y() * 100.0;
+                cars.at(std::to_underlying(CarClass::B4)).uwb_state.state.pos().y() * 100.0;
             msg.enemy_no6_x =
-                cars_.at(std::to_underlying(CarClass::B6)).uwb_state.state.pos().x() * 100.0;
+                cars.at(std::to_underlying(CarClass::B6)).uwb_state.state.pos().x() * 100.0;
             msg.enemy_no6_y =
-                cars_.at(std::to_underlying(CarClass::B6)).uwb_state.state.pos().y() * 100.0;
+                cars.at(std::to_underlying(CarClass::B6)).uwb_state.state.pos().y() * 100.0;
             msg.enemy_no7_x =
-                cars_.at(std::to_underlying(CarClass::B7)).uwb_state.state.pos().x() * 100.0;
+                cars.at(std::to_underlying(CarClass::B7)).uwb_state.state.pos().x() * 100.0;
             msg.enemy_no7_y =
-                cars_.at(std::to_underlying(CarClass::B7)).uwb_state.state.pos().y() * 100.0;
+                cars.at(std::to_underlying(CarClass::B7)).uwb_state.state.pos().y() * 100.0;
         } else {
             msg.self_no1_x =
-                cars_.at(std::to_underlying(CarClass::B1)).uwb_state.state.pos().x() * 100.0;
+                cars.at(std::to_underlying(CarClass::B1)).uwb_state.state.pos().x() * 100.0;
             msg.self_no1_y =
-                cars_.at(std::to_underlying(CarClass::B1)).uwb_state.state.pos().y() * 100.0;
+                cars.at(std::to_underlying(CarClass::B1)).uwb_state.state.pos().y() * 100.0;
             msg.self_no2_x =
-                cars_.at(std::to_underlying(CarClass::B2)).uwb_state.state.pos().x() * 100.0;
+                cars.at(std::to_underlying(CarClass::B2)).uwb_state.state.pos().x() * 100.0;
             msg.self_no2_y =
-                cars_.at(std::to_underlying(CarClass::B2)).uwb_state.state.pos().y() * 100.0;
+                cars.at(std::to_underlying(CarClass::B2)).uwb_state.state.pos().y() * 100.0;
             msg.self_no3_x =
-                cars_.at(std::to_underlying(CarClass::B3)).uwb_state.state.pos().x() * 100.0;
+                cars.at(std::to_underlying(CarClass::B3)).uwb_state.state.pos().x() * 100.0;
             msg.self_no3_y =
-                cars_.at(std::to_underlying(CarClass::B3)).uwb_state.state.pos().y() * 100.0;
+                cars.at(std::to_underlying(CarClass::B3)).uwb_state.state.pos().y() * 100.0;
             msg.self_no4_x =
-                cars_.at(std::to_underlying(CarClass::B4)).uwb_state.state.pos().x() * 100.0;
+                cars.at(std::to_underlying(CarClass::B4)).uwb_state.state.pos().x() * 100.0;
             msg.self_no4_y =
-                cars_.at(std::to_underlying(CarClass::B4)).uwb_state.state.pos().y() * 100.0;
+                cars.at(std::to_underlying(CarClass::B4)).uwb_state.state.pos().y() * 100.0;
             msg.self_no6_x =
-                cars_.at(std::to_underlying(CarClass::B6)).uwb_state.state.pos().x() * 100.0;
+                cars.at(std::to_underlying(CarClass::B6)).uwb_state.state.pos().x() * 100.0;
             msg.self_no6_y =
-                cars_.at(std::to_underlying(CarClass::B6)).uwb_state.state.pos().y() * 100.0;
+                cars.at(std::to_underlying(CarClass::B6)).uwb_state.state.pos().y() * 100.0;
             msg.self_no7_x =
-                cars_.at(std::to_underlying(CarClass::B7)).uwb_state.state.pos().x() * 100.0;
+                cars.at(std::to_underlying(CarClass::B7)).uwb_state.state.pos().x() * 100.0;
             msg.self_no7_y =
-                cars_.at(std::to_underlying(CarClass::B7)).uwb_state.state.pos().y() * 100.0;
+                cars.at(std::to_underlying(CarClass::B7)).uwb_state.state.pos().y() * 100.0;
             msg.enemy_no1_x =
-                cars_.at(std::to_underlying(CarClass::R1)).uwb_state.state.pos().x() * 100.0;
+                cars.at(std::to_underlying(CarClass::R1)).uwb_state.state.pos().x() * 100.0;
             msg.enemy_no1_y =
-                cars_.at(std::to_underlying(CarClass::R1)).uwb_state.state.pos().y() * 100.0;
+                cars.at(std::to_underlying(CarClass::R1)).uwb_state.state.pos().y() * 100.0;
             msg.enemy_no2_x =
-                cars_.at(std::to_underlying(CarClass::R2)).uwb_state.state.pos().x() * 100.0;
+                cars.at(std::to_underlying(CarClass::R2)).uwb_state.state.pos().x() * 100.0;
             msg.enemy_no2_y =
-                cars_.at(std::to_underlying(CarClass::R2)).uwb_state.state.pos().y() * 100.0;
+                cars.at(std::to_underlying(CarClass::R2)).uwb_state.state.pos().y() * 100.0;
             msg.enemy_no3_x =
-                cars_.at(std::to_underlying(CarClass::R3)).uwb_state.state.pos().x() * 100.0;
+                cars.at(std::to_underlying(CarClass::R3)).uwb_state.state.pos().x() * 100.0;
             msg.enemy_no3_y =
-                cars_.at(std::to_underlying(CarClass::R3)).uwb_state.state.pos().y() * 100.0;
+                cars.at(std::to_underlying(CarClass::R3)).uwb_state.state.pos().y() * 100.0;
             msg.enemy_no4_x =
-                cars_.at(std::to_underlying(CarClass::R4)).uwb_state.state.pos().x() * 100.0;
+                cars.at(std::to_underlying(CarClass::R4)).uwb_state.state.pos().x() * 100.0;
             msg.enemy_no4_y =
-                cars_.at(std::to_underlying(CarClass::R4)).uwb_state.state.pos().y() * 100.0;
+                cars.at(std::to_underlying(CarClass::R4)).uwb_state.state.pos().y() * 100.0;
             msg.enemy_no6_x =
-                cars_.at(std::to_underlying(CarClass::R6)).uwb_state.state.pos().x() * 100.0;
+                cars.at(std::to_underlying(CarClass::R6)).uwb_state.state.pos().x() * 100.0;
             msg.enemy_no6_y =
-                cars_.at(std::to_underlying(CarClass::R6)).uwb_state.state.pos().y() * 100.0;
+                cars.at(std::to_underlying(CarClass::R6)).uwb_state.state.pos().y() * 100.0;
             msg.enemy_no7_x =
-                cars_.at(std::to_underlying(CarClass::R7)).uwb_state.state.pos().x() * 100.0;
+                cars.at(std::to_underlying(CarClass::R7)).uwb_state.state.pos().x() * 100.0;
             msg.enemy_no7_y =
-                cars_.at(std::to_underlying(CarClass::R7)).uwb_state.state.pos().y() * 100.0;
+                cars.at(std::to_underlying(CarClass::R7)).uwb_state.state.pos().y() * 100.0;
         }
         // Implementation for converting car positions to message
         return msg;

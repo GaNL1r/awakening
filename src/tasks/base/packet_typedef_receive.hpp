@@ -108,6 +108,7 @@ struct SentryRefereeReceive {
     uint16_t ally_base_hp;
     uint8_t ally_outpost_occ_state; //0 为未被占领，1 为被己方占领，2 为被对方占领，3 为被双方占领
     uint8_t ally_fort_occ_state; //0 为未被占领，1 为被己方占领，2 为被对方占领，3 为被双方占领
+    uint8_t enemy_outpost_active;
     static std::optional<SentryRefereeReceive> create(const std::vector<uint8_t>& data) {
         if (data.size() != sizeof(SentryRefereeReceive) || data[0] != ID)
             return std::nullopt;
@@ -130,6 +131,7 @@ struct SentryRefereeReceive {
             j["ally_base_hp"] = val(ally_base_hp);
             j["ally_outpost_occ_state"] = val(ally_outpost_occ_state);
             j["ally_fort_occ_state"] = val(ally_fort_occ_state);
+            j["enemy_outpost_active"] = val(enemy_outpost_active);
         });
     }
 } __attribute__((packed));

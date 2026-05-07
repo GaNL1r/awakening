@@ -59,7 +59,7 @@ current_time=$(date +%s)
 find "$WORK_DIR" -type f \
   ! -path "*/build/*" \
   ! -path "*/bin/*" \
-  -newermt "$(date)" \
+  -newermt "$(date '+%Y-%m-%d %H:%M:%S')" \
   -exec touch {} \;
 touch "$WORK_DIR"/src/relink.cpp
 if [[ "$1" == "build" || "$1" == "rebuild" || "$1" == "run" ]]; then

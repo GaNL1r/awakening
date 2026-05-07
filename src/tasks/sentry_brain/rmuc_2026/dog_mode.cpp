@@ -2,6 +2,7 @@
 #include "map.hpp"
 #include "tasks/auto_aim/armor_tracker/armor_target.hpp"
 #include "tasks/sentry_brain/rmuc_2026/gobal_state.hpp"
+#include "utils/common/type_common.hpp"
 #include "utils/logger.hpp"
 #include <Eigen/src/Core/Matrix.h>
 #include <cstdlib>
@@ -15,6 +16,7 @@
 #include <rclcpp/subscription.hpp>
 #include <string>
 #include <thread>
+#include <vector>
 #include <yaml-cpp/node/node.h>
 namespace awakening::sentry_brain {
 struct DogMode::Impl {
@@ -54,7 +56,7 @@ struct DogMode::Impl {
                     odom_in.pose.pose.position.z
                 );
                 p = T * p;
-                current_pos_ = p.head<3>();
+                current_pos_ = p.head<2>();
             }
         );
     }
@@ -121,8 +123,7 @@ struct DogMode::Impl {
         }
         double cur_hp_ratio = double(state_.current_hp) / state_.max_hp;
         if (cur_hp_ratio < params_.go_home_hp_ratio || state_.current_hp < 60) {
-            auto tmp_pose = sentry_pose;
-            sentry_pose = GobalState::Pose::Defend;
+            sentry_pose = GobalState::Pose::Move;
             go<home_t>();
             wait_until(
                 [&]() {
@@ -135,44 +136,77 @@ struct DogMode::Impl {
                 },
                 std::chrono::duration<double>(1.0)
             );
-            sentry_pose = tmp_pose;
             return;
         }
         if (state_.current_bullets_ < params_.home_bullet_num) {
-            auto tmp_pose = sentry_pose;
-            sentry_pose = GobalState::Pose::Move;
             if (state_.home_allowance_bullets_ > 10) {
                 go<home_t>();
+                if (!is_reached<home_t>()) {
+                    sentry_pose = GobalState::Pose::Move;
+                }
             } else {
                 go<ally_fort_t>();
+                if (!is_reached<ally_fort_t>()) {
+                    sentry_pose = GobalState::Pose::Move;
+                }
             }
-            sentry_pose = tmp_pose;
+
             return;
         }
-        if (state_.current_game_time_ < 60) {
-            auto tmp_pose = sentry_pose;
-            sentry_pose = GobalState::Pose::Move;
-            go<enemy_fly_land_t>();
-            sentry_pose = tmp_pose;
+        if (state_.enemy_outpost_active_) {
+            go<ally_highlands_gain_t>();
+            if (is_reached<ally_highlands_gain_t>()) {
+                sentry_pose = GobalState::Pose::Attack;
+            } else {
+                sentry_pose = GobalState::Pose::Move;
+            }
             return;
         }
-        auto tmp_pose = sentry_pose;
-        sentry_pose = GobalState::Pose::Move;
-        go<ally_second_step_bottom_t>();
-        sentry_pose = tmp_pose;
+        if (state_.remain_rebuild_outpost_chance_ > 0) {
+            go<ally_outpost_t>();
+            if (is_reached<ally_outpost_t>()) {
+                sentry_pose = GobalState::Pose::Defend;
+            } else {
+                sentry_pose = GobalState::Pose::Move;
+            }
+            return;
+        }
+        patrol<ally_beijing_tunnel_top_t, enemy_jiansudai_tunnel_top_t>(5.0);
     }
+
     bool in_home() {
         auto& map = RMUC2026Map::instance();
-        return (current_pos_ - map.get<home_t>()).norm() < 0.5;
+        return (current_pos_ - map.get<home_t>().head<2>()).norm() < 0.5;
     }
     template<typename Key>
-    bool wait_reached() {
+    bool is_reached() {
         auto& map = RMUC2026Map::instance();
-        if ((current_pos_ - map.get<Key>()).norm() < 0.5) {
+        if ((current_pos_ - map.get<Key>().template head<2>()).norm() < 0.5) {
             AWAKENING_INFO("{} has reached", Key::name);
             return true;
         }
         return false;
+    }
+    template<typename... Keys>
+    void patrol(double change_dt) {
+        static size_t idx = 0;
+        static TimePoint last_time = Clock::now();
+
+        auto now = Clock::now();
+
+        if (now - last_time < std::chrono::seconds((int)change_dt)) {
+            return;
+        }
+
+        last_time = now;
+
+        using Func = void (*)(decltype(this));
+
+        std::array<std::function<void()>, sizeof...(Keys)> funcs = { [this]() { go<Keys>(); }... };
+
+        funcs[idx]();
+
+        idx = (idx + 1) % funcs.size();
     }
     template<typename Key>
     void go() noexcept {
@@ -180,7 +214,7 @@ struct DogMode::Impl {
         go(map.get<Key>(), Key::name);
     }
     void go(const Vec3& goal, std::string name) noexcept {
-        current_goal_ = goal;
+        current_goal_ = goal.head<2>();
         AWAKENING_INFO("go to {}: x: {} y: {} z: {}", name, goal.x(), goal.y(), goal.z());
     }
 
@@ -188,20 +222,24 @@ struct DogMode::Impl {
         if (!current_goal_) {
             return;
         }
+        if ((current_goal_.value() - current_pos_).norm() < 0.5) {
+            return;
+        }
         geometry_msgs::msg::PoseStamped msg;
         msg.header.stamp = rcl_node_.get_node()->now();
         msg.header.frame_id = "map";
-        msg.pose.position.x = current_goal_->x();
-        msg.pose.position.y = current_goal_->y();
-        msg.pose.position.z = current_goal_->z();
+        msg.pose.position.x = current_goal_.value().x();
+        msg.pose.position.y = current_goal_.value().y();
+        msg.pose.position.z = 0.0;
         goal_pub_->publish(msg);
     }
     GobalState::Pose sentry_pose = GobalState::Pose::Attack;
-    std::optional<Eigen::Vector3d> current_goal_;
+    std::optional<Eigen::Vector2d> current_goal_;
+
     std::thread pub_goal_thread_;
     std::thread tick_thread_;
     GobalState state_;
-    Eigen::Vector3d current_pos_;
+    Eigen::Vector2d current_pos_;
     auto_aim::ArmorTarget target_in_big_yaw_;
     rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr goal_pub_;
     rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_sub_;

@@ -20,7 +20,12 @@ tf:
     #   -0.01339114, -0.98354371, 0.18017339,
     #   -0.09589397, -0.17809578, -0.97932948,]
     # t: [-0.68605672, 1.13893625, 15.32698638]
-
+referee_serial:
+  enable: true
+  device_name: /dev/ttyUSB0
+  baud_rate: 115200
+  char_size: 8
+  read_buf_size: 4096
 detector:
   car_confidence_threshold: 0.2
   armor_confidence_threshold: 0.2
