@@ -3,6 +3,7 @@
 #include "tasks/radar_detect/type.hpp"
 #include <Eigen/src/Core/Matrix.h>
 #include <fstream>
+#include <limits>
 #include <opencv2/core/mat.hpp>
 #include <opencv2/core/types.hpp>
 #include <opencv2/imgcodecs.hpp>
@@ -100,22 +101,24 @@ public:
         int key = std::to_underlying(cc);
         auto guess = robot_guesses[key];
         auto guesses = guess.get_guesses();
-        Eigen::Vector3d predict = guesses.empty() ? Eigen::Vector3d::Zero() : guesses.front();
+        Eigen::Vector3d predict = guess.get_init_guesses();
         double best_score = -1e9;
-
-        for (const auto& point: guesses) {
-            Eigen::Vector3d d_vector = point - last_pos;
-            double dot_product = v_vec.dot(d_vector);
-            double v_norm = v_vec.norm();
-            double d_norm = d_vector.norm();
-            double cos_sim = dot_product / (v_norm * d_norm + 1e-8);
-            double d_score = std::exp(-d_norm * d_factor_);
-            double score = cos_factor_ * cos_sim + (1 - cos_factor_) * d_score;
-            if (score > best_score) {
-                best_score = score;
-                predict = point;
+        if (last_pos.norm() > 0.1) {
+            for (const auto& point: guesses) {
+                Eigen::Vector3d d_vector = point - last_pos;
+                double dot_product = v_vec.dot(d_vector);
+                double v_norm = v_vec.norm();
+                double d_norm = d_vector.norm();
+                double cos_sim = dot_product / (v_norm * d_norm + 1e-8);
+                double d_score = std::exp(-d_norm * d_factor_);
+                double score = cos_factor_ * cos_sim + (1 - cos_factor_) * d_score;
+                if (score > best_score) {
+                    best_score = score;
+                    predict = point;
+                }
             }
         }
+
         return predict;
     }
     void dump_yaml(const std::string& path) const {
@@ -359,6 +362,25 @@ public:
                 guesses.push_back(Eigen::Vector3d(v.x(), v.y(), 0));
             }
             return guesses;
+        }
+        Eigen::Vector3d get_init_guesses() const noexcept {
+            Eigen::Vector3d p = Eigen::Vector3d::Zero();
+            double min_dis = std::numeric_limits<double>::max();
+            Eigen::Vector2d base;
+            int _k = std::to_underlying(car_class_);
+            if (_k < 100) {
+                base = Eigen::Vector2d(2.3, 7.5);
+            } else {
+                base = Eigen::Vector2d(25, 7.5);
+            }
+            for (const auto& [k, v]: guess_positions) {
+                auto dis = (base - v).norm();
+                if (dis < min_dis) {
+                    p = Eigen::Vector3d(v.x(), v.y(), 0);
+                    min_dis = dis;
+                }
+            }
+            return p;
         }
         std::unordered_map<std::string, Eigen::Vector2d> guess_positions;
         CarClass car_class_;

@@ -60,6 +60,24 @@ std::string RadarFrame_to_str(int f) {
 std::string RadarFrame_to_str(RadarFrame f) {
     return RadarFrame_to_str(std::to_underlying(f));
 }
+void draw_star(cv::Mat& img, cv::Point center, int radius, cv::Scalar color, int thickness = -1) {
+    const int num_points = 5;
+    std::vector<cv::Point> pts(2 * num_points);
+
+    double angle = -CV_PI / 2; // 从顶点开始
+    double delta = CV_PI / num_points;
+
+    for (int i = 0; i < 2 * num_points; ++i) {
+        double r = (i % 2 == 0) ? radius : radius / 2.5;
+        pts[i] = cv::Point(
+            static_cast<int>(center.x + r * cos(angle)),
+            static_cast<int>(center.y + r * sin(angle))
+        );
+        angle += delta;
+    }
+
+    cv::fillPoly(img, std::vector<std::vector<cv::Point>> { pts }, color);
+}
 struct LogCtx {
     int image_count;
     int detect_count;
@@ -155,6 +173,17 @@ int main(int argc, char** argv) {
     radar_detect::RadarDebugCtx debug_ctx;
     debug_ctx.map = map.image.clone();
     auto outpost_bbox = utils::load_rect2f(config["outpost_bbox"]);
+    std::vector<cv::Point2f> cal_pts;
+    for (const auto& pt : config["cal_pts"]) {
+        if (pt.size() != 2) {
+            std::cerr << "每个点必须有两个元素" << std::endl;
+            continue;
+        }
+        float x = pt[0].as<float>();
+        float y = pt[1].as<float>();
+        
+        cal_pts.emplace_back(x, y);
+    }
     s.register_task<CameraIO, CommonFrameIo>("push_common_frame", [&](CameraIO::second_type&& f) {
         static int current_id = 0;
         int x = 0;
@@ -207,10 +236,6 @@ int main(int argc, char** argv) {
                 auto end = Clock::now();
                 log_ctx.detect_cost_ms +=
                     std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
-                // std::cout
-                //     << "cost : "
-                //     << std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count()
-                //     << " ms" << std::endl;
             }
         }
 
@@ -275,6 +300,9 @@ int main(int argc, char** argv) {
         for (const auto& o: outpost) {
             o.draw(image);
         }
+        for (const auto& pt : cal_pts) {
+            cv::circle(image, pt, 20, cv::Scalar(255, 0, 255), -1);
+        }
         cv::rectangle(image, outpost_bbox, cv::Scalar(0, 255, 0), 2);
         for (const auto& car: _fin_cars) {
             auto img_point =
@@ -288,7 +316,46 @@ int main(int argc, char** argv) {
                 get_cv_color_from_car(car.second.car_class),
                 2
             );
-            cv::circle(map.image, img_point, 10, get_cv_color_from_car(car.second.car_class), -1);
+            auto vel_end = radar_detect::uwb_to_image(
+                map,
+                car.second.uwb_state.state.pos().head<2>()
+                    + car.second.uwb_state.state.vel().head<2>()
+            );
+            {
+                cv::Point start = img_point;
+                cv::Point end = vel_end;
+
+                // 箭头长度
+                double length = cv::norm(end - start);
+                if (length > 1.0) { // 防止速度过小箭头不可见
+                    double tip_ratio =
+                        std::min(0.3, 0.2 + 0.1 * (length / 50.0)); // tip 长度随箭头长度变化
+                    cv::arrowedLine(
+                        map.image,
+                        start,
+                        end,
+                        get_cv_color_from_car(car.second.car_class),
+                        2, // 线宽
+                        cv::LINE_AA, // 抗锯齿
+                        0,
+                        tip_ratio // 自适应箭头头部
+                    );
+                }
+            }
+            double r = 0.6 / radar_detect::FIELD_LONGTH * map.image.size().width;
+            if (car.second.car_state != radar_detect::CarState::GUESSING) {
+                cv::circle(
+                    map.image,
+                    img_point,
+                    30,
+                    get_cv_color_from_car(car.second.car_class),
+                    -1
+                );
+            } else {
+                draw_star(map.image, img_point, 30, get_cv_color_from_car(car.second.car_class));
+            }
+
+            cv::circle(map.image, img_point, r, get_cv_color_from_car(car.second.car_class), 5);
         }
         cv::imshow("Map", map.image);
         cv::imshow("Video Frame", image);
