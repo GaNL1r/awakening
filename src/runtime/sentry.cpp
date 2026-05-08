@@ -361,7 +361,7 @@ int main(int argc, char** argv) {
                 // wheel_odometry.predict_ekf(packet_time);
                 // wheel_odometry.update(Vec3(vx, vy, vz), packet_time);
                 ISO3 gimbal_odom_in_odom = ISO3::Identity();
-                gimbal_odom_in_odom.translation() = wheel_odometry.state.pos();
+                // gimbal_odom_in_odom.translation() = wheel_odometry.state.pos();
                 tf->push(
                     SentryFrame::ODOM,
                     SentryFrame::GIMBAL_ODOM,
@@ -794,9 +794,13 @@ int main(int argc, char** argv) {
 #endif
         });
 #ifdef USE_ROS2
-        s.add_rate_source<>("tf_pub", 100.0, [&]() {
-            rcl_tf.pub_robot_tf(*tf, [](SentryFrame frame) { return SentryFrame_to_str(frame); });
-        });
+        if (debug) {
+            s.add_rate_source<>("tf_pub", 100.0, [&]() {
+                rcl_tf.pub_robot_tf(*tf, [](SentryFrame frame) {
+                    return SentryFrame_to_str(frame);
+                });
+            });
+        }
 #endif
     }
     auto cmd_sub = rcl_node.make_sub<geometry_msgs::msg::Twist>(

@@ -152,6 +152,7 @@ set(ROS2_PACKAGES
     sensor_msgs
     visualization_msgs
     nav_msgs
+    
 )
 foreach(pkg IN LISTS ROS2_PACKAGES)
     find_package(${pkg} QUIET)
@@ -257,6 +258,10 @@ target_link_libraries(radar_cal
 )
 endif()
 if(ROS2_FULL_FOUND)
+add_common_executable(camera_to_ros2 src/runtime/test/camera_to_ros2.cpp)
+target_link_libraries(camera_to_ros2
+    ${PROJECT_NAME}_rcl
+)
 target_link_libraries(auto_aim
     ${PROJECT_NAME}_rcl
 )

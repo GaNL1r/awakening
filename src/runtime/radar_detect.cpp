@@ -51,7 +51,7 @@ using DetIo = IOPair<DetectTag, std::vector<radar_detect::Cars>>;
 
 struct RefereeSerialTag {};
 using RefereeSerialIO = IOPair<RefereeSerialTag, std::vector<uint8_t>>;
-enum class RadarFrame : int { TARGET_MAP, CAMERA, CAMERA_CV, N };
+enum class RadarFrame : int { TARGET_MAP, CAMERA_CV, N };
 using RadarTF = utils::tf::RobotTF<RadarFrame, static_cast<size_t>(RadarFrame::N), false>;
 std::string RadarFrame_to_str(int f) {
     constexpr const char* details[] = { "target_map", "camera_cv" };
@@ -60,7 +60,18 @@ std::string RadarFrame_to_str(int f) {
 std::string RadarFrame_to_str(RadarFrame f) {
     return RadarFrame_to_str(std::to_underlying(f));
 }
-
+struct LogCtx {
+    int image_count;
+    int detect_count;
+    double detect_cost_ms;
+    int receive_referee_count;
+    void reset() {
+        image_count = 0;
+        detect_count = 0;
+        detect_cost_ms = 0;
+        receive_referee_count = 0;
+    }
+};
 int main(int argc, char** argv) {
     print_banner();
     auto& signal = utils::SignalGuard::instance();
@@ -80,6 +91,7 @@ int main(int argc, char** argv) {
     } else {
         return 1;
     }
+    LogCtx log_ctx;
     auto config = YAML::LoadFile(config_path);
     auto camera_config = config["camera"];
     CameraInfo camera_info;
@@ -88,16 +100,16 @@ int main(int argc, char** argv) {
     rcl::RclcppNode rcl_node("radar_detect");
     rcl::TF rcl_tf(rcl_node);
     RadarTF tf;
-
     {
-        tf.add_edge(RadarFrame::TARGET_MAP, RadarFrame::CAMERA);
-        tf.add_edge(RadarFrame::CAMERA, RadarFrame::CAMERA_CV);
-        ISO3 camera_cv_in_camera = ISO3::Identity();
-        camera_cv_in_camera.linear() = R_CV2PHYSICS;
-        tf.push(RadarFrame::CAMERA, RadarFrame::CAMERA_CV, Clock::now(), camera_cv_in_camera);
-        ISO3 camera_in_target_map = utils::load_isometry3(config["tf"]["camera_in_target_map"]);
-
-        tf.push(RadarFrame::TARGET_MAP, RadarFrame::CAMERA, Clock::now(), camera_in_target_map);
+        tf.add_edge(RadarFrame::TARGET_MAP, RadarFrame::CAMERA_CV);
+        ISO3 camera_cv_in_target_map =
+            utils::load_isometry3(config["tf"]["camera_cv_in_target_map"]);
+        tf.push(
+            RadarFrame::TARGET_MAP,
+            RadarFrame::CAMERA_CV,
+            Clock::now(),
+            camera_cv_in_target_map
+        );
     }
     std::unique_ptr<VideoPlayer> video;
     std::unique_ptr<HikCamera> camera;
@@ -120,7 +132,9 @@ int main(int argc, char** argv) {
         }
     }
     std::unique_ptr<SerialDriver> referee_serial;
-    referee_serial = std::make_unique<SerialDriver>(config["referee_serial"], s);
+    if (config["referee_serial"]["enable"].as<bool>()) {
+        referee_serial = std::make_unique<SerialDriver>(config["referee_serial"], s);
+    }
     bool enemy_outpost_active = false;
     utils::OrderedQueue<radar_detect::Cars> cars_queue;
     radar_detect::SelfColor self_color =
@@ -154,6 +168,7 @@ int main(int argc, char** argv) {
             .expanded = cv::Rect(x, y, w, h),
             .offset = cv::Point2f(x, y),
         };
+        log_ctx.image_count++;
 
         return std::make_tuple(std::optional<CommonFrameIo::second_type>(std::move(frame)));
     });
@@ -171,6 +186,7 @@ int main(int argc, char** argv) {
             bool got = detector_sem->try_acquire();
             utils::SemaphoreGuard guard(*detector_sem, got);
             if (got) {
+                log_ctx.detect_count++;
                 auto start = Clock::now();
                 cars.cars = detector.detect(frame);
                 utils::dt_once(
@@ -189,6 +205,8 @@ int main(int argc, char** argv) {
                     std::chrono::duration<double>(1.0)
                 );
                 auto end = Clock::now();
+                log_ctx.detect_cost_ms +=
+                    std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
                 // std::cout
                 //     << "cost : "
                 //     << std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count()
@@ -205,6 +223,7 @@ int main(int argc, char** argv) {
                     car.point_in_uwb.x() = radar_detect::FIELD_LONGTH - car.point_in_uwb.x();
                     car.point_in_uwb.y() = radar_detect::FIELD_WIDTH - car.point_in_uwb.y();
                 }
+
                 valid_cars.push_back(car);
             }
         }
@@ -227,6 +246,16 @@ int main(int argc, char** argv) {
     cv::resizeWindow("Video Frame", 800, 600);
     cv::namedWindow("Map", cv::WINDOW_NORMAL);
     cv::resizeWindow("Map", 800, 600);
+    auto get_cv_color_from_car = [&](radar_detect::CarClass c) {
+        int k = std::to_underlying(c);
+        if (k < 0) {
+            return cv::Scalar(0, 255, 0);
+        } else if (k < 100) {
+            return cv::Scalar(0, 0, 255);
+        } else {
+            return cv::Scalar(255, 0, 0);
+        }
+    };
     s.add_rate_source<>("debug", 10.0, [&]() {
         auto image = debug_ctx.img_frame.get().src_img;
         if (image.empty()) {
@@ -246,6 +275,7 @@ int main(int argc, char** argv) {
         for (const auto& o: outpost) {
             o.draw(image);
         }
+        cv::rectangle(image, outpost_bbox, cv::Scalar(0, 255, 0), 2);
         for (const auto& car: _fin_cars) {
             auto img_point =
                 radar_detect::uwb_to_image(map, car.second.uwb_state.state.pos().head<2>());
@@ -254,11 +284,11 @@ int main(int argc, char** argv) {
                 radar_detect::CarClass_to_str(car.second.car_class),
                 img_point,
                 cv::FONT_HERSHEY_SIMPLEX,
-                5.0,
-                cv::Scalar(0, 255, 0),
+                3.0,
+                get_cv_color_from_car(car.second.car_class),
                 2
             );
-            cv::circle(map.image, img_point, 10, cv::Scalar(0, 255, 0), -1);
+            cv::circle(map.image, img_point, 10, get_cv_color_from_car(car.second.car_class), -1);
         }
         cv::imshow("Map", map.image);
         cv::imshow("Video Frame", image);
@@ -268,6 +298,7 @@ int main(int argc, char** argv) {
     radar_io::RadarCmd radar_cmd;
     radar_io::MapRobotData map_robot_data;
     auto parse_referee = [&](uint16_t cmd_id, uint8_t* data, size_t len) {
+        log_ctx.receive_referee_count++;
         auto data_vec = std::vector<uint8_t>(data, data + len);
         auto cmd = radar_io::CMDID(cmd_id);
         switch (cmd) {
@@ -294,56 +325,59 @@ int main(int argc, char** argv) {
             }
         }
     };
-    s.register_task<RefereeSerialIO>(
-        "receive_referee_serial",
-        [&](RefereeSerialIO::second_type&& data) {
-            static std::deque<uint8_t> rx_buffer;
-            rx_buffer.insert(rx_buffer.end(), data.begin(), data.end());
+    if (referee_serial) {
+        s.register_task<RefereeSerialIO>(
+            "receive_referee_serial",
+            [&](RefereeSerialIO::second_type&& data) {
+                static std::deque<uint8_t> rx_buffer;
+                rx_buffer.insert(rx_buffer.end(), data.begin(), data.end());
 
-            while (true) {
-                if (rx_buffer.size() < 5)
-                    return;
+                while (true) {
+                    if (rx_buffer.size() < 5)
+                        return;
 
-                while (!rx_buffer.empty() && rx_buffer.front() != 0xA5) {
-                    rx_buffer.pop_front();
+                    while (!rx_buffer.empty() && rx_buffer.front() != 0xA5) {
+                        rx_buffer.pop_front();
+                    }
+
+                    if (rx_buffer.size() < 5)
+                        return;
+
+                    radar_io::FrameHeader header;
+
+                    header.sof = rx_buffer[0];
+                    header.data_length = rx_buffer[1] | (rx_buffer[2] << 8);
+
+                    header.seq = rx_buffer[3];
+                    header.crc8 = rx_buffer[4];
+                    if (!radar_io::verify_crc8(&rx_buffer[0], static_cast<uint32_t>(5))) {
+                        rx_buffer.pop_front();
+                        AWAKENING_WARN("crc8 failed");
+                        continue;
+                    }
+                    size_t full_len = 5 + // frame_header
+                        2 + // cmd_id
+                        header.data_length + 2; // crc16
+                    if (rx_buffer.size() < full_len)
+                        return;
+
+                    std::vector<uint8_t> frame(rx_buffer.begin(), rx_buffer.begin() + full_len);
+                    if (!radar_io::verify_crc16(frame.data(), full_len)) {
+                        rx_buffer.pop_front();
+                        AWAKENING_WARN("crc16 failed");
+                        continue;
+                    }
+
+                    uint16_t cmd_id = frame[5] | (frame[6] << 8);
+                    uint8_t* payload = frame.data() + 7;
+                    parse_referee(cmd_id, payload, static_cast<uint32_t>(header.data_length));
+
+                    rx_buffer.erase(rx_buffer.begin(), rx_buffer.begin() + full_len);
                 }
-
-                if (rx_buffer.size() < 5)
-                    return;
-
-                radar_io::FrameHeader header;
-
-                header.sof = rx_buffer[0];
-                header.data_length = rx_buffer[1] | (rx_buffer[2] << 8);
-
-                header.seq = rx_buffer[3];
-                header.crc8 = rx_buffer[4];
-                if (!radar_io::verify_crc8(&rx_buffer[0], static_cast<uint32_t>(5))) {
-                    rx_buffer.pop_front();
-                    AWAKENING_WARN("crc8 failed");
-                    continue;
-                }
-                size_t full_len = 5 + // frame_header
-                    2 + // cmd_id
-                    header.data_length + 2; // crc16
-                if (rx_buffer.size() < full_len)
-                    return;
-
-                std::vector<uint8_t> frame(rx_buffer.begin(), rx_buffer.begin() + full_len);
-                if (!radar_io::verify_crc16(frame.data(), full_len)) {
-                    rx_buffer.pop_front();
-                    AWAKENING_WARN("crc16 failed");
-                    continue;
-                }
-
-                uint16_t cmd_id = frame[5] | (frame[6] << 8);
-                uint8_t* payload = frame.data() + 7;
-                parse_referee(cmd_id, payload, static_cast<uint32_t>(header.data_length));
-
-                rx_buffer.erase(rx_buffer.begin(), rx_buffer.begin() + full_len);
             }
-        }
-    );
+        );
+    }
+
     s.add_rate_source<>("main", 30.0, [&]() {
         auto _fin_cars = fin_cars.read();
         auto msg = radar_detect::CarPool::to_msg(self_color, _fin_cars);
@@ -385,13 +419,13 @@ int main(int argc, char** argv) {
         std::memcpy(to_no1.user_data, s.data(), copy_bytes);
 
         radar_cmd.radar_cmd = 0;
-        radar_cmd.password_cmd =1;
-        radar_cmd.password_1 =1;
-        radar_cmd.password_2 =1;
-        radar_cmd.password_3 =1;
-        radar_cmd.password_4 =1;
-        radar_cmd.password_5 =1;
-        radar_cmd.password_6 =1;
+        radar_cmd.password_cmd = 1;
+        radar_cmd.password_1 = 1;
+        radar_cmd.password_2 = 1;
+        radar_cmd.password_3 = 1;
+        radar_cmd.password_4 = 1;
+        radar_cmd.password_5 = 1;
+        radar_cmd.password_6 = 1;
         auto _radar_cmd = radar_io::RobotInteractionData::create(
             self_color == radar_detect::SelfColor::RED ? 9 : 109,
             0x8080,
@@ -418,6 +452,19 @@ int main(int argc, char** argv) {
     if (referee_serial) {
         referee_serial->start<RefereeSerialTag>("referee_serial");
     }
+    s.add_rate_source<>("tf_pub", 100.0, [&]() {
+        rcl_tf.pub_robot_tf(tf, [](RadarFrame frame) { return RadarFrame_to_str(frame); });
+    });
+    s.add_rate_source<>("log", 1.0, [&]() {
+        AWAKENING_INFO(
+            "img: {}, det: {},avg_cost: {:.2f}ms, referee: {}",
+            log_ctx.image_count,
+            log_ctx.detect_count,
+            log_ctx.detect_cost_ms / (log_ctx.detect_count ? log_ctx.detect_count : 1),
+            log_ctx.receive_referee_count
+        );
+        log_ctx.reset();
+    });
     s.build();
     s.run();
     std::thread([&]() { rcl_node.spin(); }).detach();

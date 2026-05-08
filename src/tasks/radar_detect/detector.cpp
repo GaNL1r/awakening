@@ -211,7 +211,6 @@ struct Detector::Impl {
         }
 
         if (car_ctxs.empty()) {
-            std::cerr << "No valid car images found!" << std::endl;
             return cars;
         }
 

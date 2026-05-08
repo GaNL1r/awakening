@@ -175,6 +175,8 @@ public:
         insert(self_3);
         out << "self_4:\n";
         insert(self_4);
+        out << "self_6:\n";
+        insert(self_6);
         out << "self_7:\n";
         insert(self_7);
         out << "enemy_1:\n";
@@ -185,6 +187,8 @@ public:
         insert(enemy_3);
         out << "enemy_4:\n";
         insert(enemy_4);
+        out << "enemy_6:\n";
+        insert(enemy_6);
         out << "enemy_7:\n";
         insert(enemy_7);
     }

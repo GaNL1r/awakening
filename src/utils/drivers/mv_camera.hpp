@@ -46,7 +46,7 @@ public:
         AWAKENING_INFO("Starting image capture loop!");
         tSdkFrameHead head;
         BYTE* raw;
-
+        int fail_count = 0;
         while (running_) {
             std::this_thread::sleep_for(std::chrono::milliseconds(1));
 
@@ -78,7 +78,11 @@ public:
                 });
             } else {
                 AWAKENING_ERROR("Failed to get image buffer!");
-                break;
+                fail_count++;
+                if (fail_count > 10) {
+                    AWAKENING_ERROR("Too many failures, exiting image capture loop.");
+                    break;
+                }
             }
         }
         AWAKENING_INFO("Exiting image capture loop.");
