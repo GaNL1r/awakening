@@ -270,7 +270,6 @@ int main(int argc, char** argv) {
     auto parse_referee = [&](uint16_t cmd_id, uint8_t* data, size_t len) {
         auto data_vec = std::vector<uint8_t>(data, data + len);
         auto cmd = radar_io::CMDID(cmd_id);
-        // std::cout<<"hello"<<std::endl;
         switch (cmd) {
             case radar_io::CMDID::RoboStatus: {
                 auto r = utils::from_vector<radar_io::RoboStatus>(data_vec);
@@ -374,14 +373,38 @@ int main(int argc, char** argv) {
         map_robot_data.ally_sentry_position_y = msg.self_no7_y;
         radar_io::CustomInfo to_no1;
         to_no1.sender_id = self_color == radar_detect::SelfColor::RED ? 9 : 109;
-        to_no1.receiver_id = self_color == radar_detect::SelfColor::RED ? 1 : 101;
-        std::u16string s = u"你好";
-        std::memcpy(to_no1.user_data, s.data(), s.size() * sizeof(char16_t));
+        to_no1.receiver_id = self_color == radar_detect::SelfColor::RED ? 0x0101 : 0x0165;
+        constexpr size_t max_bytes = sizeof(to_no1.user_data);
+
+        std::u16string s = u"aaa";
+
+        std::memset(to_no1.user_data, 0, max_bytes);
+
+        size_t copy_bytes = std::min(s.size() * sizeof(char16_t), max_bytes - 2);
+
+        std::memcpy(to_no1.user_data, s.data(), copy_bytes);
+
+        radar_cmd.radar_cmd = 0;
+        radar_cmd.password_cmd =1;
+        radar_cmd.password_1 =1;
+        radar_cmd.password_2 =1;
+        radar_cmd.password_3 =1;
+        radar_cmd.password_4 =1;
+        radar_cmd.password_5 =1;
+        radar_cmd.password_6 =1;
+        auto _radar_cmd = radar_io::RobotInteractionData::create(
+            self_color == radar_detect::SelfColor::RED ? 9 : 109,
+            0x8080,
+            radar_cmd
+        );
         if (referee_serial) {
             if (!referee_serial->write(radar_io::pack_frame(map_robot_data))) {
                 AWAKENING_ERROR("FUCK");
             }
             if (!referee_serial->write(radar_io::pack_frame(to_no1))) {
+                AWAKENING_ERROR("FUCK");
+            }
+            if (!referee_serial->write(radar_io::pack_frame(_radar_cmd))) {
                 AWAKENING_ERROR("FUCK");
             }
         }

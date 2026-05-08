@@ -402,3 +402,6 @@ brain:
   home: 
     go_home_hp_ratio: 0.4
     home_bullet_num: 10
+  dog:
+    go_home_hp_ratio: 0.4
+    home_bullet_num: 10

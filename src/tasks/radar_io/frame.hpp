@@ -151,7 +151,23 @@ enum class CMDID : uint16_t {
     RadarMark = RadarMark::CMDID,
     RadarInfo = RadarInfo::CMDID,
 };
-
+struct RobotInteractionData {
+    static constexpr uint16_t CMDID = 0x0301;
+    uint16_t data_cmd_id;
+    uint16_t sender_id;
+    uint16_t receiver_id;
+    // uint8_t user_data[];
+    std::vector<uint8_t> user_data;
+    template<class T>
+    static RobotInteractionData create(uint16_t sender_id, uint16_t receiver_id, const T& data) {
+        RobotInteractionData d;
+        d.data_cmd_id = T::CMDID;
+        d.sender_id = sender_id;
+        d.receiver_id = receiver_id;
+        d.user_data = utils::to_vector(data);
+        return d;
+    }
+};
 struct RadarCmd {
     static constexpr uint16_t CMDID = 0X0121;
     uint8_t radar_cmd;
@@ -194,6 +210,6 @@ struct CustomInfo {
     static constexpr uint16_t CMDID = 0x0308;
     uint16_t sender_id;
     uint16_t receiver_id;
-    uint8_t user_data[30] = { 0 };
+    uint8_t user_data[30];
 };
 } // namespace awakening::radar_io

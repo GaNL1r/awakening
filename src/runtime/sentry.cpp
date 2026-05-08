@@ -207,10 +207,10 @@ int main(int argc, char** argv) {
     rcl::TF rcl_tf(rcl_node);
 #endif
 
-    std::unique_ptr<SerialDriver> serial;
+    std::shared_ptr<SerialDriver> serial;
     if (!player) {
         if (config["serial"]["enable"].as<bool>()) {
-            serial = std::make_unique<SerialDriver>(config["serial"], s);
+            serial = std::make_shared<SerialDriver>(config["serial"], s);
         }
     }
     int serial_send_to_image_microseconds = config["serial_send_to_image_microseconds"].as<int>();
@@ -240,7 +240,7 @@ int main(int argc, char** argv) {
     utils::OrderedQueue<auto_aim::Armors> armors_queue;
     utils::SWMR<auto_aim::ArmorTarget> armor_target;
     utils::SWMR<auto_aim::ArmorTarget> omni_armor_target;
-    auto brain = sentry_brain::create_brain_mode(rcl_node, rcl_tf, config["brain"]);
+    auto brain = sentry_brain::create_brain_mode(rcl_node, rcl_tf, config["brain"], serial);
     armor_omni.emplace_one(
         config["armor_omni"]["camera0"],
         std::to_underlying(SentryFrame::OMNI_0),
@@ -815,6 +815,7 @@ int main(int argc, char** argv) {
             }
         }
     );
+
     rcl_node.push_sub(cmd_sub);
 
     if (player) {
@@ -839,6 +840,9 @@ int main(int argc, char** argv) {
         if (serial) {
             serial->start<SerialTag>("serial");
         }
+    }
+    if (brain) {
+        brain->start();
     }
     s.build();
     s.run();
