@@ -17,6 +17,7 @@ public:
 
     void push_frame(const cv::Mat& frame);
     bool try_pop_packet(BlindSend& out);
+    void pull_and_packetize(); 
     struct Impl;
     std::unique_ptr<Impl> _impl;
 };

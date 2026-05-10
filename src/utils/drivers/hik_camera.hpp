@@ -58,32 +58,36 @@ public:
     void hik_capture_loop() {
         AWAKENING_INFO("Starting image capture loop!");
         Frame frame;
+        static int grab_total = 0;  // 新增帧计数
+
         while (running_) {
             std::this_thread::sleep_for(std::chrono::milliseconds(1));
             int n_ret = MV_CC_GetImageBuffer(camera_handle_, &frame.out_frame, 100);
             if (n_ret == MV_OK) {
+                // grab_total++;
+                // AWAKENING_INFO("Camera grabbed frame #{}", grab_total);  //  心跳
+
                 const auto current_time = std::chrono::steady_clock::now();
-
-                const auto half_exposure =
-                    std::chrono::microseconds(static_cast<long>(get_ExposureTime() / 2));
-
+                const auto half_exposure = std::chrono::microseconds(static_cast<long>(get_ExposureTime() / 2));
                 frame.timestamp = current_time - half_exposure;
+
                 auto img_frame = to_image_frame(frame);
                 scheduler_.runtime_push_source<IO>(
                     source_snapshot_id_,
                     [f = std::move(img_frame)]() {
-                        return std::make_tuple(std::optional<typename IO::second_type>(std::move(f))
-                        );
+                        return std::make_tuple(std::optional<typename IO::second_type>(std::move(f)));
                     }
                 );
+
+                // 释放 buffer
+                MV_CC_FreeImageBuffer(camera_handle_, &frame.out_frame);
             } else {
-                AWAKENING_ERROR("Failed to get image buffer!");
+                AWAKENING_ERROR("Failed to get image buffer, ret=0x{:X}", n_ret);
                 break;
             }
         }
         AWAKENING_INFO("Exiting image capture loop.");
     }
-
     const std::unordered_map<MvGvspPixelType, int> CVT_MAP_BGR = {
         { PixelType_Gvsp_BayerGR8, cv::COLOR_BayerGR2RGB },
         { PixelType_Gvsp_BayerRG8, cv::COLOR_BayerRG2RGB },
