@@ -7,6 +7,7 @@
 #include <chrono>
 #include <cstdint>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <utility>
@@ -321,7 +322,11 @@ int main(int argc, char** argv) {
 #endif
     s.register_task<CameraIO, CommonFrameIo>("push_common_frame", [&](CameraIO::second_type&& f) {
         static int current_id = 0;
+        if (f.src_img.empty()) {
+            return std::make_tuple(std::optional<CommonFrameIo::second_type>(std::nullopt));
+        }
         log_ctx.camera_count++;
+
         if (recorder) {
             utils::dt_once(
                 [&]() { recorder->record<CameraTag>(f); },
@@ -360,6 +365,8 @@ int main(int argc, char** argv) {
     });
     if (serial || player) {
         s.register_task<SerialIO>("receive_serial", [&](SerialIO::second_type&& data) {
+            static std::mutex mutex;
+            std::lock_guard<std::mutex> lock(mutex);
             if (recorder) {
                 utils::dt_once(
                     [&]() { recorder->record<SerialTag>(data); },
@@ -420,6 +427,8 @@ int main(int argc, char** argv) {
     }
     if (camera) {
         s.register_task<CommonFrameIo>("auto_exposure", [&](CommonFrameIo::second_type&& frame) {
+            static std::mutex mutex;
+            std::lock_guard<std::mutex> lock(mutex);
             struct AutoExposureCfg {
                 bool enable = false;
                 double ttarget_brightness;
@@ -504,6 +513,8 @@ int main(int argc, char** argv) {
     });
 
     s.register_task<DetIo>("tracker", [&](DetIo::second_type&& io) {
+        static std::mutex mutex;
+        std::lock_guard<std::mutex> lock(mutex);
         for (const auto& armors_raw: io) {
             auto armors = armors_raw;
             armors.armors.clear();

@@ -46,6 +46,10 @@ struct CameraInfo {
         camera_matrix = K.clone();
         distortion_coefficients = D.clone();
     }
+    CameraInfo clone() const {
+        return { .camera_matrix = this->camera_matrix.clone(),
+                 .distortion_coefficients = this->distortion_coefficients.clone() };
+    }
 };
 struct AimPoint {
     ISO3 pose;

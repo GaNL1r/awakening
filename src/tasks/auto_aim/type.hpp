@@ -176,7 +176,7 @@ inline std::vector<PointT> getArmorKeyPoints3D(ArmorClass armor_class) {
 enum class ArmorColor : int { BLUE = 0, RED, NONE, PURPLE };
 
 constexpr int armor_num_by_armor_class(const ArmorClass& armor_class) {
-    constexpr std::array details { 4, 4, 4, 4, 4, 4, 3, 4, 4 };
+    constexpr std::array details { 4, 4, 4, 4, 4, 4, 3, 1, 4 };
     return details[std::to_underlying(armor_class)];
 }
 inline std::string string_by_armor_color(ArmorColor armor_color) {

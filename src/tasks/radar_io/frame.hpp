@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <optional>
 #include <vector>
 namespace awakening::radar_io {
 enum class RoboID : uint16_t {
@@ -217,6 +218,22 @@ struct RadarCmd {
     uint8_t password_5;
     uint8_t password_6;
 } __attribute__((packed));
+struct ToSenrty {
+    static constexpr uint16_t CMDID = 0x0200;
+    uint8_t enemy_outpost_active;
+    uint16_t opponent_hero_position_x;
+    uint16_t opponent_hero_position_y;
+    uint16_t opponent_engineer_position_x;
+    uint16_t opponent_engineer_position_y;
+    uint16_t opponent_infantry_3_position_x;
+    uint16_t opponent_infantry_3_position_y;
+    uint16_t opponent_infantry_4_position_x;
+    uint16_t opponent_infantry_4_position_y;
+    uint16_t opponent_aerial_position_x;
+    uint16_t opponent_aerial_position_y;
+    uint16_t opponent_sentry_position_x;
+    uint16_t opponent_sentry_position_y;
+};
 struct MapRobotData {
     static constexpr uint16_t CMDID = 0x0305;
     uint16_t opponent_hero_position_x;
@@ -249,5 +266,76 @@ struct CustomInfo {
     uint16_t sender_id;
     uint16_t receiver_id;
     uint8_t user_data[30];
+} __attribute__((packed));
+/*===| 雷达无线链路-对方机器人位置 |===*/
+struct RF_Pos {
+    int16_t Robo_1_X_cm;
+    int16_t Robo_1_Y_cm;
+    int16_t Robo_2_X_cm;
+    int16_t Robo_2_Y_cm;
+    int16_t Robo_3_X_cm;
+    int16_t Robo_3_Y_cm;
+    int16_t Robo_4_X_cm;
+    int16_t Robo_4_Y_cm;
+    int16_t Robo_6_X_cm;
+    int16_t Robo_6_Y_cm;
+    int16_t Robo_5_X_cm;
+    int16_t Robo_5_Y_cm;
+} __attribute__((packed));
+
+/*===| 雷达无线链路-对方机器人血量 |===*/
+struct RF_Hp {
+    int16_t Robo_1_HP;
+    int16_t Robo_2_HP;
+    int16_t Robo_3_HP;
+    int16_t Robo_4_HP;
+    int16_t reserve;
+    int16_t Robo_7_HP;
+} __attribute__((packed));
+
+/*===| 雷达无线链路-对方机器人允许发弹量 |===*/
+struct RF_Bullet {
+    int16_t Robo_1_Bullet;
+    int16_t Robo_3_Bullet;
+    int16_t Robo_4_Bullet;
+    int16_t Robo_6_Bullet;
+    int16_t Robo_7_Bullet;
+} __attribute__((packed));
+
+/*===| 雷达无线链路-对方金币与占领状态 |===*/
+struct RF_State {
+    int16_t Remain_Coin;
+    int16_t Total_Coin;
+    int32_t RFID_State;
+} __attribute__((packed));
+
+/*===| 雷达无线链路-干扰波秘钥 |===*/
+struct RF_key {
+    uint8_t Key[6];
+} __attribute__((packed));
+struct FromWifi {
+    static constexpr uint16_t CMDID = 0x06;
+    uint8_t cmd_ID;
+    RF_Pos RF_Position_Struct; //对方机器人位置
+    RF_Hp RF_HP_Struct; //对方机器人血量
+    RF_Bullet RF_Bullet_Struct; //对方机器人允许发弹量
+    RF_State RF_Coin_RFID_Struct; //对方金币与占领状态
+    RF_key RF_Key_Struct; //干扰波秘钥
+    uint32_t rf_info_count;
+    uint32_t rf_jam_count;
+    static std::optional<FromWifi> create(const std::vector<uint8_t>& data) {
+        if (data.size() != sizeof(FromWifi) || data[0] != CMDID)
+            return std::nullopt;
+
+        FromWifi out;
+        std::memcpy(&out, data.data(), sizeof(out));
+        return out;
+    }
+};
+struct ToWifi {
+    static constexpr uint16_t CMDID = 0x06;
+    uint8_t cmd_id;
+    uint8_t robot_id;
+    uint8_t jam_level;
 };
 } // namespace awakening::radar_io

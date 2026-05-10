@@ -72,9 +72,9 @@ include_directories(${PROJECT_NAME}_utils PUBLIC
     ${CMAKE_BINARY_DIR}/src
     ${OpenCV_INCLUDE_DIRS}
 )
-file(GLOB_RECURSE UTILS_SOURCES CONFIGURE_DEPENDS src/utils/*.cpp 3rdparty/*.cpp 3rdparty/*.c)
+file(GLOB_RECURSE UTILS_SOURCES  src/utils/*.cpp 3rdparty/*.cpp 3rdparty/*.c)
 if(BUILD_WITH_TRT)
-    file(GLOB_RECURSE UTILS_CUDA_SOURCES CONFIGURE_DEPENDS src/utils/*.cu)
+    file(GLOB_RECURSE UTILS_CUDA_SOURCES  src/utils/*.cu)
     list(APPEND UTILS_SOURCES ${UTILS_CUDA_SOURCES})
 endif()
 add_library(${PROJECT_NAME}_utils SHARED ${UTILS_SOURCES})
@@ -92,7 +92,7 @@ target_link_libraries(${PROJECT_NAME}_utils
     ${BUILD_LIBS}
     
 )
-file(GLOB_RECURSE AUTO_AIM_SOURCES CONFIGURE_DEPENDS src/tasks/auto_aim/*.cpp)
+file(GLOB_RECURSE AUTO_AIM_SOURCES  src/tasks/auto_aim/*.cpp)
 add_library(${PROJECT_NAME}_auto_aim SHARED ${AUTO_AIM_SOURCES})
 target_link_libraries(${PROJECT_NAME}_auto_aim
      ${PROJECT_NAME}_utils
@@ -121,7 +121,7 @@ else()
     message(FATAL_ERROR "Paho MQTT C++ not found")
 endif()
 
-file(GLOB_RECURSE BLIND_SOURCES CONFIGURE_DEPENDS src/tasks/eyes_of_blind/*.cpp)
+file(GLOB_RECURSE BLIND_SOURCES  src/tasks/eyes_of_blind/*.cpp)
 list(APPEND BLIND_SOURCES ${PROTO_SRCS})
 add_library(${PROJECT_NAME}_eyes_of_blind SHARED ${BLIND_SOURCES})
 target_include_directories(${PROJECT_NAME}_eyes_of_blind
@@ -178,7 +178,7 @@ if(ROS2_FULL_FOUND)
         endif()
     endforeach()
     include_directories(${ROS2_INCLUDES})
-    file(GLOB_RECURSE RCL_SOURCES CONFIGURE_DEPENDS src/_rcl/*.cpp)
+    file(GLOB_RECURSE RCL_SOURCES  src/_rcl/*.cpp)
     add_library(
         ${PROJECT_NAME}_rcl SHARED ${RCL_SOURCES}
     )
@@ -188,7 +188,7 @@ if(ROS2_FULL_FOUND)
     ament_target_dependencies(${PROJECT_NAME}_rcl  ${ROS2_PACKAGES})
     target_compile_definitions(${PROJECT_NAME}_rcl  PUBLIC ${BUILD_DEFINITIONS})
     if(BUILD_SENTRY)
-    file(GLOB_RECURSE SENTRY_BRAIN_SOURCES CONFIGURE_DEPENDS src/tasks/sentry_brain/*.cpp)
+    file(GLOB_RECURSE SENTRY_BRAIN_SOURCES  src/tasks/sentry_brain/*.cpp)
     add_library(${PROJECT_NAME}_sentry_brain SHARED ${SENTRY_BRAIN_SOURCES})
     target_link_libraries(${PROJECT_NAME}_sentry_brain
         ${PROJECT_NAME}_rcl
@@ -198,14 +198,14 @@ if(ROS2_FULL_FOUND)
     if(BUILD_RADAR)
     find_package(small_gicp REQUIRED)
     find_package(Open3D REQUIRED)
-    file(GLOB_RECURSE RADAR_DETECT_SOURCES CONFIGURE_DEPENDS src/tasks/radar_detect/*.cpp)
+    file(GLOB_RECURSE RADAR_DETECT_SOURCES  src/tasks/radar_detect/*.cpp)
     add_library(${PROJECT_NAME}_radar_detect SHARED ${RADAR_DETECT_SOURCES})
     target_link_libraries(${PROJECT_NAME}_radar_detect
         ${PROJECT_NAME}_utils
         ${PROJECT_NAME}_rcl
         Open3D::Open3D
     )
-    file(GLOB_RECURSE RADAR_IO_SOURCES CONFIGURE_DEPENDS src/tasks/radar_io/*.cpp)
+    file(GLOB_RECURSE RADAR_IO_SOURCES  src/tasks/radar_io/*.cpp)
     add_library(${PROJECT_NAME}_radar_io SHARED ${RADAR_IO_SOURCES})
     target_link_libraries(${PROJECT_NAME}_radar_io
         ${PROJECT_NAME}_utils

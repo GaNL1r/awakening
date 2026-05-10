@@ -20,6 +20,7 @@
 #include "utils/semaphore_guard.hpp"
 #include "utils/signal_guard.hpp"
 #include "utils/utils.hpp"
+#include <chrono>
 #include <cstdint>
 #include <iostream>
 #include <memory>
@@ -50,6 +51,8 @@ using DetIo = IOPair<DetectTag, std::vector<radar_detect::Cars>>;
 
 struct RefereeSerialTag {};
 using RefereeSerialIO = IOPair<RefereeSerialTag, std::vector<uint8_t>>;
+struct WifiSerialTag {};
+using WifiSerialIO = IOPair<WifiSerialTag, std::vector<uint8_t>>;
 enum class RadarFrame : int { TARGET_MAP, CAMERA_CV, N };
 using RadarTF = utils::tf::RobotTF<RadarFrame, static_cast<size_t>(RadarFrame::N), false>;
 std::string RadarFrame_to_str(int f) {
@@ -147,6 +150,10 @@ int main(int argc, char** argv) {
         if (!camera->running_) {
             return 0;
         }
+    }
+    std::unique_ptr<SerialDriver> wifi_serial;
+    if (config["wifi_serial"]["enable"].as<bool>()) {
+        wifi_serial = std::make_unique<SerialDriver>(config["wifi_serial"], s);
     }
     std::unique_ptr<SerialDriver> referee_serial;
     if (config["referee_serial"]["enable"].as<bool>()) {
@@ -363,6 +370,7 @@ int main(int argc, char** argv) {
     radar_io::RadarInfo radar_info;
     radar_io::RadarCmd radar_cmd;
     radar_io::MapRobotData map_robot_data;
+    radar_io::ToSenrty to_sentry;
     auto parse_referee = [&](uint16_t cmd_id, uint8_t* data, size_t len) {
         log_ctx.receive_referee_count++;
         auto data_vec = std::vector<uint8_t>(data, data + len);
@@ -443,6 +451,28 @@ int main(int argc, char** argv) {
             }
         );
     }
+    radar_io::FromWifi from_wifi;
+    radar_io::ToWifi to_wifi;
+    bool rf_key_right = false;
+    TimePoint rf_info_time = Clock::now();
+    if (wifi_serial) {
+        s.register_task<WifiSerialIO>("receive_wifi_serial", [&](WifiSerialIO::second_type&& data) {
+            auto wifi_opt = radar_io::FromWifi::create(data);
+            if (wifi_opt) {
+                auto wifi = wifi_opt.value();
+                static uint32_t rf_info_count = 0;
+                static uint32_t rf_jam_count = 0;
+                if (wifi.rf_info_count > rf_info_count) {
+                    rf_info_count = wifi.rf_info_count;
+                    rf_key_right = true;
+                }
+                if (wifi.rf_jam_count > rf_jam_count) {
+                    rf_jam_count = wifi.rf_jam_count;
+                    rf_info_time = Clock::now();
+                }
+            }
+        });
+    }
 
     s.add_rate_source<>("main", 30.0, [&]() {
         auto _fin_cars = fin_cars.read();
@@ -459,6 +489,25 @@ int main(int argc, char** argv) {
         map_robot_data.opponent_aerial_position_y = msg.enemy_no6_y;
         map_robot_data.opponent_sentry_position_x = msg.enemy_no7_x;
         map_robot_data.opponent_sentry_position_y = msg.enemy_no7_y;
+        if (std::chrono::duration<double>(Clock::now() - rf_info_time)
+            < std::chrono::duration<double>(1.0)) {
+            map_robot_data.opponent_hero_position_x = from_wifi.RF_Position_Struct.Robo_1_X_cm;
+            map_robot_data.opponent_hero_position_y = from_wifi.RF_Position_Struct.Robo_1_Y_cm;
+            map_robot_data.opponent_engineer_position_x = from_wifi.RF_Position_Struct.Robo_2_X_cm;
+            map_robot_data.opponent_engineer_position_y = from_wifi.RF_Position_Struct.Robo_2_Y_cm;
+            map_robot_data.opponent_infantry_3_position_x =
+                from_wifi.RF_Position_Struct.Robo_3_X_cm;
+            map_robot_data.opponent_infantry_3_position_y =
+                from_wifi.RF_Position_Struct.Robo_3_Y_cm;
+            map_robot_data.opponent_infantry_4_position_x =
+                from_wifi.RF_Position_Struct.Robo_4_X_cm;
+            map_robot_data.opponent_infantry_4_position_y =
+                from_wifi.RF_Position_Struct.Robo_4_Y_cm;
+            map_robot_data.opponent_aerial_position_x = from_wifi.RF_Position_Struct.Robo_6_X_cm;
+            map_robot_data.opponent_aerial_position_y = from_wifi.RF_Position_Struct.Robo_6_Y_cm;
+            map_robot_data.opponent_sentry_position_x = from_wifi.RF_Position_Struct.Robo_5_X_cm;
+            map_robot_data.opponent_sentry_position_y = from_wifi.RF_Position_Struct.Robo_5_Y_cm;
+        }
         map_robot_data.ally_hero_position_x = msg.self_no1_x;
         map_robot_data.ally_hero_position_y = msg.self_no1_y;
         map_robot_data.ally_engineer_position_x = msg.self_no2_x;
@@ -471,11 +520,36 @@ int main(int argc, char** argv) {
         map_robot_data.ally_aerial_position_y = msg.self_no6_y;
         map_robot_data.ally_sentry_position_x = msg.self_no7_x;
         map_robot_data.ally_sentry_position_y = msg.self_no7_y;
+        if (enemy_outpost_active) {
+            to_sentry.enemy_outpost_active = enemy_outpost_active;
+        }
+        to_sentry.opponent_hero_position_x = map_robot_data.opponent_hero_position_x;
+        to_sentry.opponent_hero_position_y = map_robot_data.opponent_hero_position_y;
+        to_sentry.opponent_engineer_position_x = map_robot_data.opponent_engineer_position_x;
+        to_sentry.opponent_engineer_position_y = map_robot_data.opponent_engineer_position_y;
+        to_sentry.opponent_infantry_3_position_x = map_robot_data.opponent_infantry_3_position_x;
+        to_sentry.opponent_infantry_3_position_y = map_robot_data.opponent_infantry_3_position_y;
+        to_sentry.opponent_infantry_4_position_x = map_robot_data.opponent_infantry_4_position_x;
+        to_sentry.opponent_infantry_4_position_y = map_robot_data.opponent_infantry_4_position_y;
+        to_sentry.opponent_aerial_position_x = map_robot_data.opponent_aerial_position_x;
+        to_sentry.opponent_aerial_position_y = map_robot_data.opponent_aerial_position_y;
+        to_sentry.opponent_sentry_position_x = map_robot_data.opponent_sentry_position_x;
+        to_sentry.opponent_sentry_position_y = map_robot_data.opponent_sentry_position_y;
+        auto _to_sentry = radar_io::RobotInteractionData::create(
+            self_color == radar_detect::SelfColor::RED ? std::to_underlying(radar_io::RoboID::R9)
+                                                       : std::to_underlying(radar_io::RoboID::B9),
+
+            self_color == radar_detect::SelfColor::RED ? std::to_underlying(radar_io::RoboID::R7)
+                                                       : std::to_underlying(radar_io::RoboID::B7),
+            to_sentry
+        );
         radar_io::CustomInfo to_no1;
-        to_no1.sender_id = self_color == radar_detect::SelfColor::RED ? 9 : 109;
+        to_no1.sender_id = self_color == radar_detect::SelfColor::RED
+            ? std::to_underlying(radar_io::RoboID::R9)
+            : std::to_underlying(radar_io::RoboID::B9);
         to_no1.receiver_id = self_color == radar_detect::SelfColor::RED
-            ? std::to_underlying(radar_io::RoboID::R1OP)
-            : std::to_underlying(radar_io::RoboID::B1OP);
+            ? std::to_underlying(radar_io::RoboID::R2OP)
+            : std::to_underlying(radar_io::RoboID::B2OP);
         constexpr size_t max_bytes = sizeof(to_no1.user_data);
 
         std::u16string s = u"aaa";
@@ -511,6 +585,9 @@ int main(int argc, char** argv) {
             std::to_underlying(radar_io::RoboID::REFEREE),
             radar_cmd
         );
+        to_wifi.cmd_id = radar_io::ToWifi::CMDID;
+        to_wifi.robot_id = self_color == radar_detect::SelfColor::RED ? 9 : 109;
+        to_wifi.jam_level = radar_info.encryption_level;
         if (referee_serial) {
             if (!referee_serial->write(radar_io::pack_frame(map_robot_data))) {
                 AWAKENING_ERROR("FUCK");
@@ -521,7 +598,15 @@ int main(int argc, char** argv) {
             if (!referee_serial->write(radar_io::pack_frame(_radar_cmd))) {
                 AWAKENING_ERROR("FUCK");
             }
+            if(!referee_serial->write(radar_io::pack_frame(_to_sentry)))
+            {
+                AWAKENING_ERROR("FUCK");
+            }
         }
+        if(wifi_serial){
+            wifi_serial->write(utils::to_vector(to_wifi));
+        }
+
     });
     if (camera) {
         camera->start<CameraTag>("hik");

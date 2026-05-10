@@ -30,7 +30,7 @@ void ArmorTarget::reset(
     measure_ctx.id = 0;
     measure_ctx.armor_number = a.number;
     measure_ctx.camera_cv_in_odom = camera_cv_in_odom;
-    measure_ctx.camera_info = camera_info;
+    measure_ctx.camera_info = camera_info.clone();
     target_number = a.number;
     double r_pre;
     Eigen::DiagonalMatrix<double, X_N> p0;

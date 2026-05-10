@@ -92,6 +92,9 @@ struct Predict {
         if (ceres::abs(vyaw) > T(20.0)) {
             vyaw = T(0.0);
         }
+        if (armor_number == auto_aim::ArmorClass::BASE) {
+            x[idx::VYAW] = T(0.0);
+        }
     }
     inline void f(const VecX& x0, VecX& x1) const {
         assert(x0.size() == X_N);
@@ -108,6 +111,13 @@ inline void project_points_jets(
     const cv::Mat& dist_coeffs,
     std::vector<Eigen::Matrix<T, 2, 1>>& img_pts_jet
 ) {
+    if (obj_pts.empty())
+        return;
+    if (K.empty() || K.rows != 3 || K.cols != 3)
+        throw std::runtime_error("Invalid K");
+    if (dist_coeffs.empty())
+        throw std::runtime_error("Invalid dist_coeffs");
+
     const Eigen::Matrix<T, 3, 3>& R = pose_cam.linear();
     const Eigen::Matrix<T, 3, 1>& t = pose_cam.translation();
 
@@ -122,7 +132,6 @@ inline void project_points_jets(
     };
 
     const int n_dist = dist_coeffs.rows * dist_coeffs.cols;
-
     const T k1 = n_dist > 0 ? T(get_dist(0)) : T(0);
     const T k2 = n_dist > 1 ? T(get_dist(1)) : T(0);
     const T p1 = n_dist > 2 ? T(get_dist(2)) : T(0);
@@ -132,14 +141,17 @@ inline void project_points_jets(
     img_pts_jet.clear();
     img_pts_jet.reserve(obj_pts.size());
 
+    const T eps = T(1e-8);
+
     for (const auto& pt3: obj_pts) {
         Eigen::Matrix<T, 3, 1> Pw(T(pt3.x), T(pt3.y), T(pt3.z));
-
         Eigen::Matrix<T, 3, 1> Pc = R * Pw + t;
+        T Xc = Pc(0), Yc = Pc(1), Zc = Pc(2);
 
-        T Xc = Pc(0);
-        T Yc = Pc(1);
-        T Zc = Pc(2);
+        if (Zc < eps) {
+            img_pts_jet.emplace_back(T(0), T(0));
+            continue;
+        }
 
         T xp = Xc / Zc;
         T yp = Yc / Zc;
@@ -149,9 +161,7 @@ inline void project_points_jets(
         T r6 = r4 * r2;
 
         T radial = T(1) + k1 * r2 + k2 * r4 + k3 * r6;
-
         T xd = xp * radial + T(2) * p1 * xp * yp + p2 * (r2 + T(2) * xp * xp);
-
         T yd = yp * radial + p1 * (r2 + T(2) * yp * yp) + T(2) * p2 * xp * yp;
 
         T u = fx * xd + cx;

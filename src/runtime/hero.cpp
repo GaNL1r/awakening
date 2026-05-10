@@ -211,14 +211,14 @@ int main(int argc, char** argv) {
     int serial_send_to_image_microseconds = config["serial_send_to_image_microseconds"].as<int>();
 
     auto camera_config = config["camera"];
-    std::unique_ptr<HikCamera> camera;
+    std::unique_ptr<MvCamera> camera;
     utils::SignalGuard::add_callback([&]() {
         if (camera) {
             camera->stop();
         }
     });
     if (!player) {
-        camera = std::make_unique<HikCamera>(camera_config["hik_camera"], s);
+        camera = std::make_unique<MvCamera>(camera_config["mv_camera"], s);
         camera->init();
         if (!camera->running_) {
             return 0;
@@ -242,6 +242,7 @@ int main(int argc, char** argv) {
         auto_aim_dbg->camera_info_ = camera_info;
     }
     WheelOdometry wheel_odometry(config["wheel_odometry"], Clock::now());
+    eyes_of_blind::Encoder encoder(config["encoder"]);
     auto tf = SimpleRobotTF::create();
     {
         tf->add_edge(SimpleFrame::ODOM, SimpleFrame::GIMBAL_ODOM);
@@ -261,6 +262,9 @@ int main(int argc, char** argv) {
 
     s.register_task<CameraIO, CommonFrameIo>("push_common_frame", [&](CameraIO::second_type&& f) {
         static int current_id = 0;
+        if (f.src_img.empty()) {
+            return std::make_tuple(std::optional<CommonFrameIo::second_type>(std::nullopt));
+        }
         log_ctx.camera_count++;
         if (recorder) {
             utils::dt_once(
@@ -268,6 +272,7 @@ int main(int argc, char** argv) {
                 std::chrono::milliseconds(100)
             );
         }
+
         CommonFrame frame {
             .img_frame = std::move(f),
             .id = current_id++,
@@ -360,9 +365,11 @@ int main(int argc, char** argv) {
     }
     if (camera) {
         s.register_task<CommonFrameIo>("auto_exposure", [&](CommonFrameIo::second_type&& frame) {
+            static std::mutex mutex;
+            std::lock_guard<std::mutex> lock(mutex);
             if (mode == Mode::Blind) {
                 camera->set_ExposureTime(5000);
-                camera->set_AcquisitionFrameRate(30);
+                // camera->set_AcquisitionFrameRate(30);
                 return;
             }
             struct AutoExposureCfg {
@@ -426,7 +433,10 @@ int main(int argc, char** argv) {
             detector_sem =
                 std::make_unique<std::counting_semaphore<>>(config["max_infer_num"].as<int>());
         }
-
+        static std::unique_ptr<std::counting_semaphore<>> blind_sem;
+        if (!blind_sem) {
+            blind_sem = std::make_unique<std::counting_semaphore<>>(1);
+        }
         auto_aim::Armors armors { .timestamp = frame.img_frame.timestamp,
                                   .id = frame.id,
                                   .frame_id = frame.frame_id };
@@ -437,6 +447,38 @@ int main(int argc, char** argv) {
                 armors.armors = armor_detector.detect(frame);
                 log_ctx.detect_count++;
             }
+        }
+        if (mode == Mode::Blind) {
+            bool got = blind_sem->try_acquire();
+            utils::SemaphoreGuard guard(*blind_sem, got);
+            if (got) {
+                encoder.push_frame(frame.img_frame.src_img);
+                eyes_of_blind::BlindSend pkg;
+                while (true) {
+                    if (encoder.try_pop_packet(pkg)) {
+                        cv::Mat out;
+                        if (serial && config["serial"]["enable"].as<bool>()) {
+                            std::array<uint8_t, eyes_of_blind::MAX_PACKET_SIZE> raw {};
+                            std::memcpy(raw.data(), &pkg, eyes_of_blind::MAX_PACKET_SIZE);
+
+                            doorlock_sniper::CustomByteBlock block;
+                            block.set_data(raw.data(), eyes_of_blind::MAX_PACKET_SIZE);
+
+                            std::string serialized;
+                            if (!block.SerializeToString(&serialized)) {
+                                AWAKENING_ERROR("Protobuf serialization failed");
+                                continue;
+                            }
+                            serial->write(std::vector<uint8_t>(serialized.begin(), serialized.end())
+                            );
+                        }
+
+                    } else {
+                        break;
+                    }
+                }
+            }
+            return std::make_tuple(std::optional<DetIo::second_type>(std::nullopt));
         }
         armors_queue.enqueue(armors);
         auto batch_armors = armors_queue.dequeue_batch();
@@ -449,6 +491,8 @@ int main(int argc, char** argv) {
     });
 
     s.register_task<DetIo>("tracker", [&](DetIo::second_type&& io) {
+        static std::mutex mutex;
+        std::lock_guard<std::mutex> lock(mutex);
         for (const auto& armors_raw: io) {
             auto armors = armors_raw;
             armors.armors.clear();
@@ -644,48 +688,7 @@ int main(int argc, char** argv) {
             serial->start<SerialTag>("serial");
         }
     }
-    eyes_of_blind::Encoder encoder(config["encoder"]);
 
-    s.register_task<CameraIO>("blind", [&](CameraIO::second_type&& f) {
-        if (f.src_img.empty()) {
-            return;
-        }
-        static std::unique_ptr<std::counting_semaphore<>> detector_sem;
-        if (!detector_sem) {
-            detector_sem = std::make_unique<std::counting_semaphore<>>(1);
-        }
-        if (mode == Mode::Blind) {
-            bool got = detector_sem->try_acquire();
-            utils::SemaphoreGuard guard(*detector_sem, got);
-            if (got) {
-                encoder.push_frame(f.src_img);
-                eyes_of_blind::BlindSend pkg;
-                while (true) {
-                    if (encoder.try_pop_packet(pkg)) {
-                        cv::Mat out;
-                        if (serial && config["serial"]["enable"].as<bool>()) {
-                            std::array<uint8_t, eyes_of_blind::MAX_PACKET_SIZE> raw {};
-                            std::memcpy(raw.data(), &pkg, eyes_of_blind::MAX_PACKET_SIZE);
-
-                            doorlock_sniper::CustomByteBlock block;
-                            block.set_data(raw.data(), eyes_of_blind::MAX_PACKET_SIZE);
-
-                            std::string serialized;
-                            if (!block.SerializeToString(&serialized)) {
-                                AWAKENING_ERROR("Protobuf serialization failed");
-                                continue;
-                            }
-                            serial->write(std::vector<uint8_t>(serialized.begin(), serialized.end())
-                            );
-                        }
-
-                    } else {
-                        break;
-                    }
-                }
-            }
-        }
-    });
     s.build();
     s.run();
     if (player) {

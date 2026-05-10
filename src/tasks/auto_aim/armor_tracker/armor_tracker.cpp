@@ -7,6 +7,7 @@
 #include "utils/utils.hpp"
 #include <array>
 #include <iostream>
+#include <mutex>
 #include <opencv2/core/eigen.hpp>
 #include <opencv2/core/types.hpp>
 #include <utility>
