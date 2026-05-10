@@ -24,6 +24,7 @@ rsync -avz \
     --exclude='model/' \
     --exclude='log/' \
     --exclude='record/' \
+    --exclude='src/tasks/radar_detect/data/' \
     --exclude='CMakeLists.txt' \
     "${WORK_DIR}/" \
     "${REMOTE_USER}@${REMOTE_IP}:${TARGET_PATH}/"

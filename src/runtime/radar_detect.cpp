@@ -4,7 +4,6 @@
 #include "tasks/base/common.hpp"
 #include "tasks/radar_detect/car_pool.hpp"
 #include "tasks/radar_detect/detector.hpp"
-#include "tasks/radar_detect/lidar_location.hpp"
 #include "tasks/radar_detect/pixel_to_world.hpp"
 #include "tasks/radar_detect/tracker.hpp"
 #include "tasks/radar_detect/type.hpp"
@@ -174,14 +173,14 @@ int main(int argc, char** argv) {
     debug_ctx.map = map.image.clone();
     auto outpost_bbox = utils::load_rect2f(config["outpost_bbox"]);
     std::vector<cv::Point2f> cal_pts;
-    for (const auto& pt : config["cal_pts"]) {
+    for (const auto& pt: config["cal_pts"]) {
         if (pt.size() != 2) {
             std::cerr << "每个点必须有两个元素" << std::endl;
             continue;
         }
         float x = pt[0].as<float>();
         float y = pt[1].as<float>();
-        
+
         cal_pts.emplace_back(x, y);
     }
     s.register_task<CameraIO, CommonFrameIo>("push_common_frame", [&](CameraIO::second_type&& f) {
@@ -300,7 +299,7 @@ int main(int argc, char** argv) {
         for (const auto& o: outpost) {
             o.draw(image);
         }
-        for (const auto& pt : cal_pts) {
+        for (const auto& pt: cal_pts) {
             cv::circle(image, pt, 20, cv::Scalar(255, 0, 255), -1);
         }
         cv::rectangle(image, outpost_bbox, cv::Scalar(0, 255, 0), 2);
@@ -474,28 +473,42 @@ int main(int argc, char** argv) {
         map_robot_data.ally_sentry_position_y = msg.self_no7_y;
         radar_io::CustomInfo to_no1;
         to_no1.sender_id = self_color == radar_detect::SelfColor::RED ? 9 : 109;
-        to_no1.receiver_id = self_color == radar_detect::SelfColor::RED ? 0x0101 : 0x0165;
+        to_no1.receiver_id = self_color == radar_detect::SelfColor::RED
+            ? std::to_underlying(radar_io::RoboID::R1OP)
+            : std::to_underlying(radar_io::RoboID::B1OP);
         constexpr size_t max_bytes = sizeof(to_no1.user_data);
 
         std::u16string s = u"aaa";
-
         std::memset(to_no1.user_data, 0, max_bytes);
-
         size_t copy_bytes = std::min(s.size() * sizeof(char16_t), max_bytes - 2);
-
         std::memcpy(to_no1.user_data, s.data(), copy_bytes);
-
-        radar_cmd.radar_cmd = 0;
-        radar_cmd.password_cmd = 1;
-        radar_cmd.password_1 = 1;
-        radar_cmd.password_2 = 1;
-        radar_cmd.password_3 = 1;
-        radar_cmd.password_4 = 1;
-        radar_cmd.password_5 = 1;
-        radar_cmd.password_6 = 1;
+        static uint8_t double_vulnerability_count = 0;
+        if (radar_info.double_vulnerability_chance > 0) {
+            double_vulnerability_count++;
+        }
+        radar_cmd.radar_cmd = double_vulnerability_count;
+        radar_cmd.password_cmd = 2;
+        radar_cmd.password_1 = 'r';
+        radar_cmd.password_2 = 'm';
+        radar_cmd.password_3 = '2';
+        radar_cmd.password_4 = '0';
+        radar_cmd.password_5 = '2';
+        radar_cmd.password_6 = '6';
+        if (radar_info.can_change_key) {
+            std::random_device rd;
+            std::mt19937 gen(rd());
+            std::uniform_int_distribution<uint16_t> dis(0, 255);
+            radar_cmd.password_cmd = 1;
+            radar_cmd.password_1 = static_cast<uint8_t>(dis(gen));
+            radar_cmd.password_2 = static_cast<uint8_t>(dis(gen));
+            radar_cmd.password_3 = static_cast<uint8_t>(dis(gen));
+            radar_cmd.password_4 = static_cast<uint8_t>(dis(gen));
+            radar_cmd.password_5 = static_cast<uint8_t>(dis(gen));
+            radar_cmd.password_6 = static_cast<uint8_t>(dis(gen));
+        }
         auto _radar_cmd = radar_io::RobotInteractionData::create(
             self_color == radar_detect::SelfColor::RED ? 9 : 109,
-            0x8080,
+            std::to_underlying(radar_io::RoboID::REFEREE),
             radar_cmd
         );
         if (referee_serial) {

@@ -7,6 +7,44 @@
 #include <cstring>
 #include <vector>
 namespace awakening::radar_io {
+enum class RoboID : uint16_t {
+    R1 = 1,
+    R2 = 2,
+    R3 = 3,
+    R4 = 4,
+    R5 = 5,
+    R6 = 6,
+    R7 = 7,
+    R8 = 8,
+    R9 = 9,
+    R10 = 10,
+    R11 = 11,
+    B1 = 101,
+    B2 = 102,
+    B3 = 103,
+    B4 = 104,
+    B5 = 105,
+    B6 = 106,
+    B7 = 107,
+    B8 = 108,
+    B9 = 109,
+    B10 = 110,
+    B11 = 111,
+    R1OP = 0X101,
+    R2OP = 0X102,
+    R3OP = 0X103,
+    R4OP = 0X104,
+    R5OP = 0X105,
+    R6OP = 0X106,
+    B6OP = 0x16A,
+    B1OP = 0x165,
+    B2OP = 0X166,
+    B3OP = 0X167,
+    B4OP = 0X168,
+    B5OP = 0X169,
+    REFEREE = 0X8080,
+
+};
 struct FrameHeader {
     static constexpr uint8_t SOF = 0xA5;
     uint8_t sof = SOF;
