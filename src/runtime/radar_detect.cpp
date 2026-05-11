@@ -85,11 +85,13 @@ struct LogCtx {
     int detect_count;
     double detect_cost_ms;
     int receive_referee_count;
+    int receive_wifi_count;
     void reset() {
         image_count = 0;
         detect_count = 0;
         detect_cost_ms = 0;
         receive_referee_count = 0;
+        receive_wifi_count = 0;
     }
 };
 int main(int argc, char** argv) {
@@ -470,6 +472,7 @@ int main(int argc, char** argv) {
                     rf_jam_count = wifi.rf_jam_count;
                     rf_info_time = Clock::now();
                 }
+                log_ctx.receive_wifi_count++;
             }
         });
     }
@@ -598,15 +601,13 @@ int main(int argc, char** argv) {
             if (!referee_serial->write(radar_io::pack_frame(_radar_cmd))) {
                 AWAKENING_ERROR("FUCK");
             }
-            if(!referee_serial->write(radar_io::pack_frame(_to_sentry)))
-            {
+            if (!referee_serial->write(radar_io::pack_frame(_to_sentry))) {
                 AWAKENING_ERROR("FUCK");
             }
         }
-        if(wifi_serial){
+        if (wifi_serial) {
             wifi_serial->write(utils::to_vector(to_wifi));
         }
-
     });
     if (camera) {
         camera->start<CameraTag>("hik");
@@ -617,16 +618,20 @@ int main(int argc, char** argv) {
     if (referee_serial) {
         referee_serial->start<RefereeSerialTag>("referee_serial");
     }
+    if (wifi_serial) {
+        wifi_serial->start<WifiSerialTag>("wifi");
+    }
     s.add_rate_source<>("tf_pub", 100.0, [&]() {
         rcl_tf.pub_robot_tf(tf, [](RadarFrame frame) { return RadarFrame_to_str(frame); });
     });
     s.add_rate_source<>("log", 1.0, [&]() {
         AWAKENING_INFO(
-            "img: {}, det: {},avg_cost: {:.2f}ms, referee: {}",
+            "img: {}, det: {},avg_cost: {:.2f}ms, referee: {}, wifi: {}",
             log_ctx.image_count,
             log_ctx.detect_count,
             log_ctx.detect_cost_ms / (log_ctx.detect_count ? log_ctx.detect_count : 1),
-            log_ctx.receive_referee_count
+            log_ctx.receive_referee_count,
+            log_ctx.receive_wifi_count
         );
         log_ctx.reset();
     });

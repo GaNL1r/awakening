@@ -3,6 +3,7 @@
 #include "utils/logger.hpp"
 #include <algorithm>
 #include <cstdlib>
+#include <string>
 #include <unordered_map>
 #include <utility>
 
@@ -11,13 +12,27 @@ namespace awakening::sentry_brain {
 class GobalState {
 public:
     enum class SelfColor : bool { Red = 0, Blue = 1 } self_color;
-    enum class Pose : uint8_t { UNKNOWEN, Attack, Defend, Move } pose;
+    enum class Pose : uint8_t { UNKNOWEN = 0, Attack = 1, Defend = 2, Move = 3 } pose;
+    static std::string Pose_to_str(Pose pose) {
+        constexpr const char* details[] = { "Unknown", "Attack", "Defend", "Move" };
+        return details[std::to_underlying(pose)];
+    }
     std::unordered_map<uint8_t, int> pose_acc_time;
+    std::unordered_map<uint8_t, int> last_pose_time;
+    std::unordered_map<uint8_t, bool> pose_active_flags;
     GobalState() {
         pose_acc_time[std::to_underlying(Pose::UNKNOWEN)] = 0;
         pose_acc_time[std::to_underlying(Pose::Attack)] = 0;
         pose_acc_time[std::to_underlying(Pose::Defend)] = 0;
         pose_acc_time[std::to_underlying(Pose::Move)] = 0;
+        last_pose_time[std::to_underlying(Pose::UNKNOWEN)] = 0;
+        last_pose_time[std::to_underlying(Pose::Attack)] = 0;
+        last_pose_time[std::to_underlying(Pose::Defend)] = 0;
+        last_pose_time[std::to_underlying(Pose::Move)] = 0;
+        pose_active_flags[std::to_underlying(Pose::UNKNOWEN)] = false;
+        pose_active_flags[std::to_underlying(Pose::Attack)] = false;
+        pose_active_flags[std::to_underlying(Pose::Defend)] = false;
+        pose_active_flags[std::to_underlying(Pose::Move)] = false;
     }
     void update(const SentryRefereeReceive& d) {
         self_color = (d.robo_id > 100) ? SelfColor::Blue : SelfColor::Red;
@@ -43,14 +58,29 @@ public:
             pose_acc_time[std::to_underlying(Pose::Attack)] = 0;
             pose_acc_time[std::to_underlying(Pose::Defend)] = 0;
             pose_acc_time[std::to_underlying(Pose::Move)] = 0;
+            last_pose_time[std::to_underlying(Pose::UNKNOWEN)] = 0;
+            last_pose_time[std::to_underlying(Pose::Attack)] = 0;
+            last_pose_time[std::to_underlying(Pose::Defend)] = 0;
+            last_pose_time[std::to_underlying(Pose::Move)] = 0;
+            pose_active_flags[std::to_underlying(Pose::UNKNOWEN)] = false;
+            pose_active_flags[std::to_underlying(Pose::Attack)] = false;
+            pose_active_flags[std::to_underlying(Pose::Defend)] = false;
+            pose_active_flags[std::to_underlying(Pose::Move)] = false;
         }
     }
 
     void update_pose(Pose new_pose, int game_time) {
-        pose_acc_time.at(std::to_underlying(new_pose))++;
+        if (!pose_active_flags[std::to_underlying(new_pose)]) {
+            pose_active_flags[std::to_underlying(new_pose)] = true;
+            last_pose_time[std::to_underlying(new_pose)] = game_time;
+            return;
+        }
+        pose_acc_time.at(std::to_underlying(new_pose)) +=
+            std::abs(game_time - last_pose_time.at(std::to_underlying(new_pose)));
         if (pose_acc_time.at(std::to_underlying(new_pose)) > 170) {
             AWAKENING_WARN("need change pose");
         }
+        last_pose_time.at(std::to_underlying(new_pose)) = game_time;
     }
     bool pose_active(Pose pose) {
         return pose_acc_time.at(std::to_underlying(pose)) < 170;

@@ -2,6 +2,7 @@
 #include "_rcl/tf.hpp"
 #include "mode_base.hpp"
 #include "tasks/base/packet_typedef_send.hpp"
+#include "tasks/sentry_brain/rmuc_2026/map.hpp"
 #include "utils/drivers/serial_driver.hpp"
 #include "utils/impl.hpp"
 namespace awakening::sentry_brain {
@@ -35,6 +36,7 @@ public:
             AWAKENING_INFO("waiting for game start... current_time: {}", state_.current_game_time_);
             return;
         }
+        sentry_pose = GobalState::Pose::Defend;
         if (in_home()) {
             state_.home_allowance_bullets_ = 0;
         }
@@ -43,10 +45,14 @@ public:
         }
         double cur_hp_ratio = double(state_.current_hp) / state_.max_hp;
         if (cur_hp_ratio < params_.go_home_hp_ratio || state_.current_hp < 60) {
-            sentry_pose = GobalState::Pose::Move;
-            go<home_t>();
             wait_until(
                 [&]() {
+                    go<home_t>();
+                    if (!is_reached<home_t>()) {
+                        sentry_pose = GobalState::Pose::Move;
+                    } else {
+                        sentry_pose = GobalState::Pose::Defend;
+                    }
                     if (std::abs(state_.current_hp - state_.max_hp) < 50) {
                         AWAKENING_INFO("hp is enough: {}", state_.current_hp);
                         return true;
@@ -70,7 +76,6 @@ public:
                     sentry_pose = GobalState::Pose::Move;
                 }
             }
-
             return;
         }
         if (state_.enemy_outpost_active_) {
@@ -84,14 +89,18 @@ public:
         }
         if (state_.remain_rebuild_outpost_chance_ > 0) {
             go<ally_outpost_t>();
-            if (is_reached<ally_outpost_t>()) {
-                sentry_pose = GobalState::Pose::Defend;
-            } else {
-                sentry_pose = GobalState::Pose::Move;
-            }
+            if (!is_reached<ally_outpost_t>()) {
+                 sentry_pose = GobalState::Pose::Move;
+            } 
             return;
         }
-        patrol<ally_beijing_tunnel_top_t, enemy_jiansudai_tunnel_top_t>(5.0);
+        patrol<ally_beijing_tunnel_top_t, enemy_jiansudai_head_t>(10.0);
+        if (!is_reached<ally_beijing_tunnel_top_t>() && !is_reached<enemy_jiansudai_head_t>()) {
+            sentry_pose = GobalState::Pose::Move;
+        }
+        if (target_in_big_yaw_.check()) {
+            sentry_pose = GobalState::Pose::Attack;
+        }
         if (state_.current_hp < 10) {
             sentry_pose = GobalState::Pose::Defend;
         }

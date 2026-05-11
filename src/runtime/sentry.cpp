@@ -3,6 +3,7 @@
 #include "tasks/auto_aim/armor_omni.hpp"
 #include "tasks/base/ballistic_trajectory.hpp"
 #include "tasks/base/wheel_odometry.hpp"
+#include "tasks/sentry_brain/rmuc_2026/gobal_state.hpp"
 #include "tasks/sentry_brain/rmuc_2026/mode_factory.hpp"
 #include <chrono>
 #include <cstdint>
@@ -234,6 +235,7 @@ int main(int argc, char** argv) {
     camera_info.load(camera_config["camera_info"]);
     auto_aim::ArmorDetector armor_detector(config["armor_detector"]);
     auto_aim::ArmorTracker armor_tracker(config["armor_tracker"]);
+    armor_tracker.set_sentry(true);
     auto_aim::AutoAimFsmController auto_aim_fsm_controller(config["auto_aim_fsm"]);
     auto_aim::ArmorOmni armor_omni(config["armor_omni"]);
     auto_aim::VeryAimer very_aimer(config["very_aimer"]);
@@ -510,6 +512,9 @@ int main(int argc, char** argv) {
                 {
                     continue;
                 }
+                if (a.number == auto_aim::ArmorClass::NO2) {
+                    continue;
+                }
                 armors.armors.push_back(a);
             }
             auto camera_cv_in_odom =
@@ -722,7 +727,7 @@ int main(int argc, char** argv) {
         double avg_latency_ms = log_ctx.latency_ms_total / log_ctx.track_count;
         double omni_avg_latency_ms = log_ctx.omni_latency_ms_total / log_ctx.omni_count;
         AWAKENING_INFO(
-            "detect: {} track: {} found: {} solve: {} serial: {} camera: {} avg_latency: {:.3} ms omni: {} avg_latency: {:.3} ms",
+            "detect: {} track: {} found: {} solve: {} serial: {} camera: {} avg_latency: {:.3} ms omni: {} avg_latency: {:.3} ms ",
             log_ctx.detect_count,
             log_ctx.track_count,
             log_ctx.found_count,

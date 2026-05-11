@@ -9,6 +9,7 @@ DEFINE_CONFIG_PATH(OMNI_CONFIG_PATH, "/config/omni.yaml")
 DEFINE_CONFIG_PATH(SENTRY_CONFIG_PATH, "/config/sentry.yaml")
 DEFINE_CONFIG_PATH(LEG_CONFIG_PATH, "/config/leg.yaml")
 DEFINE_CONFIG_PATH(HERO_CONFIG_PATH, "/config/hero.yaml")
+DEFINE_CONFIG_PATH(RMUC_2026_POINT_CONFIG_PATH, "/config/rmuc_2026_map_point.yaml")
 inline std::optional<std::string> get_robot_config_path(std::string name) {
     auto key = utils::to_upper(name);
     if (key == "OMNI") {

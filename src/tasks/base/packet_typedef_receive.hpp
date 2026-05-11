@@ -88,7 +88,7 @@ struct SentryJointState {
     }
     void update_log() {
         using namespace web;
-        write_log("referee", [&](auto& j) {
+        write_log("joint", [&](auto& j) {
             j["big_yaw_in_world"] = val(big_yaw_in_world);
             j["turtle_state"] = val(turtle_state);
         });
@@ -108,7 +108,21 @@ struct SentryRefereeReceive {
     uint16_t ally_base_hp;
     uint8_t ally_outpost_occ_state; //0 为未被占领，1 为被己方占领，2 为被对方占领，3 为被双方占领
     uint8_t ally_fort_occ_state; //0 为未被占领，1 为被己方占领，2 为被对方占领，3 为被双方占领
+
+    //雷达多机通信
     uint8_t enemy_outpost_active;
+    uint16_t opponent_hero_position_x;
+    uint16_t opponent_hero_position_y;
+    uint16_t opponent_engineer_position_x;
+    uint16_t opponent_engineer_position_y;
+    uint16_t opponent_infantry_3_position_x;
+    uint16_t opponent_infantry_3_position_y;
+    uint16_t opponent_infantry_4_position_x;
+    uint16_t opponent_infantry_4_position_y;
+    uint16_t opponent_aerial_position_x;
+    uint16_t opponent_aerial_position_y;
+    uint16_t opponent_sentry_position_x;
+    uint16_t opponent_sentry_position_y;
     static std::optional<SentryRefereeReceive> create(const std::vector<uint8_t>& data) {
         if (data.size() != sizeof(SentryRefereeReceive) || data[0] != ID)
             return std::nullopt;
@@ -132,6 +146,19 @@ struct SentryRefereeReceive {
             j["ally_outpost_occ_state"] = val(ally_outpost_occ_state);
             j["ally_fort_occ_state"] = val(ally_fort_occ_state);
             j["enemy_outpost_active"] = val(enemy_outpost_active);
+
+            j["opponent_hero_position_x"] = val(opponent_hero_position_x);
+            j["opponent_hero_position_y"] = val(opponent_hero_position_y);
+            j["opponent_engineer_position_x"] = val(opponent_engineer_position_x);
+            j["opponent_engineer_position_y"] = val(opponent_engineer_position_y);
+            j["opponent_infantry_3_position_x"] = val(opponent_infantry_3_position_x);
+            j["opponent_infantry_3_position_y"] = val(opponent_infantry_3_position_y);
+            j["opponent_infantry_4_position_x"] = val(opponent_infantry_4_position_x);
+            j["opponent_infantry_4_position_y"] = val(opponent_infantry_4_position_y);
+            j["opponent_aerial_position_x"] = val(opponent_aerial_position_x);
+            j["opponent_aerial_position_y"] = val(opponent_aerial_position_y);
+            j["opponent_sentry_position_x"] = val(opponent_sentry_position_x);
+            j["opponent_sentry_position_y"] = val(opponent_sentry_position_y);
         });
     }
 } __attribute__((packed));

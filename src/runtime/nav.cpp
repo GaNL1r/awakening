@@ -1,9 +1,11 @@
 #include "_rcl/node.hpp"
+#include "_rcl/tf.hpp"
 #include "ascii_banner.hpp"
 #include "backward-cpp/backward.hpp"
 #include "geometry_msgs/msg/twist.hpp"
 #include "tasks/base/packet_typedef_receive.hpp"
 #include "tasks/base/packet_typedef_send.hpp"
+#include "tasks/sentry_brain/rmuc_2026/mode_factory.hpp"
 #include "utils/drivers/serial_driver.hpp"
 #include "utils/signal_guard.hpp"
 #include "utils/utils.hpp"
@@ -33,11 +35,12 @@ int main(int argc, char** argv) {
     }
     auto config = YAML::LoadFile(config_path);
     Scheduler s;
-    SerialDriver serial(config["serial"], s);
-    rcl::RclcppNode rcl_node("auto_aim");
+    std::shared_ptr<SerialDriver> serial = std::make_shared<SerialDriver>(config["serial"], s);
+    rcl::RclcppNode rcl_node("nav");
+    rcl::TF rcl_tf(rcl_node);
+    auto brain = sentry_brain::create_brain_mode(rcl_node, rcl_tf, config["brain"], serial);
     s.register_task<SerialIO>("receive_serial", [&](SerialIO::second_type&& data) {
         auto robo_opt = ReceiveRobotData::create(data);
-
         if (robo_opt.has_value()) {
             auto robo = robo_opt.value();
             robo.update_log();
@@ -50,6 +53,7 @@ int main(int argc, char** argv) {
         auto referee_opt = SentryRefereeReceive::create(data);
         if (referee_opt) {
             referee_opt->update_log();
+            brain->update_gobal_state(referee_opt.value());
         }
     });
     auto cmd_sub = rcl_node.make_sub<geometry_msgs::msg::Twist>(
@@ -63,11 +67,14 @@ int main(int argc, char** argv) {
             send.vy = msg->linear.y;
             send.wz = msg->angular.z;
             send.turtle_state = (msg->linear.z > 0) ? true : false;
-            serial.write(utils::to_vector(send));
+            serial->write(utils::to_vector(send));
         }
     );
     rcl_node.push_sub(cmd_sub);
-    serial.start<SerialTag>("serial");
+    serial->start<SerialTag>("serial");
+    brain->start();
+    s.build();
+    s.run();
     std::thread([&]() { rcl_node.spin(); }).detach();
     utils::SignalGuard::spin(std::chrono::milliseconds(1000));
     s.stop();

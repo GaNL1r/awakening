@@ -22,7 +22,7 @@ shared_size = 2 * 1024 * 1024  # 2MB
 data_path = "/dev/shm/awakening_data.json"
 log_path = "/dev/shm/awakening_log.json"
 
-port = 8000
+port = 5000
 
 fd = None
 mapfile = None

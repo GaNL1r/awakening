@@ -16,8 +16,8 @@ referee_serial:
   char_size: 8
   read_buf_size: 4096
 wifi_serial:
-  enable: false
-  device_name: /dev/ttyUSB0
+  enable: true
+  device_name: /dev/ttyACM0
   baud_rate: 115200
   char_size: 8
   read_buf_size: 4096
@@ -74,7 +74,7 @@ cal_pts:
   - [2490, 1818]
   - [3378, 1970]
 camera: 
-  type: hik
+  type: video
   hik_camera:
     target_sn: 00J14461534
     adc_bit_depth: Bits_8

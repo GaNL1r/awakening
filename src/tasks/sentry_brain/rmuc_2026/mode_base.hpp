@@ -6,10 +6,16 @@
 #include "tasks/auto_aim/armor_tracker/armor_target.hpp"
 #include "tasks/base/packet_typedef_receive.hpp"
 #include "utils/drivers/serial_driver.hpp"
+#include "utils/utils.hpp"
 #include <geometry_msgs/msg/pose_stamped.hpp>
 #include <nav_msgs/msg/odometry.hpp>
 #include <rclcpp/publisher.hpp>
 #include <rclcpp/subscription.hpp>
+#include <string>
+#define DEFINE_CONFIG_PATH(NAME, FILE) \
+    static constexpr auto NAME##_ARR = awakening::utils::concat(ROOT_DIR, FILE); \
+    static constexpr std::string_view NAME(NAME##_ARR.data());
+DEFINE_CONFIG_PATH(RMUC_2026_POINT_CONFIG_PATH, "/config/rmuc_2026_map_point.yaml")
 namespace awakening::sentry_brain {
 class ModeBase {
 public:
@@ -21,6 +27,8 @@ public:
     ):
         rcl_node_(rcl_node),
         rcl_tf_(rcl_tf) {
+        auto& map = RMUC2026Map::instance();
+        map.load_points_yaml(std::string(RMUC_2026_POINT_CONFIG_PATH));
         serial_ = serial;
         goal_pub_ =
             rcl_node_.make_pub<geometry_msgs::msg::PoseStamped>("rose_goal", rclcpp::QoS(10));
@@ -52,7 +60,7 @@ public:
         );
     }
     virtual void tick_callback() = 0;
-    ~ModeBase() {
+    virtual ~ModeBase() {
         stop();
     }
     void start() {
@@ -144,9 +152,11 @@ public:
     }
     void go(const Vec3& goal, std::string name) noexcept {
         current_goal_ = goal.head<2>();
+        current_goal_name_ = name;
         AWAKENING_INFO("go to {}: x: {} y: {} z: {}", name, goal.x(), goal.y(), goal.z());
     }
     void pub_goal_callback() noexcept {
+        print_status();
         if (!current_goal_) {
             return;
         }
@@ -161,11 +171,24 @@ public:
         msg.pose.position.z = 0.0;
         goal_pub_->publish(msg);
     }
+    void print_status() const noexcept {
+        utils::dt_once(
+            [&]() {
+                AWAKENING_INFO(
+                    "Pose: {}, Goal: {}",
+                    GobalState::Pose_to_str(sentry_pose),
+                    current_goal_name_
+                );
+            },
+            std::chrono::duration<double>(1.0)
+        );
+    }
     GobalState::Pose sentry_pose = GobalState::Pose::Attack;
     std::optional<Eigen::Vector2d> current_goal_;
     std::thread pub_goal_thread_;
     std::thread tick_thread_;
     GobalState state_;
+    std::string current_goal_name_;
     Eigen::Vector2d current_pos_;
     auto_aim::ArmorTarget target_in_big_yaw_;
     rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr goal_pub_;

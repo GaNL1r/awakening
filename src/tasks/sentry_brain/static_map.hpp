@@ -164,8 +164,21 @@ public:
 
         const int padding = 20;
         const int max_panel_width_limit = 400;
+        const int line_h = 20;
+        std::vector<cv::Size> text_sizes(keys.size());
+        int max_text_width = 0;
+
+        // --- 预计算文字尺寸 ---
+        for (size_t i = 0; i < keys.size(); i++) {
+            int baseline = 0;
+            text_sizes[i] = cv::getTextSize(keys[i], cv::FONT_HERSHEY_SIMPLEX, 0.5, 1, &baseline);
+            max_text_width = std::max(max_text_width, text_sizes[i].width);
+        }
+
+        int panel_width = std::min(max_text_width + padding * 2, max_panel_width_limit);
 
         while (true) {
+            // --- 缩放地图 ---
             cv::Mat map_vis;
             cv::resize(
                 map_img_,
@@ -177,33 +190,17 @@ public:
             );
             cv::cvtColor(map_vis, map_vis, cv::COLOR_GRAY2BGR);
 
-            int max_width = 0;
-            int baseline = 0;
-
-            for (size_t i = 0; i < keys.size(); i++) {
-                std::string text = (i == selected_index_ ? "> " : "  ") + keys[i];
-
-                auto size = cv::getTextSize(text, cv::FONT_HERSHEY_SIMPLEX, 0.5, 1, &baseline);
-
-                max_width = std::max(max_width, size.width);
-            }
-
-            int panel_width = max_width + padding * 2;
-            panel_width = std::min(panel_width, max_panel_width_limit);
-
+            // --- 整体画布 ---
             cv::Mat vis(map_vis.rows, map_vis.cols + panel_width, CV_8UC3, cv::Scalar(40, 40, 40));
-
             map_vis.copyTo(vis(cv::Rect(0, 0, map_vis.cols, map_vis.rows)));
 
+            // --- 绘制地图点 ---
             int idx = 0;
             for (auto& [k, p]: map_) {
-                auto pix = world_to_pixel(p);
-
+                cv::Point pix = world_to_pixel(p);
                 cv::Scalar color =
                     (idx == selected_index_) ? cv::Scalar(0, 255, 255) : cv::Scalar(0, 0, 255);
-
                 cv::circle(vis, pix, 6, color, -1);
-
                 cv::putText(
                     vis,
                     k,
@@ -213,36 +210,30 @@ public:
                     cv::Scalar(0, 255, 0),
                     1
                 );
-
                 idx++;
             }
 
+            // --- 绘制侧边面板 ---
             int start_x = map_vis.cols + padding;
             int start_y = 30;
-            int line_h = 20;
-
             for (size_t i = 0; i < keys.size(); i++) {
                 std::string text = (i == selected_index_ ? "> " : "  ") + keys[i];
-
-                int baseline = 0;
-                auto size = cv::getTextSize(text, cv::FONT_HERSHEY_SIMPLEX, 0.5, 1, &baseline);
-
+                cv::Size sz = text_sizes[i];
                 int x = start_x;
                 int y = start_y + i * line_h;
 
-                // --- 背景框 ---
+                // 背景框
                 cv::rectangle(
                     vis,
-                    cv::Point(x - 5, y - size.height - 2),
-                    cv::Point(x + size.width + 5, y + 4),
+                    cv::Point(x - 5, y - sz.height - 2),
+                    cv::Point(x + sz.width + 5, y + 4),
                     cv::Scalar(20, 20, 20),
                     -1
                 );
 
-                // --- 文字 ---
+                // 文字
                 cv::Scalar color =
                     (i == selected_index_) ? cv::Scalar(0, 255, 255) : cv::Scalar(220, 220, 220);
-
                 cv::putText(vis, text, cv::Point(x, y), cv::FONT_HERSHEY_SIMPLEX, 0.5, color, 1);
             }
 
@@ -250,24 +241,20 @@ public:
 
             int key = cv::waitKey(30);
 
-            if (key == 'q')
-                break;
-
-            if (key == 's')
-                dump_yaml("points.yaml");
-
-            // 左键
-            if (key == 81 || key == 2424832) {
-                selected_index_--;
-                if (selected_index_ < 0)
-                    selected_index_ = keys.size() - 1;
-            }
-
-            // 右键
-            if (key == 83 || key == 2555904) {
-                selected_index_++;
-                if (selected_index_ >= (int)keys.size())
-                    selected_index_ = 0;
+            switch (key) {
+                case 'q':
+                    return;
+                case 's':
+                    dump_yaml("points.yaml");
+                    break;
+                case 81:
+                case 2424832: // 左
+                    selected_index_ = (selected_index_ - 1 + keys.size()) % keys.size();
+                    break;
+                case 83:
+                case 2555904: // 右
+                    selected_index_ = (selected_index_ + 1) % keys.size();
+                    break;
             }
         }
     }

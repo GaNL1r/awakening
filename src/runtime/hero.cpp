@@ -10,6 +10,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <tuple>
 #include <utility>
 #ifdef USE_ROS2
     #include "_rcl/node.hpp"
@@ -365,8 +366,6 @@ int main(int argc, char** argv) {
     }
     if (camera) {
         s.register_task<CommonFrameIo>("auto_exposure", [&](CommonFrameIo::second_type&& frame) {
-            static std::mutex mutex;
-            std::lock_guard<std::mutex> lock(mutex);
             if (mode == Mode::Blind) {
                 camera->set_ExposureTime(5000);
                 // camera->set_AcquisitionFrameRate(30);
@@ -486,7 +485,6 @@ int main(int argc, char** argv) {
             auto_aim_dbg->expanded.set(frame.expanded);
             auto_aim_dbg->img_frame.set(std::move(frame.img_frame.clone()));
         }
-
         return std::make_tuple(std::optional<DetIo::second_type>(std::move(batch_armors)));
     });
 

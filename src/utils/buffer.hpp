@@ -235,7 +235,6 @@ public:
         return main_queue_.size() + buffer_.size();
     }
 
-private:
     std::deque<T> main_queue_;
     std::unordered_map<int, T> buffer_;
     int current_id_;

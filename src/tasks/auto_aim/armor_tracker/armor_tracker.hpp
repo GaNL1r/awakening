@@ -16,6 +16,7 @@ public:
     );
     int get_count();
     void reset_count();
+    void set_sentry(bool is_sentry);
     AWAKENING_IMPL_DEFINITION(ArmorTracker)
 };
 } // namespace awakening::auto_aim

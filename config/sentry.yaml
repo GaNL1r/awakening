@@ -397,8 +397,8 @@ uvc_camera_test:
 
 
 brain:
-  enable: false
-  mode: home
+  enable: true
+  mode: dog
   home: 
     go_home_hp_ratio: 0.4
     home_bullet_num: 10

@@ -233,7 +233,7 @@ struct ToSenrty {
     uint16_t opponent_aerial_position_y;
     uint16_t opponent_sentry_position_x;
     uint16_t opponent_sentry_position_y;
-};
+} __attribute__((packed));
 struct MapRobotData {
     static constexpr uint16_t CMDID = 0x0305;
     uint16_t opponent_hero_position_x;
@@ -331,11 +331,11 @@ struct FromWifi {
         std::memcpy(&out, data.data(), sizeof(out));
         return out;
     }
-};
+} __attribute__((packed));
 struct ToWifi {
     static constexpr uint16_t CMDID = 0x06;
     uint8_t cmd_id;
     uint8_t robot_id;
     uint8_t jam_level;
-};
+} __attribute__((packed));
 } // namespace awakening::radar_io

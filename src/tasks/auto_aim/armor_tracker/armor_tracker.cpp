@@ -84,6 +84,13 @@ struct ArmorTracker::Impl {
         if (!found) {
             return false;
         }
+        if (iam_sentry) {
+            ArmorTarget::armor_pnp(init_target, camera_info, camera_cv_in_odom);
+            if (init_target.pose.translation().norm() > 5) {
+                return false;
+            }
+        }
+
         AWAKENING_INFO("init target: {}", string_by_armor_class(init_target.number));
         target.reset(init_target, cfg_, armors.timestamp, frame_id, camera_info, camera_cv_in_odom);
         target.track_state.tracker_state = ArmorTarget::TrackState::DETECTING;
@@ -172,6 +179,9 @@ struct ArmorTracker::Impl {
         if (found)
             ++found_count_;
     }
+    void set_sentry(bool is_sentry) {
+        iam_sentry = is_sentry;
+    }
 
     int lost_thres_;
     int is_none_purple_count_ = 0;
@@ -181,6 +191,7 @@ struct ArmorTracker::Impl {
     size_t pre_target_idx_ = 1;
     std::array<ArmorTarget, 2> target_buf_;
     ArmorTrackerCfg cfg_;
+    bool iam_sentry = false;
 };
 ArmorTracker::ArmorTracker(const YAML::Node& config) {
     _impl = std::make_unique<Impl>(config);
@@ -202,5 +213,8 @@ int ArmorTracker::get_count() {
 }
 void ArmorTracker::reset_count() {
     _impl->found_count_ = 0;
+}
+void ArmorTracker::set_sentry(bool is_sentry) {
+    _impl->set_sentry(is_sentry);
 }
 } // namespace awakening::auto_aim
