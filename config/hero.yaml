@@ -2,18 +2,18 @@ encoder:
   # ----- 编码器参数 -----
   fps: 30                       # 输出帧率
   target_bitrate: 65            # 目标比特率（kbps）
-  max_packets_per_sec: 30       # 每秒最大包数（令牌桶速率）
+  max_packets_per_sec: 50       # 每秒最大包数（令牌桶速率）
 
   # ----- 图像预处理参数 -----
   crop_size: 300                # 中心裁剪区域大小
-  output_w: 150                 # 编码输出宽度
-  output_h: 150                 # 编码输出高度
+  output_w: 128                 # 编码输出宽度
+  output_h: 128                 # 编码输出高度
 
   static_simplify: true         # 开启动静分离
   motion_threshold: 14          # 运动检测阈值
   motion_erode_px: 2            # 腐蚀
   motion_dilate_px: 6           # 膨胀
-  motion_trail_frames: 50       # 拖影历史帧数，0 表示关闭
+  motion_trail_frames: 0       # 拖影历史帧数，0 表示关闭
   trail_disable_motion_ratio: 0.5   # 拖影抑制运动比例阈值
   bg_update_alpha: 0.01         # 背景更新速度
   bg_blur_sigma: 0.1            # 静态模糊强度

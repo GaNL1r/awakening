@@ -170,65 +170,80 @@ int main(int argc, char** argv) {
     // 启动相机
     camera->start<CameraTag>("hik");
     if (serial) serial->start<SerialTag>("serial");
+    
 
     // ========== 编码线程 ==========
     // 编码线程
     // 独立推流线程（只推不拉）
     std::thread push_thread([&]() {
         using namespace std::chrono;
-        auto next_frame_time = steady_clock::now();
+        auto next_push = steady_clock::now();
         cv::Mat latest_frame;
-        bool has_frame = false;
+        bool has_new = false;
 
         while (running) {
-            // 取出最新帧，丢弃旧帧
+            // 拿最新帧
             {
                 std::unique_lock<std::mutex> lock(queue_mutex);
                 if (queue_cv.wait_for(lock, milliseconds(5), [&]{ return !frame_queue.empty() || !running; })) {
                     if (frame_queue.empty()) continue;
                     latest_frame = std::move(frame_queue.front());
                     frame_queue.pop();
-                    // 清空队列，只保留最新
                     while (!frame_queue.empty()) {
                         latest_frame = std::move(frame_queue.front());
                         frame_queue.pop();
                     }
-                    has_frame = true;
+                    has_new = true;
                 } else {
                     if (!running) break;
                     continue;
                 }
             }
 
-            // 等待到预定时间
+            // 等待至预定时间
             auto now = steady_clock::now();
-            if (now < next_frame_time) {
-                std::this_thread::sleep_until(next_frame_time);
+            if (now < next_push) {
+                std::this_thread::sleep_until(next_push);
                 now = steady_clock::now();
             }
 
-            // 推流（如果队列在 sleep 期间又有新帧，则自动丢弃旧帧，因为上面取的是之前保留的）
-            if (has_frame) {
+            if (has_new) {
                 encoder.push_frame(latest_frame);
-                has_frame = false;
+                has_new = false;
             }
-
-            // 计算下次推流时刻，避免累积误差
-            next_frame_time = std::max(now, next_frame_time + frame_interval);
+            next_push = std::max(now, next_push + frame_interval);
         }
     });
+    
     // 独立拉流 + 发送线程
     std::thread pull_thread([&]() {
+        using namespace std::chrono;
+        auto next_send = steady_clock::now();
         while (running) {
-            encoder.pull_and_packetize();   // 尝试拉取编码数据并分片入队
+            if (!encoder.is_pipeline_alive()) {   // 检测到管线失效，立即退出
+                AWAKENING_WARN("Encoder pipeline dead, exiting pull thread.");
+                running = false;
+                break;
+            }
+            encoder.pull_and_packetize();
             eyes_of_blind::BlindSend pkg;
             while (encoder.try_pop_packet(pkg)) {
+                // 严格 20ms 间隔
+                auto now = steady_clock::now();
+                if (now < next_send) {
+                    std::this_thread::sleep_until(next_send);
+                    now = steady_clock::now();
+                }
+                // 发送（串口 / MQTT）
                 if (serial && config["serial"]["enable"].as<bool>()) {
                     eyes_of_blind::SerialSendPacket send{};
-                    std::memcpy(&send, &pkg, sizeof(eyes_of_blind::BlindSend));
+                    std::memcpy(&send.data, &pkg, sizeof(eyes_of_blind::BlindSend));
                     serial->write(utils::to_vector(send));
                 } else if (use_mqtt && mqtt_client && mqtt_client->is_connected()) {
-                    if (loss_sim.should_drop()) continue;
+                    if (loss_sim.should_drop()) {
+                    next_send += milliseconds(20);  // 严格间隔，保留
+                    continue;}
+                    
                     std::array<uint8_t, eyes_of_blind::MAX_PACKET_SIZE> raw{};
                     std::memcpy(raw.data(), &pkg, eyes_of_blind::MAX_PACKET_SIZE);
                     doorlock_sniper::CustomByteBlock block;
@@ -237,9 +252,9 @@ int main(int argc, char** argv) {
                     if (block.SerializeToString(&serialized))
                         mqtt_client->publish(mqtt::make_message(mqtt_topic, serialized));
                 }
+                next_send = std::max(now, next_send + milliseconds(20));
             }
-            // 避免空转消耗 CPU，短暂睡眠
-            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+            std::this_thread::sleep_for(milliseconds(1));
         }
     });
     // 启动调度器
@@ -247,7 +262,7 @@ int main(int argc, char** argv) {
     s.run();
 
     // 等待退出信号
-    
+
     utils::SignalGuard::add_callback([&]() {
         running = false;
         queue_cv.notify_all();

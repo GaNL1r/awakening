@@ -18,6 +18,7 @@ public:
     void push_frame(const cv::Mat& frame);
     bool try_pop_packet(BlindSend& out);
     void pull_and_packetize(); 
+    bool is_pipeline_alive() const;
     struct Impl;
     std::unique_ptr<Impl> _impl;
 };

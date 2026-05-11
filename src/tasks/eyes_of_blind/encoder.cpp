@@ -115,6 +115,121 @@ struct Encoder::Impl {
     uint32_t gop_send_id_ = 0;
     std::chrono::steady_clock::time_point last_send_time_;
 
+    // 合并 P 帧 相关
+    std::vector<uint8_t> merge_buffer_;          // 合并后的原始数据
+    std::vector<size_t> merge_frame_lengths_;    // 每个子帧的长度
+    int merge_frame_count_ = 0;                  // 当前缓存的子帧数量
+    static constexpr int MERGE_MAX_FRAMES = 4;   // 最多合并 4 个 P 帧
+
+    std::chrono::steady_clock::time_point last_merge_time_;
+    std::atomic<bool> pipeline_alive_{true}; 
+
+    // 声明辅助函数
+    void flush_merged_pframes() {
+        if (merge_frame_count_ == 0) return;
+
+        if (merge_frame_count_ == 1) {
+            // 只有一帧，当作普通单 P 帧发送（带 FEC）
+            uint8_t flags = 0;   // 无合并标志
+            send_encoded_frame(merge_buffer_.data(), merge_frame_lengths_[0],
+                            frame_id_++, flags);
+        } else {
+            // 多帧合并
+            std::vector<uint8_t> payload;
+            payload.push_back(static_cast<uint8_t>(merge_frame_count_));
+            for (size_t len : merge_frame_lengths_) {
+                uint16_t l = static_cast<uint16_t>(len);
+                payload.push_back(l & 0xFF);
+                payload.push_back((l >> 8) & 0xFF);
+            }
+            payload.insert(payload.end(), merge_buffer_.begin(), merge_buffer_.end());
+
+            uint8_t flags = FLAG_MERGED | ((merge_frame_count_ & 0x1F) << 3);
+            send_encoded_frame(payload.data(), payload.size(), frame_id_++, flags);
+        }
+
+        merge_buffer_.clear();
+        merge_frame_lengths_.clear();
+        merge_frame_count_ = 0;
+    }
+
+    void send_encoded_frame(const uint8_t* data, size_t size, uint32_t frame_id, uint8_t flags) {
+        const size_t frag_payload = PAYLOAD_SIZE;  // 287
+        uint16_t frag_count = (size + frag_payload - 1) / frag_payload;
+        if (frag_count == 0) frag_count = 1;
+
+        // FEC 决策：合并帧或分片数 ≥ 2 时使用
+        bool use_fec = ((flags & FLAG_MERGED) || (frag_count >= 2));
+        uint16_t total_frags = use_fec ? frag_count + 1 : frag_count;
+
+        // 原子申请令牌
+        if (!bucket_.try_consume_bulk(total_frags)) {
+            AWAKENING_WARN("Dropping frame#{}: rate limit exceeded (need {}, have {})", frame_id, total_frags, bucket_.tokens);
+            return;
+        }
+
+        std::vector<BlindSend> packets;
+
+        // 生成数据分片
+        for (uint16_t i = 0; i < frag_count; ++i) {
+            BlindSend pkt{};
+            pkt.header.frame_id     = frame_id;
+            pkt.header.frag_idx     = i;
+            pkt.header.frag_count   = total_frags;
+            pkt.header.payload_size = static_cast<uint16_t>(std::min(frag_payload, size - i * frag_payload));
+            pkt.header.frame_size   = static_cast<uint16_t>(size);
+            pkt.header.flags        = flags;
+            std::memcpy(pkt.data.data(), data + i * frag_payload, pkt.header.payload_size);
+            packets.push_back(pkt);
+        }
+
+        // 生成 FEC 包
+        if (use_fec) {
+            BlindSend fec_pkt{};
+            fec_pkt.header.frame_id     = frame_id;
+            fec_pkt.header.frag_idx     = frag_count;    // 索引为数据分片数
+            fec_pkt.header.frag_count   = total_frags;
+            fec_pkt.header.frame_size   = static_cast<uint16_t>(size);
+            fec_pkt.header.flags        = flags | FLAG_FEC_PACKET;
+
+            std::vector<uint8_t> fec_data(PAYLOAD_SIZE, 0);
+            if (frag_count == 1) {
+                // 1+1：复制数据包内容
+                std::copy(packets[0].data.begin(), packets[0].data.begin() + PAYLOAD_SIZE, fec_data.begin());
+            } else {
+                for (auto& p : packets)
+                    for (size_t j = 0; j < PAYLOAD_SIZE; ++j)
+                        fec_data[j] ^= p.data[j];
+            }
+            fec_pkt.header.payload_size = PAYLOAD_SIZE;
+            std::memcpy(fec_pkt.data.data(), fec_data.data(), PAYLOAD_SIZE);
+            packets.push_back(fec_pkt);
+        }
+
+        // 入队（队列溢出时丢弃最旧包）
+        {
+            std::lock_guard<std::mutex> qlock(pkg_mutex_);
+            for (auto& p : packets) {
+                if (pkg_queue_.size() >= max_queue_packets_)
+                    pkg_queue_.pop_front();
+                pkg_queue_.push_back(p);
+            }
+        }
+
+        std::string frame_type;
+        if (flags & FLAG_MERGED) {
+            int merged_cnt = (flags >> 3) & 0x1F;
+            frame_type = "MERGED(" + std::to_string(merged_cnt) + ")";
+        } else if (flags & FLAG_KEYFRAME) {
+            frame_type = "IDR";
+        } else {
+            frame_type = "P";
+        }
+
+        AWAKENING_INFO("Frame#{} {} : {} bytes, data_frags={}, total_frags={}, FEC={}",
+            frame_id, frame_type, size, frag_count, total_frags, use_fec ? "YES" : "NO");
+    }
+
     Impl(const YAML::Node& config) {
         params_.load(config);
 
@@ -176,15 +291,17 @@ struct Encoder::Impl {
             "speed-preset",     9,                         
             "tune",             0x00000001,                
             "bframes",          0,
-            "ref",              2,
-            "key-int-max",      8,
+            "ref",              1,
+            "key-int-max",      20,
             "rc-lookahead",     0,
             "sync-lookahead",   0,
             "sliced-threads",   FALSE,
             "byte-stream",      TRUE,
             "aud",              TRUE,
-            "option-string",
+            "vbv-buf-capacity", 500,    // ms
+            "option-string",            
             "repeat-headers=1:"
+            "vbv-maxrate=60:"           // kbps
             "force-cfr=1:"
             "scenecut=0:"
             "open-gop=0:"
@@ -202,7 +319,7 @@ struct Encoder::Impl {
 
         // h264parse 配置
         // config-interval=-1: 仅在 IDR 帧前插入 SPS/PPS（默认行为）
-        g_object_set(parser, "config-interval", 1, "disable-passthrough", TRUE, nullptr);
+        g_object_set(parser, "config-interval", -1, "disable-passthrough", TRUE, nullptr);
 
         // 输出 caps：H.264 byte-stream（Au 对齐）
         GstCaps* h264_caps = gst_caps_new_simple(
@@ -238,8 +355,10 @@ struct Encoder::Impl {
         }
 
 
+        // 修改 bus watch：捕获 ERROR 和 EOS
         bus_ = gst_element_get_bus(pipeline_);
         gst_bus_add_watch(bus_, [](GstBus* bus, GstMessage* msg, gpointer data) -> gboolean {
+            auto* impl = static_cast<Impl*>(data);
             switch (GST_MESSAGE_TYPE(msg)) {
                 case GST_MESSAGE_ERROR: {
                     GError* err;
@@ -248,9 +367,16 @@ struct Encoder::Impl {
                     AWAKENING_ERROR("GStreamer ERROR: {} ({})", err->message, debug ? debug : "");
                     g_error_free(err);
                     g_free(debug);
+                    impl->pipeline_alive_.store(false);   // 标记管线失效
+                    break;
+                }
+                case GST_MESSAGE_EOS: {
+                    AWAKENING_WARN("GStreamer EOS received, marking pipeline as dead.");
+                    impl->pipeline_alive_.store(false);
                     break;
                 }
                 case GST_MESSAGE_WARNING: {
+                    // 保留原有警告打印
                     GError* warn;
                     gchar* debug;
                     gst_message_parse_warning(msg, &warn, &debug);
@@ -262,7 +388,7 @@ struct Encoder::Impl {
                 default: break;
             }
             return TRUE;
-        }, nullptr);
+        }, this);   // 传递 this 指针
     }
     void shutdown_gstreamer() {
         if (!pipeline_)
@@ -322,6 +448,10 @@ struct Encoder::Impl {
     void pull_stream_and_packetize() {
         static int pull_count = 0;
         // AWAKENING_INFO("pull_stream_and_packetize called (#{})", ++pull_count);
+        if (appsink_ && gst_app_sink_is_eos(GST_APP_SINK(appsink_))) {
+            pipeline_alive_.store(false);
+            return;
+        }
 
         GstSample* sample = gst_app_sink_try_pull_sample(GST_APP_SINK(appsink_), 0);
         if (!sample) {
@@ -337,6 +467,14 @@ struct Encoder::Impl {
                 no_sample_count = 0;
                 last_warn = now;
             }
+            if (merge_frame_count_ > 0) {
+                auto now = std::chrono::steady_clock::now();
+                auto dur = std::chrono::duration_cast<std::chrono::milliseconds>(now - last_merge_time_).count();
+                if (dur > 100) {   // 100ms 无新 P 帧
+                    flush_merged_pframes();
+                    last_merge_time_ = now;
+                }
+            }
             return;
         }
 
@@ -350,132 +488,60 @@ struct Encoder::Impl {
         }
 
         const uint8_t* data = map.data;
-        const size_t   size = map.size;
+        const size_t  frame_size = map.size;
 
-        // ----- 判断是否为 IDR (NAL type 5) -----
+        // 检测是否为 IDR
         bool is_idr = false;
-        for (size_t i = 0; i + 4 < size; ++i) {
-            if (data[i]==0x00 && data[i+1]==0x00 &&
-                data[i+2]==0x00 && data[i+3]==0x01 && i+4<size) {
+        for (size_t i = 0; i + 4 < frame_size; ++i) {
+            if (data[i]==0x00 && data[i+1]==0x00 && data[i+2]==0x00 && data[i+3]==0x01 && i+4<frame_size) {
                 if ((data[i+4] & 0x1F) == 5) { is_idr = true; break; }
             }
         }
+
+        // IDR 帧：先清空当前合并缓冲区
+        if (is_idr && merge_frame_count_ > 0) {
+            flush_merged_pframes();
+        }
         
-        // ----- 分片准备 -----
-        const size_t frag_payload = PAYLOAD_SIZE;
-        uint16_t frag_count = (size + frag_payload - 1) / frag_payload;
-        if (frag_count == 0) frag_count = 1;
+        if (!is_idr) {
+            // ---- P 帧处理 ----
+            // 计算如果加入当前帧，新合并包的 payload 大小
+            size_t new_count = merge_frame_count_ + 1;
+            size_t header_size = 1 + new_count * 2;   // 1字节帧数 + 2*N个长度
+            size_t total_data = merge_buffer_.size() + frame_size;
 
-        std::vector<std::vector<uint8_t>> fragments(frag_count);
-        for (uint16_t i = 0; i < frag_count; ++i) {
-            size_t offset = i * frag_payload;
-            size_t copy   = std::min(frag_payload, size - offset);
-            fragments[i].assign(data + offset, data + offset + copy);
-        }
-
-        // ----- FEC 决策 -----
-        bool use_fec = ( is_idr ||frag_count >= 2);
-        uint16_t total_frags = use_fec ? (frag_count + 1) : frag_count;
-
-        uint32_t frame_id = frame_id_++;
-
-        // ----- 令牌批量申请 -----
-        if (!bucket_.try_consume_bulk(total_frags)) {
-            // 令牌不足，整帧丢弃，直接返回（解绑缓冲区后返回）
-            gst_buffer_unmap(buffer, &map);
-            gst_sample_unref(sample);
-            return;
-        }
-        // 日志
-        const char* frame_type = is_idr ? "IDR" : "P";
-        AWAKENING_INFO("Frame#{} {} : {} bytes, data_frags={}, total_frags={}, FEC={}",
-                    frame_id, frame_type, size, frag_count, total_frags,
-                    use_fec ? "YES" : "NO");
-
-        // ----- 发送数据分片（直接入队，不再单独扣令牌）-----
-        std::vector<BlindSend> packets;
-        for (uint16_t i = 0; i < frag_count; ++i) {
-            BlindSend pkt{};
-            pkt.header.frame_id     = frame_id;
-            pkt.header.frag_idx     = i;
-            pkt.header.frag_count   = total_frags;
-            pkt.header.payload_size = static_cast<uint16_t>(fragments[i].size());
-            pkt.header.frame_size   = static_cast<uint16_t>(size);
-            pkt.header.flags        = is_idr ? FLAG_KEYFRAME : 0;
-            std::memcpy(pkt.data.data(), fragments[i].data(), fragments[i].size());
-            packets.push_back(pkt);
-        }
-
-        // ----- 生成 FEC 冗余包（若需要）-----
-        if (use_fec) {
-            BlindSend fec_pkt{};
-            fec_pkt.header.frame_id     = frame_id;
-            fec_pkt.header.frag_idx     = frag_count;           // 索引固定为分片数
-            fec_pkt.header.frag_count   = total_frags;
-            fec_pkt.header.frame_size   = static_cast<uint16_t>(size);
-            fec_pkt.header.flags        = FLAG_FEC_PACKET | (is_idr ? FLAG_KEYFRAME : 0);
-
-            std::vector<uint8_t> fec_data(PAYLOAD_SIZE, 0);
-            if (frag_count == 1) {
-                fec_data = fragments[0];                 // 1+1：复制内容
+            if (new_count <= MERGE_MAX_FRAMES && (header_size + total_data) <= PAYLOAD_SIZE) {
+                // 可以合并
+                merge_buffer_.insert(merge_buffer_.end(), data, data + frame_size);
+                merge_frame_lengths_.push_back(frame_size);
+                merge_frame_count_ = new_count;
             } else {
-                for (uint16_t i = 0; i < frag_count; ++i)
-                    for (size_t j = 0; j < fragments[i].size(); ++j)
-                        fec_data[j] ^= fragments[i][j];
-            }
-            fec_pkt.header.payload_size = (frag_count == 1) ? fragments[0].size() : PAYLOAD_SIZE;
-            std::memcpy(fec_pkt.data.data(), fec_data.data(), fec_pkt.header.payload_size);
-            packets.push_back(fec_pkt);
-        }
-
-        // 所有包一次性入队（队列满时丢弃最旧的包）
-        {
-            std::lock_guard<std::mutex> qlock(pkg_mutex_);
-            for (auto& pkt : packets) {
-                if (pkg_queue_.size() >= max_queue_packets_) {
-                    pkg_queue_.pop_front();      // 队列溢出，丢弃最旧包
+                // 无法继续合并，先把旧合并帧发出（如果有）
+                if (merge_frame_count_ > 0) {
+                    flush_merged_pframes();
                 }
-                pkg_queue_.push_back(pkt);
+                // 然后判断当前帧是否太大（连单独一个包都放不下）
+                size_t single_header = 1 + 2;   // 单一帧的合并结构：1字节帧数+2字节长度
+                if (single_header + frame_size <= PAYLOAD_SIZE) {
+                    // 当前帧可以作为新的合并帧的开始（暂时只有它自己）
+                    merge_buffer_.assign(data, data + frame_size);
+                    merge_frame_lengths_.push_back(frame_size);
+                    merge_frame_count_ = 1;
+                } else {
+                    // 单帧已经超过一个包，必须立即发送（带 FEC 保护）
+                    uint8_t flags = 0;
+                    send_encoded_frame(data, frame_size, frame_id_++, flags);
+                }
             }
+        } else {
+            // IDR 帧直接发送（不带合并标志）
+            uint8_t flags = FLAG_KEYFRAME;
+            send_encoded_frame(data, frame_size, frame_id_++, flags);
         }
 
         gst_buffer_unmap(buffer, &map);
         gst_sample_unref(sample);
     }
-
-    // void send_as_frame(const uint8_t* data, size_t size, bool is_keyframe) {
-    //     const size_t frag_payload = PAYLOAD_SIZE;
-    //     const uint16_t frag_count = (size + frag_payload - 1) / frag_payload;
-    //     uint32_t current_frame_id = frame_id_++;
-        
-    //     AWAKENING_INFO("  Frame#{}: {} bytes -> {} fragments", 
-    //         current_frame_id, size, frag_count);
-        
-    //     for (uint16_t i = 0; i < frag_count; ++i) {
-    //         if (!bucket_.consume()) {
-    //             AWAKENING_WARN("  Token bucket exhausted at frag {}/{}", i, frag_count);
-    //             break;
-    //         }
-            
-    //         BlindSend pkt{};
-    //         pkt.header.frame_id = current_frame_id;
-    //         pkt.header.frag_idx = i;
-    //         pkt.header.frag_count = frag_count;
-    //         size_t offset = i * frag_payload;
-    //         size_t remain = size - offset;
-    //         size_t copy_size = std::min(remain, frag_payload);
-    //         pkt.header.payload_size = static_cast<uint16_t>(copy_size);
-    //         pkt.header.flags = is_keyframe ? 0x01 : 0x00;
-    //         std::memcpy(pkt.data.data(), data + offset, copy_size);
-            
-    //         {
-    //             std::lock_guard<std::mutex> qlock(pkg_mutex_);
-    //             if (pkg_queue_.size() < max_queue_packets_) {
-    //                 pkg_queue_.push_back(pkt);
-    //             }
-    //         }
-    //     }
-    // }
 
     cv::Mat preprocess(const cv::Mat& frame) {
         if (!preprocessor_)
@@ -520,6 +586,10 @@ void Encoder::pull_and_packetize() {
 
 bool Encoder::try_pop_packet(BlindSend& out) {
     return _impl->try_pop_packet(out);
+}
+
+bool Encoder::is_pipeline_alive() const {
+    return _impl->pipeline_alive_.load();
 }
 
 } // namespace awakening::eyes_of_blind
