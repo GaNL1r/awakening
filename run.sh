@@ -98,7 +98,11 @@ if [ "$1" == "rebuild" ]; then
     do_build
     exit 0
 fi
-
+if [ "$1" == "build" ]; then
+    echo -e "${yellow}<--- building --->${reset}"
+    do_build
+    exit 0
+fi
 # ==============================
 # RUN / DEBUG
 # ==============================
