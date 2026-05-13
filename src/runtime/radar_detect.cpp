@@ -586,9 +586,7 @@ int main(int argc, char** argv) {
         size_t copy_bytes = std::min(s.size() * sizeof(char16_t), max_bytes - 2);
         std::memcpy(to_no1.user_data, s.data(), copy_bytes);
         static uint8_t double_vulnerability_count = 0;
-        if (radar_info.double_vulnerability_chance > 0) {
-            double_vulnerability_count++;
-        }
+        double_vulnerability_count = (double_vulnerability_count + 1) % 3;
         radar_cmd.radar_cmd = double_vulnerability_count;
         radar_cmd.password_cmd = 2;
         radar_cmd.password_1 = 'r';
