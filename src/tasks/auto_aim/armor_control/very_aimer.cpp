@@ -738,8 +738,6 @@ struct VeryAimer::Impl {
                                   int horizon,
                                   double dt) -> bool {
                 int half = horizon / 2;
-                const int delay_steps = params_.control_delay * 2.0 / dt;
-
                 for (int i = half; i >= 1; --i) {
                     double t = -i * dt;
 
@@ -793,17 +791,24 @@ struct VeryAimer::Impl {
             limit_traj_.build_limit(params_.max_yaw_acc, params_.max_pitch_acc, time_in_traj);
 
             if (fsm == AutoAimFsm::AIM_WHOLE_CAR_CENTER) {
-                aim_traj_.clear();
-                aim_traj_.reserve(horizon + 1);
                 aim_center_target_traj_.clear();
 
                 aim_center_target_traj_.reserve(horizon + 1);
+                auto aim_center_target_hit_ctx_opt =
+                    get_hit(target, bullet_speed, AutoAimFsm::AIM_WHOLE_CAR_ARMOR);
+                if (!aim_center_target_hit_ctx_opt) {
+                    cmd.appear = false;
+                    return cmd;
+                }
 
+                auto aim_center_target_hit_ctx = aim_center_target_hit_ctx_opt.value();
                 aim_center_target_traj_cp0_ = select_and_get_control_point(
-                    hit_ctx.hit_time_target,
+                    aim_center_target_hit_ctx.hit_time_target,
                     bullet_speed,
                     AutoAimFsm::AIM_WHOLE_CAR_ARMOR
                 );
+                aim_traj_.clear();
+                aim_traj_.reserve(horizon + 1);
                 // Trajectory<AimPoint, double> __aim_traj;
                 if (!build_traj(
                         aim_center_target_traj_,

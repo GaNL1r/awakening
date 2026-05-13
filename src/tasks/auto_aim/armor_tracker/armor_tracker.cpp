@@ -48,8 +48,10 @@ struct ArmorTracker::Impl {
             process(pre_target_idx_);
 
             if (pre.track_state.tracker_state == ArmorTarget::TrackState::TRACKING) {
-                std::swap(cur, pre);
-                pre.track_state.tracker_state = ArmorTarget::TrackState::LOST;
+                if (cur.target_number != ArmorClass::OUTPOST) {
+                    std::swap(cur, pre);
+                    pre.track_state.tracker_state = ArmorTarget::TrackState::LOST;
+                }
             }
         } else if (cur.track_state.tracker_state == ArmorTarget::TrackState::TRACKING) {
             pre.track_state.tracker_state = ArmorTarget::TrackState::LOST;

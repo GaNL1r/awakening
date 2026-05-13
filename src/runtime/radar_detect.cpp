@@ -230,6 +230,11 @@ int main(int argc, char** argv) {
 
         return std::make_tuple(std::optional<CommonFrameIo::second_type>(std::move(frame)));
     });
+    if (video_saver) {
+        s.register_task<CameraIO>("save", [&](CameraIO::second_type&& f) {
+            video_saver->write_frame(f.src_img);
+        });
+    }
     s.register_task<CommonFrameIo, DetIo>("detector", [&](CommonFrameIo::second_type&& frame) {
         static std::unique_ptr<std::counting_semaphore<>> detector_sem;
         if (!detector_sem) {
@@ -285,9 +290,7 @@ int main(int argc, char** argv) {
         debug_ctx.outpost.set(outpost_armors);
         cars_queue.enqueue(cars);
         auto batch_cars = cars_queue.dequeue_batch();
-        if (video_saver) {
-            video_saver->write_frame(frame.img_frame.src_img);
-        }
+
         debug_ctx.img_frame.set(std::move(frame.img_frame));
         return std::make_tuple(std::optional<DetIo::second_type>(std::move(batch_cars)));
     });

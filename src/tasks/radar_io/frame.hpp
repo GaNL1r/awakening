@@ -1,6 +1,8 @@
 #pragma once
 
+#include <iostream>
 #include "tasks/radar_io/crc.hpp"
+#include "utils/logger.hpp"
 #include "utils/utils.hpp"
 #include <cstddef>
 #include <cstdint>
@@ -154,10 +156,8 @@ struct RadarInfo {
     uint8_t encryption_level = 1;
 
     bool can_change_key = false;
-
     static RadarInfo create(const uint8_t* data, size_t len) {
         RadarInfo r;
-
         if (len < 1)
             return r;
 
@@ -180,7 +180,12 @@ struct RadarInfo {
 
         // bit5
         r.can_change_key = get(5);
+        static uint8_t last_level = 255;
 
+        if (last_level != r.encryption_level) {
+            last_level = r.encryption_level;
+            AWAKENING_INFO("Encryption level changed -> {}", r.encryption_level);
+        }
         return r;
     }
 

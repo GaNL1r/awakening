@@ -350,6 +350,9 @@ int main(int argc, char** argv) {
                 );
                 enemy_color = EnemyColor(robo.detect_color);
                 bullet_speed = robo.bullet_speed;
+                if (bullet_speed > 12.2) {
+                    bullet_speed = 12.0;
+                }
                 robo.update_log();
                 static uint32_t last_bullet_count = 0;
                 if (robo.bullet_count > last_bullet_count) {
@@ -568,10 +571,10 @@ int main(int argc, char** argv) {
             if (auto_aim_fsm != auto_aim::AutoAimFsm::AIM_SINGLE_ARMOR
                 && target.target_number == auto_aim::ArmorClass::OUTPOST)
             {
-                auto_aim_fsm_controller.fsm_state_ = auto_aim::AutoAimFsm::AIM_WHOLE_CAR_CENTER;
+                auto_aim_fsm = auto_aim::AutoAimFsm::AIM_WHOLE_CAR_CENTER;
             }
             very_aimer.set_operator_offset(operator_offset);
-            cmd = very_aimer.very_aim(target, bullet_speed, auto_aim_fsm_controller.get_state());
+            cmd = very_aimer.very_aim(target, bullet_speed, auto_aim_fsm);
         }
 
         if (serial) {
