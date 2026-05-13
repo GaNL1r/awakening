@@ -103,7 +103,7 @@ auto_aim_fsm:
 
 very_aimer:
   base_yaw_offset: -0.0
-  base_pitch_offset: -1.0
+  base_pitch_offset: -2.5
   # base_yaw_offset: -0.0
   # base_pitch_offset: -0.0
   sample_total_time: 1.0

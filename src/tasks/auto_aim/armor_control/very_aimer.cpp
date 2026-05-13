@@ -535,7 +535,7 @@ struct VeryAimer::Impl {
             if (auto_aim_fsm == AutoAimFsm::AIM_WHOLE_CAR_PAIR
                 && target.target_number != ArmorClass::OUTPOST) {
                 std::vector<int> all;
-                if (target_state.h() > 0) {
+                if (target_state.h() < 0) {
                     all.push_back(1);
                     all.push_back(3);
                 } else {

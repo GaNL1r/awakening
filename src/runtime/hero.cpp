@@ -519,9 +519,7 @@ int main(int argc, char** argv) {
                 __armor_target.get_target_state().vyaw(),
                 __armor_target.jumped
             );
-            if (__armor_target.target_number == auto_aim::ArmorClass::OUTPOST) {
-                auto_aim_fsm_controller.fsm_state_ = auto_aim::AutoAimFsm::AIM_WHOLE_CAR_CENTER;
-            }
+
             armor_target.write(__armor_target);
 
             auto latency_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -566,6 +564,12 @@ int main(int argc, char** argv) {
             .appear = false,
         };
         if (target.check()) {
+            auto auto_aim_fsm = auto_aim_fsm_controller.get_state();
+            if (auto_aim_fsm != auto_aim::AutoAimFsm::AIM_SINGLE_ARMOR
+                && target.target_number == auto_aim::ArmorClass::OUTPOST)
+            {
+                auto_aim_fsm_controller.fsm_state_ = auto_aim::AutoAimFsm::AIM_WHOLE_CAR_CENTER;
+            }
             very_aimer.set_operator_offset(operator_offset);
             cmd = very_aimer.very_aim(target, bullet_speed, auto_aim_fsm_controller.get_state());
         }

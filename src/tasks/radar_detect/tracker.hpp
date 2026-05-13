@@ -93,7 +93,7 @@ public:
         tracker_config_.load(config);
     }
     float compute_iou(const cv::Rect2f& a, const cv::Rect2f& b) const noexcept {
-        // Calculate intersection area
+        // 计算交集坐标
         float inter_left = std::max(a.x, b.x);
         float inter_right = std::min(a.x + a.width, b.x + b.width);
         float inter_top = std::max(a.y, b.y);
@@ -102,7 +102,7 @@ public:
         float inter_width = inter_right - inter_left;
         float inter_height = inter_bottom - inter_top;
 
-        // No intersection (either width or height is zero or negative)
+        // 没有交集
         if (inter_width <= 0 || inter_height <= 0)
             return 0.0f;
 
@@ -110,8 +110,8 @@ public:
         float area_a = a.width * a.height;
         float area_b = b.width * b.height;
 
-        // IoU formula: intersection area / union area
-        return inter_area / (area_a + area_b - inter_area);
+        // 用较小面积归一化
+        return inter_area / std::min(area_a, area_b);
     }
     void nms(std::vector<Car>& cars) const noexcept {
         std::sort(cars.begin(), cars.end(), [](const Car& a, const Car& b) {
