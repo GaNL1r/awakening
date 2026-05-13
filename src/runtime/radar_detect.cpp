@@ -295,6 +295,8 @@ int main(int argc, char** argv) {
         return std::make_tuple(std::optional<DetIo::second_type>(std::move(batch_cars)));
     });
     s.register_task<DetIo>("tracker", [&](DetIo::second_type&& io) {
+        static std::mutex mutex;
+        std::lock_guard<std::mutex> lock(mutex);
         for (const auto& cars: io) {
             tracker.update(cars.cars, cars.t);
             car_pool.update(tracker.get_targets());
