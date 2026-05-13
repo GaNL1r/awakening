@@ -1,7 +1,6 @@
 import cv2
 import yaml
 import numpy as np
-import itertools
 
 # =============================
 # YAML 文件路径
@@ -27,14 +26,12 @@ if img is None:
     raise RuntimeError("图像读取失败")
 
 display = img.copy()
-
-# =============================
-# 2D 点采集
-# =============================
 pts2d = []
 
+# =============================
+# 重绘函数
+# =============================
 def redraw_display():
-    """重绘所有已点击点"""
     global display
     display = img.copy()
     for idx, (x, y) in enumerate(pts2d):
@@ -44,7 +41,6 @@ def redraw_display():
     cv2.imshow("Image", display)
 
 def mouse_callback(event, x, y, flags, param):
-    global display, pts2d
     if event == cv2.EVENT_LBUTTONDOWN:
         pts2d.append([x, y])
         redraw_display()
@@ -71,9 +67,7 @@ while True:
     if key == 27:  # ESC 退出
         break
 
-    # =============================
     # 撤回最后一个点
-    # =============================
     if key == ord('u'):
         if pts2d:
             removed = pts2d.pop()
@@ -81,12 +75,9 @@ while True:
             redraw_display()
         continue
 
-    # =============================
-    # 方向键微调最后一个点
-    # =============================
+    # 微调最后一个点
     if pts2d:
         dx, dy = 0, 0
-        # 小键盘方向键值
         if key == 81:   # 左
             dx = -1
         elif key == 82: # 上
@@ -101,101 +92,47 @@ while True:
             redraw_display()
             print(f"微调最后一个点: {pts2d[-1]}")
 
-    # =============================
     # 运行PnP
-    # =============================
     if key == 13:  # Enter 键
-
         if len(pts2d) < 4:
             print("至少需要4个点")
             continue
 
         pts2d_np = np.array(pts2d, dtype=np.float32)
-        M = len(pts2d_np)
-        N = len(pts3d)
-
-        best_rvec, best_tvec = None, None
-        best_error = float("inf")
-        best_indices = None
 
         # =============================
-        # 暴力匹配
+        # 顺序对应 PnP
         # =============================
-        for indices in itertools.permutations(range(N), M):
-            pts3d_sub = pts3d[list(indices)]
-
-            success, rvec, tvec = cv2.solvePnP(
-                pts3d_sub, pts2d_np,
-                camera_matrix, dist_coeffs,
-                flags=cv2.SOLVEPNP_ITERATIVE
-            )
-
-            if not success:
-                continue
-
-            reproj, _ = cv2.projectPoints(
-                pts3d_sub, rvec, tvec,
-                camera_matrix, dist_coeffs
-            )
-            reproj = reproj.reshape(-1, 2)
-
-            err = np.mean(np.linalg.norm(reproj - pts2d_np, axis=1))
-
-            if err < best_error:
-                best_error = err
-                best_rvec, best_tvec = rvec, tvec
-                best_indices = indices
-
-        if best_rvec is None:
-            print("PnP失败")
-            continue
-
-        print("\n===== 初步PnP结果 =====")
-        print("best indices:", best_indices)
-        print("rvec:\n", best_rvec)
-        print("tvec:\n", best_tvec)
-        print("error:", best_error)
-
-        # =============================
-        # refine PnP
-        # =============================
-        pts3d_best = pts3d[list(best_indices)]
-
-        success, rvec_opt, tvec_opt = cv2.solvePnP(
-            pts3d_best, pts2d_np,
+        success, rvec, tvec = cv2.solvePnP(
+            pts3d[:len(pts2d_np)], pts2d_np,
             camera_matrix, dist_coeffs,
-            rvec=best_rvec,
-            tvec=best_tvec,
-            useExtrinsicGuess=True,
             flags=cv2.SOLVEPNP_ITERATIVE
         )
 
-        # =============================
-        # 世界->相机 (Rwc, twc)
-        # =============================
-        R_wc, _ = cv2.Rodrigues(rvec_opt)
-        t_wc = tvec_opt
+        if not success:
+            print("PnP失败")
+            continue
 
-        # =============================
+        # 世界->相机
+        R_wc, _ = cv2.Rodrigues(rvec)
+        t_wc = tvec
+
         # 相机->世界
-        # =============================
         R_cw = R_wc.T
         t_cw = -R_wc.T @ t_wc
 
-        print("\n==============================")
+        print("\n===== PnP结果 =====")
+        print("rvec:\n", rvec)
+        print("tvec:\n", tvec)
         print("R_cw:\n", R_cw)
         print("t_cw:\n", t_cw)
-        print("==============================")
 
-        # =============================
         # 保存 YAML
-        # =============================
         yaml_data = {
             "t": t_cw.flatten().tolist(),
             "R": R_cw.flatten().tolist(),
             "cal_pts": [list(p) for p in pts2d_np.astype(int)]
         }
-
         yaml_path = "PnP_result.yaml"
         with open(yaml_path, "w") as f:
             f.write(f"t: {yaml_data['t']}\n")
@@ -206,11 +143,9 @@ while True:
 
         print(f"✅ YAML 保存完成: {yaml_path}")
 
-        # =============================
         # 重投影可视化
-        # =============================
         reproj, _ = cv2.projectPoints(
-            pts3d_best, rvec_opt, tvec_opt,
+            pts3d[:len(pts2d_np)], rvec, tvec,
             camera_matrix, dist_coeffs
         )
         reproj = reproj.reshape(-1, 2)

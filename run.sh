@@ -25,7 +25,6 @@ blue="\033[1;34m"
 yellow="\033[1;33m"
 red="\033[1;31m"
 reset="\033[0m"
-
 # ==============================
 # 加载 bashrc
 # ==============================
@@ -106,7 +105,7 @@ fi
 # ==============================
 # RUN / DEBUG
 # ==============================
-if [[ "$1" == "run" || "$1" == "debug" ]]; then
+if [[ "$1" == "run" || "$1" == "debug" || "$1" == "race" ]]; then
     MODE="$1"
     shift
     if [ $# -lt 1 ]; then
@@ -115,7 +114,9 @@ if [[ "$1" == "run" || "$1" == "debug" ]]; then
     fi
 
     # 每次 run/debug 前都 build
-    do_build
+    if [[ "$MODE" != "race" ]]; then
+        do_build
+    fi
 
     RUN_PROGRAM="$BIN_DIR/$1"
     shift
@@ -123,7 +124,7 @@ if [[ "$1" == "run" || "$1" == "debug" ]]; then
 
     echo -e "${yellow}<--- Running awakening ($MODE) --->${reset}"
 
-    if [ "$MODE" == "debug" ]; then
+    if [[ "$MODE" == "debug" ]]; then
         echo -e "${yellow}Starting GDB with program: $RUN_PROGRAM ...${reset}"
         gdb --args "$RUN_PROGRAM" "${ORIGINAL_ARGS[@]}"
     else

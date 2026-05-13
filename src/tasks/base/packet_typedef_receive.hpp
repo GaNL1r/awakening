@@ -162,5 +162,16 @@ struct SentryRefereeReceive {
         });
     }
 } __attribute__((packed));
+struct HeroMode {
+    static constexpr uint8_t ID = 0x07;
+    uint8_t mode; //o:auto_aim 1:blind
+    static std::optional<HeroMode> create(const std::vector<uint8_t>& data) {
+        if (data.size() != sizeof(HeroMode) || data[0] != ID)
+            return std::nullopt;
 
+        HeroMode out;
+        std::memcpy(&out, data.data(), sizeof(out));
+        return out;
+    }
+};
 } // namespace awakening

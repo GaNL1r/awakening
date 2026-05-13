@@ -1,4 +1,4 @@
-enemy_color: blue
+enemy_color: red
 max_infer_num: 5
 bullet_speed: 21.0
 
@@ -50,10 +50,9 @@ auto_exposure:
   tolerance: 3.0
   step_gain: 15.0
   decay_step: 1.0
-  exposure_min: 100.0
-  exposure_max: 3500.0
+  exposure_min: 200.0
+  exposure_max: 5500.0
   control_interval_ms: 300
-
 
 armor_detector:
   armor_infer:
@@ -398,10 +397,17 @@ uvc_camera_test:
 
 brain:
   enable: true
-  mode: dog
+  mode: home
+  
   home: 
     go_home_hp_ratio: 0.4
     home_bullet_num: 10
+    start_in_referee_map: 
+      t: [3.3, 8, -1.6]
+      R: [1.0,0.0,0.0,0.0,1.0,0.0,0.0,0.0,1.0]
   dog:
     go_home_hp_ratio: 0.4
     home_bullet_num: 10
+    start_in_referee_map: 
+      t: [3.3, 8, -1.6]
+      R: [1.0,0.0,0.0,0.0,1.0,0.0,0.0,0.0,1.0]

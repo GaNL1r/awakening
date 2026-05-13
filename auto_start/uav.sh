@@ -8,7 +8,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORK_DIR="$(dirname "$SCRIPT_DIR")"
 
 ACTION=$1 
-echo "正在操作： leg"
+echo "正在操作： uav"
 echo "📂  脚本路径: $SCRIPT_DIR"
 echo "🏗  工作区路径: $WORK_DIR"
 echo "🧾  目标 Service 文件: $SERVICE_FILE"
@@ -48,14 +48,14 @@ install_service() {
     echo "✏️  正在生成新的 Service 文件..."
     sudo tee "$SERVICE_FILE" > /dev/null <<EOF
 [Unit]
-Description=AWAKENING LEG Service
+Description=AWAKENING UAV Service
 After=network.target
 
 [Service]
 Type=simple
 User=root
 WorkingDirectory=${WORK_DIR}
-ExecStart=${WORK_DIR}/run.sh race auto_aim leg false
+ExecStart=${WORK_DIR}/run.sh race auto_aim uav false
 Restart=always
 RestartSec=5
 StandardOutput=journal

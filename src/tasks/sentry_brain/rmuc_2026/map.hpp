@@ -25,6 +25,7 @@ MAP_KEY(enemy_second_step_bottom, 0, 0, 0)
 MAP_KEY(enemy_outpost, 0, 0, 0)
 MAP_KEY(enemy_highlands_gain, 0, 0, 0)
 MAP_KEY(enemy_jiansudai_u, 0, 0, 0)
+
 using MapKeys = std::tuple<
     start_t,
     home_t,

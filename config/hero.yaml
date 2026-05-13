@@ -21,9 +21,9 @@ player:
 tf:
   camera_in_gimbal:
     t: [0.21,0.00,0.08]
-    R: [ 0.98480775,  0.    ,     -0.17364818,
+    R: [ 0.9781476,   0.    ,      0.20791169,
        0. ,         1.    ,      0. ,
-       0.17364818,  0. ,         0.98480775]
+       -0.20791169 , 0.   ,       0.9781476]
   shoot_in_gimbal:
     t: [0.2,0.0,0.0]
     R: [1.0,0.0,0.0,0.0,1.0,0.0,0.0,0.0,1.0]
@@ -43,7 +43,7 @@ auto_exposure:
   step_gain: 15.0
   decay_step: 1.0
   exposure_min: 200.0
-  exposure_max: 3500.0
+  exposure_max: 5500.0
   control_interval_ms: 300
 
 
@@ -94,23 +94,23 @@ armor_tracker:
 auto_aim_fsm:
   single_whole_up: 1.5 
   single_whole_down: 1.0
-  whole_pair_up: 16.5 
-  whole_pair_down: 7.5 #1s内至少换2次板子  2pi  否则轨迹规划无意义
+  whole_pair_up: 3.5 
+  whole_pair_down: 2.5 #1s内至少换2次板子  2pi  否则轨迹规划无意义
   pair_center_up: 16.5
   pair_center_down: 15.0
   transfer_thresh: 50
 
 
 very_aimer:
-  base_yaw_offset: -1.0
-  base_pitch_offset: -2.5
+  base_yaw_offset: -0.0
+  base_pitch_offset: -1.0
   # base_yaw_offset: -0.0
   # base_pitch_offset: -0.0
   sample_total_time: 1.0
   
   sample_horizon: 200
 
-  control_delay: 0.1
+  control_delay: 0.25
   
   max_yaw_acc: 40
   #全向yaw加速度测算37
@@ -118,7 +118,7 @@ very_aimer:
   
 
   prediction_delay: 0.00
-  aim_center_more_prediction_time: 0.0
+  aim_center_more_prediction_time: 0.2
   comming_angle: 70
   leaving_angle: 20
 

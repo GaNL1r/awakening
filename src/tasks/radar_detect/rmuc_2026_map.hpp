@@ -84,6 +84,8 @@ public:
             robot_guesses[std::to_underlying(CarClass::B3)] = self_3;
             self_4.set_car_class(CarClass::B4);
             robot_guesses[std::to_underlying(CarClass::B4)] = self_4;
+            self_6.set_car_class(CarClass::B6);
+            robot_guesses[std::to_underlying(CarClass::B6)] = self_6;
             self_7.set_car_class(CarClass::B7);
             robot_guesses[std::to_underlying(CarClass::B7)] = self_7;
         }

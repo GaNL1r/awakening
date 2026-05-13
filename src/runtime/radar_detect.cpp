@@ -15,6 +15,7 @@
 #include "utils/drivers/hik_camera.hpp"
 #include "utils/drivers/serial_driver.hpp"
 #include "utils/drivers/video_player.hpp"
+#include "utils/io/video_save.hpp"
 #include "utils/logger.hpp"
 #include "utils/runtime_tf.hpp"
 #include "utils/semaphore_guard.hpp"
@@ -94,6 +95,23 @@ struct LogCtx {
         receive_wifi_count = 0;
     }
 };
+static constexpr auto RECORD_FOLDER_PATH_ARR = utils::concat(ROOT_DIR, "/record/radar");
+static constexpr std::string_view RECORD_FOLDER_PATH(RECORD_FOLDER_PATH_ARR.data());
+inline std::string generate_record_filename(const std::string& folder_path) {
+    auto now = std::chrono::system_clock::now();
+    auto t = std::chrono::system_clock::to_time_t(now);
+    std::tm tm {};
+
+#ifdef _WIN32
+    localtime_s(&tm, &t);
+#else
+    localtime_r(&t, &tm);
+#endif
+
+    std::ostringstream oss;
+    oss << folder_path << "/" << std::put_time(&tm, "%Y-%m-%d_%H-%M-%S") << ".avi";
+    return oss.str();
+}
 int main(int argc, char** argv) {
     print_banner();
     auto& signal = utils::SignalGuard::instance();
@@ -135,6 +153,7 @@ int main(int argc, char** argv) {
     }
     std::unique_ptr<VideoPlayer> video;
     std::unique_ptr<HikCamera> camera;
+    std::unique_ptr<VideoSaver> video_saver;
     utils::SignalGuard::add_callback([&]() {
         if (camera) {
             camera->stop();
@@ -146,6 +165,8 @@ int main(int argc, char** argv) {
         video = std::make_unique<VideoPlayer>(camera_config["video"], s);
     } else {
         camera = std::make_unique<HikCamera>(camera_config["hik_camera"], s);
+        video_saver =
+            std::make_unique<VideoSaver>(generate_record_filename(std::string(RECORD_FOLDER_PATH)));
     }
     if (camera) {
         camera->init();
@@ -264,6 +285,9 @@ int main(int argc, char** argv) {
         debug_ctx.outpost.set(outpost_armors);
         cars_queue.enqueue(cars);
         auto batch_cars = cars_queue.dequeue_batch();
+        if (video_saver) {
+            video_saver->write_frame(frame.img_frame.src_img);
+        }
         debug_ctx.img_frame.set(std::move(frame.img_frame));
         return std::make_tuple(std::optional<DetIo::second_type>(std::move(batch_cars)));
     });
@@ -467,10 +491,12 @@ int main(int argc, char** argv) {
                 if (wifi.rf_info_count > rf_info_count) {
                     rf_info_count = wifi.rf_info_count;
                     rf_key_right = true;
+                    AWAKENING_INFO("receive ok rf key");
                 }
                 if (wifi.rf_jam_count > rf_jam_count) {
                     rf_jam_count = wifi.rf_jam_count;
                     rf_info_time = Clock::now();
+                    AWAKENING_INFO("receive ok rf info");
                 }
                 log_ctx.receive_wifi_count++;
             }
@@ -571,6 +597,14 @@ int main(int argc, char** argv) {
         radar_cmd.password_4 = '0';
         radar_cmd.password_5 = '2';
         radar_cmd.password_6 = '6';
+        if (rf_key_right) {
+            radar_cmd.password_1 = from_wifi.RF_Key_Struct.Key[0];
+            radar_cmd.password_2 = from_wifi.RF_Key_Struct.Key[1];
+            radar_cmd.password_3 = from_wifi.RF_Key_Struct.Key[2];
+            radar_cmd.password_4 = from_wifi.RF_Key_Struct.Key[3];
+            radar_cmd.password_5 = from_wifi.RF_Key_Struct.Key[4];
+            radar_cmd.password_6 = from_wifi.RF_Key_Struct.Key[5];
+        }
         if (radar_info.can_change_key) {
             std::random_device rd;
             std::mt19937 gen(rd());

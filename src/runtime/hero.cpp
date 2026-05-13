@@ -362,6 +362,14 @@ int main(int argc, char** argv) {
                 }
                 last_bullet_count = robo.bullet_count;
             }
+            auto mode_opt = HeroMode::create(data);
+            if (mode_opt.has_value()) {
+                if (mode_opt.value().mode == 1) {
+                    mode = Mode::Blind;
+                } else {
+                    mode = Mode::AutoAim;
+                }
+            }
         });
     }
     if (camera) {
@@ -511,6 +519,9 @@ int main(int argc, char** argv) {
                 __armor_target.get_target_state().vyaw(),
                 __armor_target.jumped
             );
+            if (__armor_target.target_number == auto_aim::ArmorClass::OUTPOST) {
+                auto_aim_fsm_controller.fsm_state_ = auto_aim::AutoAimFsm::AIM_WHOLE_CAR_CENTER;
+            }
             armor_target.write(__armor_target);
 
             auto latency_ms = std::chrono::duration_cast<std::chrono::milliseconds>(

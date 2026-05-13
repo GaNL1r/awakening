@@ -1,7 +1,7 @@
 import open3d as o3d
 import numpy as np
 
-mesh = o3d.io.read_triangle_mesh("/home/hy/radar_data/rmuc_2026.stl")
+mesh = o3d.io.read_triangle_mesh("/home/hy/awakening/radar.stl")
 
 if mesh.is_empty():
     print("加载失败")

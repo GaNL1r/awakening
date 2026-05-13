@@ -87,7 +87,6 @@ int main(int argc, char** argv) {
                 if (key == 's') {
                     cv::imwrite("out.png", img);
                 }
-
                 return;
             });
         } else if (cal_type == 3) {
@@ -212,7 +211,6 @@ int main(int argc, char** argv) {
         s.build();
         s.run();
         utils::SignalGuard::spin(std::chrono::milliseconds(1000));
-
         s.stop();
     }
 

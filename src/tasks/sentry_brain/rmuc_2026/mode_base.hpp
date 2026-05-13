@@ -5,8 +5,11 @@
 #include "map.hpp"
 #include "tasks/auto_aim/armor_tracker/armor_target.hpp"
 #include "tasks/base/packet_typedef_receive.hpp"
+#include "tasks/radar_detect/type.hpp"
+#include "utils/common/type_common.hpp"
 #include "utils/drivers/serial_driver.hpp"
 #include "utils/utils.hpp"
+#include <Eigen/src/Core/Matrix.h>
 #include <geometry_msgs/msg/pose_stamped.hpp>
 #include <nav_msgs/msg/odometry.hpp>
 #include <rclcpp/publisher.hpp>
@@ -27,6 +30,7 @@ public:
     ):
         rcl_node_(rcl_node),
         rcl_tf_(rcl_tf) {
+        start_in_referee_map_ = utils::load_isometry3(config["start_in_referee_map"]);
         auto& map = RMUC2026Map::instance();
         map.load_points_yaml(std::string(RMUC_2026_POINT_CONFIG_PATH));
         serial_ = serial;
@@ -55,9 +59,19 @@ public:
                     odom_in.pose.pose.position.z
                 );
                 p = T * p;
-                current_pos_ = p.head<2>();
+                current_pos_ = to_referee_map(p.head<2>());
             }
         );
+    }
+    Eigen::Vector2d to_referee_map(const Eigen::Vector2d& p) {
+        Eigen::Vector3d p3d(p.x(), p.y(), 0);
+        Eigen::Vector2d p_in_referee_map;
+        p_in_referee_map = (start_in_referee_map_ * p3d).head<2>();
+        if (state_.self_color == GobalState::SelfColor::Blue) {
+            p_in_referee_map.x() = radar_detect::FIELD_LONGTH - p_in_referee_map.x();
+            p_in_referee_map.y() = radar_detect::FIELD_WIDTH - p_in_referee_map.y();
+        }
+        return p_in_referee_map;
     }
     virtual void tick_callback() = 0;
     virtual ~ModeBase() {
@@ -190,6 +204,7 @@ public:
     GobalState state_;
     std::string current_goal_name_;
     Eigen::Vector2d current_pos_;
+    Eigen::Vector2d current_pos_in_referee_map_;
     auto_aim::ArmorTarget target_in_big_yaw_;
     rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr goal_pub_;
     rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_sub_;
@@ -197,5 +212,6 @@ public:
     rcl::RclcppNode& rcl_node_;
     rcl::TF& rcl_tf_;
     std::shared_ptr<SerialDriver> serial_;
+    ISO3 start_in_referee_map_;
 };
 } // namespace awakening::sentry_brain

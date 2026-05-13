@@ -40,7 +40,7 @@ auto_exposure:
   step_gain: 15.0
   decay_step: 1.0
   exposure_min: 200.0
-  exposure_max: 3500.0
+  exposure_max: 5500.0
   control_interval_ms: 300
 
 
@@ -132,7 +132,7 @@ very_aimer:
 
 camera: 
   hik_camera:
-    target_sn: DA3038934
+    target_sn: DA2166465
     adc_bit_depth: Bits_8
     pixel_format: BayerRG8 #RGB8Packed
     reverse_x: false

@@ -25,7 +25,8 @@ public:
         rcl::TF& rcl_tf,
         const YAML::Node& config,
         std::shared_ptr<SerialDriver> serial
-    ) : ModeBase(rcl_node, rcl_tf, config, serial) {
+    ):
+        ModeBase(rcl_node, rcl_tf, config, serial) {
         params_.load(config);
     }
 
@@ -38,7 +39,8 @@ public:
 private:
     // --- 辅助函数 ---
     void send_current_pose() {
-        if (!serial_) return;
+        if (!serial_)
+            return;
         SentryRefereeSend send;
         send.cmd_ID = SentryRefereeSend::ID;
         send.set_current_pose = std::to_underlying(sentry_pose);
@@ -47,8 +49,9 @@ private:
     template<typename Key>
     Action make_move_action(GobalState::Pose arrived_pose = GobalState::Pose::Defend) {
         go<Key>();
-        if (!is_reached<Key>()) return {GobalState::Pose::Move, current_goal_, Key::name};
-        return {arrived_pose, current_goal_, Key::name};
+        if (!is_reached<Key>())
+            return { GobalState::Pose::Move, current_goal_, Key::name };
+        return { arrived_pose, current_goal_, Key::name };
     }
 
     bool low_hp() const {
@@ -57,16 +60,19 @@ private:
     }
 
     Action low_hp_action() {
-        wait_until([this]() {
-            auto action = make_move_action<home_t>();
-            sentry_pose = action.pose;
-            if (std::abs(state_.current_hp - state_.max_hp) < 50) {
-                AWAKENING_INFO("hp is enough: {}", state_.current_hp);
-                return true;
-            }
-            AWAKENING_INFO("waiting for hp to recover: {}", state_.current_hp);
-            return false;
-        }, std::chrono::duration<double>(1.0));
+        wait_until(
+            [this]() {
+                auto action = make_move_action<home_t>();
+                sentry_pose = action.pose;
+                if (std::abs(state_.current_hp - state_.max_hp) < 50) {
+                    AWAKENING_INFO("hp is enough: {}", state_.current_hp);
+                    return true;
+                }
+                AWAKENING_INFO("waiting for hp to recover: {}", state_.current_hp);
+                return false;
+            },
+            std::chrono::duration<double>(1.0)
+        );
         return make_move_action<home_t>();
     }
 
@@ -85,9 +91,9 @@ private:
     Action enemy_outpost_action() {
         go<ally_highlands_gain_t>();
         if (is_reached<ally_highlands_gain_t>()) {
-            return {GobalState::Pose::Attack, current_goal_, ally_highlands_gain_t::name};
+            return { GobalState::Pose::Attack, current_goal_, ally_highlands_gain_t::name };
         } else {
-            return {GobalState::Pose::Move, current_goal_, ally_highlands_gain_t::name};
+            return { GobalState::Pose::Move, current_goal_, ally_highlands_gain_t::name };
         }
     }
 
@@ -99,9 +105,9 @@ private:
     Action patrol_action() {
         patrol<ally_beijing_tunnel_top_t, enemy_jiansudai_head_t>(10.0);
         if (!is_reached<ally_beijing_tunnel_top_t>() && !is_reached<enemy_jiansudai_head_t>()) {
-            return {GobalState::Pose::Move, current_goal_, "Patrol"};
+            return { GobalState::Pose::Move, current_goal_, "Patrol" };
         }
-        return {GobalState::Pose::Defend, current_goal_, "Patrol"};
+        return { GobalState::Pose::Defend, current_goal_, "Patrol" };
     }
 
 public:
@@ -116,16 +122,22 @@ public:
 
         // 默认姿态
         sentry_pose = GobalState::Pose::Defend;
-        if (in_home()) state_.home_allowance_bullets_ = 0;
+        if (in_home())
+            state_.home_allowance_bullets_ = 0;
 
         // 优先级决策
         std::optional<Action> action;
 
-        if (low_hp()) action = low_hp_action();
-        if (!action && low_bullet()) action = low_bullet_action();
-        if (!action && state_.enemy_outpost_active_) action = enemy_outpost_action();
-        if (!action && state_.remain_rebuild_outpost_chance_ > 0) action = rebuild_outpost_action();
-        if (!action) action = patrol_action();
+        if (low_hp())
+            action = low_hp_action();
+        if (!action && low_bullet())
+            action = low_bullet_action();
+        if (!action && state_.enemy_outpost_active_)
+            action = enemy_outpost_action();
+        if (!action && state_.remain_rebuild_outpost_chance_ > 0)
+            action = rebuild_outpost_action();
+        if (!action)
+            action = patrol_action();
 
         // 应用 Action
         if (action) {
@@ -135,10 +147,12 @@ public:
         }
 
         // 目标检测覆盖
-        if (target_in_big_yaw_.check()) sentry_pose = GobalState::Pose::Attack;
+        if (target_in_big_yaw_.check())
+            sentry_pose = GobalState::Pose::Attack;
 
         // 极低血量保护
-        if (state_.current_hp < 10) sentry_pose = GobalState::Pose::Defend;
+        if (state_.current_hp < 10)
+            sentry_pose = GobalState::Pose::Defend;
     }
 };
 

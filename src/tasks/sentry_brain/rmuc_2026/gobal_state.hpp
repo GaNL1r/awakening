@@ -2,6 +2,7 @@
 #include "tasks/base/packet_typedef_receive.hpp"
 #include "utils/logger.hpp"
 #include <algorithm>
+#include <cstdint>
 #include <cstdlib>
 #include <string>
 #include <unordered_map>

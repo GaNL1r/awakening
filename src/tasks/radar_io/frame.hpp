@@ -95,7 +95,7 @@ inline std::vector<uint8_t> pack_frame(const T& data) {
 }
 struct RoboStatus {
     static constexpr uint16_t CMDID = 0x0201;
-    uint8_t robot_id;
+    uint8_t robot_id = 9;
     uint8_t robot_level;
     uint16_t current_HP;
     uint16_t maximum_HP;
@@ -151,7 +151,7 @@ struct RadarInfo {
 
     bool enemy_is_double_vulnerable = false;
 
-    uint8_t encryption_level = 0;
+    uint8_t encryption_level = 1;
 
     bool can_change_key = false;
 

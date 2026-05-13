@@ -8,7 +8,7 @@ serial:
   baud_rate: 115200
   char_size: 8
   read_buf_size: 4096
-serial_send_to_image_microseconds: 0
+serial_send_to_image_microseconds: 2500
 use_sim: false
 
 recorder:
@@ -19,7 +19,7 @@ player:
 
 tf:
   camera_in_gimbal:
-    t: [0.14,0.05,0.0]
+    t: [0.04,0.0,-0.03]
     R: [1.0,0.0,0.0,0.0,1.0,0.0,0.0,0.0,1.0]
   shoot_in_gimbal:
     t: [0.2,0.0,0.0]
@@ -49,7 +49,7 @@ armor_detector:
     model_type: tup
     conf_threshold: 0.2
   net_detector:
-    backend: openvino
+    backend: tensorrt
     openvino:
       model_path: ${ROOT_DIR}/model/opt-1208-001.onnx
       device_name: "GPU"
@@ -74,11 +74,11 @@ armor_detector:
 armor_tracker:
   lost_time_thres: 0.5
   tracking_thres: 10
-  match_gate_at_1m: 1000.0
-  match_gate_not_all_init_at_1m: 10000.0
-  qxyz_common: [20.0, 20.0, 1.0]
+  match_gate_at_1m: 2000.0
+  match_gate_not_all_init_at_1m: 20000.0
+  qxyz_common: [20.0, 20.0, 5.0]
   qyaw_common: 10.0
-  qxyz_output: [1.0, 1.0, 0.5]
+  qxyz_output: [1.0, 1.0, 1.0]
   qyaw_output: 0.01
   q_r: 0.0000001
   q_l: 0.0000001
@@ -87,7 +87,6 @@ armor_tracker:
   r_uv_at_1m: 70.0
   r_uv_min: 30.0
   esekf_iter_num: 5
-
 auto_aim_fsm:
   single_whole_up: 1.5 
   single_whole_down: 1.0
@@ -99,8 +98,8 @@ auto_aim_fsm:
 
 
 very_aimer:
-  base_yaw_offset: -1.0
-  base_pitch_offset: -2.5
+  base_yaw_offset: 0.0
+  base_pitch_offset: 0.0
   # base_yaw_offset: -0.0
   # base_pitch_offset: -0.0
   sample_total_time: 1.0
@@ -109,7 +108,7 @@ very_aimer:
 
   control_delay: 0.1
   
-  max_yaw_acc: 40
+  max_yaw_acc: 20
   #全向yaw加速度测算37
   max_pitch_acc: 50
   
@@ -133,7 +132,7 @@ very_aimer:
 
 camera: 
   hik_camera:
-    target_sn: DA3038891
+    target_sn: DA0710030
     adc_bit_depth: Bits_8
     pixel_format: BayerRG8 #RGB8Packed
     reverse_x: false
@@ -152,70 +151,62 @@ camera:
     trigger_activation: ""
     format: "bgr" 
     use_cuda_cvt: true
-  mv_camera:
-    frame_speed: 0
-    exposure_time: 2000
-    r_gain: 200
-    b_gain: 150
-    g_gain: 200
-    # analog_gain: 100.0
-    # gamma: 120
   camera_info:
     #8mm
-    # image_width: 1440
-    # image_height: 1080
-    # camera_name: narrow_stereo
-    # camera_matrix:
-    #   rows: 3
-    #   cols: 3
-    #   data: [2419.64498,    0.     ,  719.05623,
-    #             0.     , 2414.38209,  538.71651,
-    #             0.     ,    0.     ,    1.     ]
-    # distortion_model: plumb_bob
-    # distortion_coefficients:
-    #   rows: 1
-    #   cols: 5
-    #   data: [-0.033521, 0.087954, -0.002045, -0.001438, 0.000000]
-    # rectification_matrix:
-    #   rows: 3
-    #   cols: 3
-    #   data: [1., 0., 0.,
-    #          0., 1., 0.,
-    #          0., 0., 1.]
-    # projection_matrix:
-    #   rows: 3
-    #   cols: 4
-    #   data: [2413.22632,    0.     ,  717.5196 ,    0.     ,
-    #             0.     , 2408.83228,  537.43444,    0.     ,
-    #             0.     ,    0.     ,    1.     ,    0.     ]
-    #6mm
-
     image_width: 1440
     image_height: 1080
     camera_name: narrow_stereo
     camera_matrix:
       rows: 3
       cols: 3
-      data: [1814.19888,    0.     ,  730.27359,
-                0.     , 1807.37177,  529.57031,
+      data: [2419.64498,    0.     ,  719.05623,
+                0.     , 2414.38209,  538.71651,
                 0.     ,    0.     ,    1.     ]
     distortion_model: plumb_bob
     distortion_coefficients:
       rows: 1
       cols: 5
-      data: [-0.089138, 0.114766, 0.000034, 0.000238, 0.000000]
+      data: [-0.033521, 0.087954, -0.002045, -0.001438, 0.000000]
     rectification_matrix:
       rows: 3
       cols: 3
       data: [1., 0., 0.,
-            0., 1., 0.,
-            0., 0., 1.]
+             0., 1., 0.,
+             0., 0., 1.]
     projection_matrix:
       rows: 3
       cols: 4
-      data: [1793.54229,    0.     ,  730.67194,    0.     ,
-                0.     , 1794.48784,  529.46193,    0.     ,
+      data: [2413.22632,    0.     ,  717.5196 ,    0.     ,
+                0.     , 2408.83228,  537.43444,    0.     ,
                 0.     ,    0.     ,    1.     ,    0.     ]
+    #6mm
+
+    # image_width: 1440
+    # image_height: 1080
+    # camera_name: narrow_stereo
+    # camera_matrix:
+    #   rows: 3
+    #   cols: 3
+    #   data: [1814.19888,    0.     ,  730.27359,
+    #             0.     , 1807.37177,  529.57031,
+    #             0.     ,    0.     ,    1.     ]
+    # distortion_model: plumb_bob
+    # distortion_coefficients:
+    #   rows: 1
+    #   cols: 5
+    #   data: [-0.089138, 0.114766, 0.000034, 0.000238, 0.000000]
+    # rectification_matrix:
+    #   rows: 3
+    #   cols: 3
+    #   data: [1., 0., 0.,
+    #         0., 1., 0.,
+    #         0., 0., 1.]
+    # projection_matrix:
+    #   rows: 3
+    #   cols: 4
+    #   data: [1793.54229,    0.     ,  730.67194,    0.     ,
+    #             0.     , 1794.48784,  529.46193,    0.     ,
+    #             0.     ,    0.     ,    1.     ,    0.     ]
     #12mm
     # image_width: 1440
     # image_height: 1080
