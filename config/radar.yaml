@@ -10,7 +10,7 @@ tf:
       0.02067321, -0.99978245, -0.00277031]
 
 referee_serial:
-  enable: false
+  enable: true
   device_name: /dev/ttyUSB0
   baud_rate: 115200
   char_size: 8

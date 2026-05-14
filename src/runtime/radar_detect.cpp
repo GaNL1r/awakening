@@ -214,6 +214,8 @@ int main(int argc, char** argv) {
         cal_pts.emplace_back(x, y);
     }
     s.register_task<CameraIO, CommonFrameIo>("push_common_frame", [&](CameraIO::second_type&& f) {
+        static std::mutex mutex;
+        std::lock_guard<std::mutex> lock(mutex);
         static int current_id = 0;
         int x = 0;
         int y = 0;
@@ -227,14 +229,12 @@ int main(int argc, char** argv) {
             .offset = cv::Point2f(x, y),
         };
         log_ctx.image_count++;
-
+        if (video_saver) {
+            video_saver->write_frame(f.src_img);
+        }
         return std::make_tuple(std::optional<CommonFrameIo::second_type>(std::move(frame)));
     });
-    if (video_saver) {
-        s.register_task<CameraIO>("save", [&](CameraIO::second_type&& f) {
-            video_saver->write_frame(f.src_img);
-        });
-    }
+
     s.register_task<CommonFrameIo, DetIo>("detector", [&](CommonFrameIo::second_type&& frame) {
         static std::unique_ptr<std::counting_semaphore<>> detector_sem;
         if (!detector_sem) {
@@ -525,22 +525,22 @@ int main(int argc, char** argv) {
         map_robot_data.opponent_sentry_position_y = msg.enemy_no7_y;
         if (std::chrono::duration<double>(Clock::now() - rf_info_time)
             < std::chrono::duration<double>(1.0)) {
-            map_robot_data.opponent_hero_position_x = from_wifi.RF_Position_Struct.Robo_1_X_cm;
-            map_robot_data.opponent_hero_position_y = from_wifi.RF_Position_Struct.Robo_1_Y_cm;
-            map_robot_data.opponent_engineer_position_x = from_wifi.RF_Position_Struct.Robo_2_X_cm;
-            map_robot_data.opponent_engineer_position_y = from_wifi.RF_Position_Struct.Robo_2_Y_cm;
-            map_robot_data.opponent_infantry_3_position_x =
-                from_wifi.RF_Position_Struct.Robo_3_X_cm;
-            map_robot_data.opponent_infantry_3_position_y =
-                from_wifi.RF_Position_Struct.Robo_3_Y_cm;
-            map_robot_data.opponent_infantry_4_position_x =
-                from_wifi.RF_Position_Struct.Robo_4_X_cm;
-            map_robot_data.opponent_infantry_4_position_y =
-                from_wifi.RF_Position_Struct.Robo_4_Y_cm;
-            map_robot_data.opponent_aerial_position_x = from_wifi.RF_Position_Struct.Robo_6_X_cm;
-            map_robot_data.opponent_aerial_position_y = from_wifi.RF_Position_Struct.Robo_6_Y_cm;
-            map_robot_data.opponent_sentry_position_x = from_wifi.RF_Position_Struct.Robo_5_X_cm;
-            map_robot_data.opponent_sentry_position_y = from_wifi.RF_Position_Struct.Robo_5_Y_cm;
+            // map_robot_data.opponent_hero_position_x = from_wifi.RF_Position_Struct.Robo_1_X_cm;
+            // map_robot_data.opponent_hero_position_y = from_wifi.RF_Position_Struct.Robo_1_Y_cm;
+            // map_robot_data.opponent_engineer_position_x = from_wifi.RF_Position_Struct.Robo_2_X_cm;
+            // map_robot_data.opponent_engineer_position_y = from_wifi.RF_Position_Struct.Robo_2_Y_cm;
+            // map_robot_data.opponent_infantry_3_position_x =
+            //     from_wifi.RF_Position_Struct.Robo_3_X_cm;
+            // map_robot_data.opponent_infantry_3_position_y =
+            //     from_wifi.RF_Position_Struct.Robo_3_Y_cm;
+            // map_robot_data.opponent_infantry_4_position_x =
+            //     from_wifi.RF_Position_Struct.Robo_4_X_cm;
+            // map_robot_data.opponent_infantry_4_position_y =
+            //     from_wifi.RF_Position_Struct.Robo_4_Y_cm;
+            // map_robot_data.opponent_aerial_position_x = from_wifi.RF_Position_Struct.Robo_6_X_cm;
+            // map_robot_data.opponent_aerial_position_y = from_wifi.RF_Position_Struct.Robo_6_Y_cm;
+            // map_robot_data.opponent_sentry_position_x = from_wifi.RF_Position_Struct.Robo_5_X_cm;
+            // map_robot_data.opponent_sentry_position_y = from_wifi.RF_Position_Struct.Robo_5_Y_cm;
         }
         map_robot_data.ally_hero_position_x = msg.self_no1_x;
         map_robot_data.ally_hero_position_y = msg.self_no1_y;
@@ -663,12 +663,13 @@ int main(int argc, char** argv) {
     });
     s.add_rate_source<>("log", 1.0, [&]() {
         AWAKENING_INFO(
-            "img: {}, det: {},avg_cost: {:.2f}ms, referee: {}, wifi: {}",
+            "img: {}, det: {},avg_cost: {:.2f}ms, referee: {}, wifi: {}, self:{}",
             log_ctx.image_count,
             log_ctx.detect_count,
             log_ctx.detect_cost_ms / (log_ctx.detect_count ? log_ctx.detect_count : 1),
             log_ctx.receive_referee_count,
-            log_ctx.receive_wifi_count
+            log_ctx.receive_wifi_count,
+            self_color == radar_detect::SelfColor::RED ? "red" : "blue"
         );
         log_ctx.reset();
     });

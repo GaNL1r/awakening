@@ -136,32 +136,11 @@ struct Detector::Impl {
         armors = armor_post_process(armor_output.output);
         for (auto& armor: armors) {
             armor.bbox = utils::transform_rect(armor_output.transform_matrix, armor.bbox);
-            cv::Rect safe_armor_bbox = cv::Rect(armor.bbox) & roi_safe_bounds;
-
-            if (safe_armor_bbox.area() > 0) {
-                cv::Scalar mean_val = cv::mean(roi(safe_armor_bbox));
-                float R = 0.f, B = 0.f;
-                switch (frame.img_frame.format) {
-                    case PixelFormat::BGR:
-                        R = mean_val[2];
-                        B = mean_val[0];
-                        break;
-                    case PixelFormat::RGB:
-                        B = mean_val[2];
-                        R = mean_val[0];
-                        break;
-                    case PixelFormat::GRAY:
-                        break;
-                }
-                if (R - B > params_.armor_color_diff_threshold)
-                    armor.color = ArmorColor::RED;
-                else if (B - R > params_.armor_color_diff_threshold)
-                    armor.color = ArmorColor::BLUE;
-                else
-                    armor.color = ArmorColor::NONE;
-            } else {
-                armor.color = ArmorColor::NONE;
-            }
+            armor.color = get_color(
+                roi(cv::Rect(armor.bbox) & roi_safe_bounds),
+                params_.armor_color_diff_threshold,
+                frame.img_frame.format
+            );
             armor.bbox += frame.offset;
         }
         // Implementation for detecting armors
@@ -269,33 +248,11 @@ struct Detector::Impl {
                     armor.bbox.height = armor.bbox.height * ctx.scale_y;
                     armor.bbox.x += ctx.raw_bbox.x;
                     armor.bbox.y += ctx.raw_bbox.y;
-
-                    cv::Rect safe_armor_bbox = cv::Rect(armor.bbox) & roi_safe_bounds;
-
-                    if (safe_armor_bbox.area() > 0) {
-                        cv::Scalar mean_val = cv::mean(roi(safe_armor_bbox));
-                        float R = 0.f, B = 0.f;
-                        switch (frame.img_frame.format) {
-                            case PixelFormat::BGR:
-                                R = mean_val[2];
-                                B = mean_val[0];
-                                break;
-                            case PixelFormat::RGB:
-                                B = mean_val[2];
-                                R = mean_val[0];
-                                break;
-                            case PixelFormat::GRAY:
-                                break;
-                        }
-                        if (R - B > params_.armor_color_diff_threshold)
-                            armor.color = ArmorColor::RED;
-                        else if (B - R > params_.armor_color_diff_threshold)
-                            armor.color = ArmorColor::BLUE;
-                        else
-                            armor.color = ArmorColor::NONE;
-                    } else {
-                        armor.color = ArmorColor::NONE;
-                    }
+                    armor.color = get_color(
+                        roi(cv::Rect(armor.bbox) & roi_safe_bounds),
+                        params_.armor_color_diff_threshold,
+                        frame.img_frame.format
+                    );
 
                     ctx.car->armors.push_back(armor);
                     break;

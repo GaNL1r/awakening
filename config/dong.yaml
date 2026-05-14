@@ -108,7 +108,7 @@ auto_aim_fsm:
   transfer_thresh: 50
 
 very_aimer:
-  base_yaw_offset: -1.0
+  base_yaw_offset: -2.0
   base_pitch_offset: 0.0
   # base_yaw_offset: -0.0
   # base_pitch_offset: -0.0
@@ -288,7 +288,7 @@ armor_omni:
     q_h: 0.0000001
     q_outpost_dz: 0.5
     r_uv_at_1m: 100.0
-    r_uv_min: 30.0
+    r_uv_min: 50.0
     esekf_iter_num: 1
   camera0:
     uvc_camera:
@@ -360,7 +360,7 @@ armor_omni:
                   0.     ,    0.     ,    1.     ,    0.     ]
 uvc_camera_test:
   uvc_camera:
-      device_name: "/dev/v4l/by-path/pci-0000:00:14.0-usb-0:7.1:1.0-video-index0"
+      device_name: ""
       fps: 30
       width: 1280
       height: 720

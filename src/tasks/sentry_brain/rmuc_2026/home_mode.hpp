@@ -89,12 +89,15 @@ private:
             return make_move_action<ally_fort_t>();
     }
     Action patrol_action() {
-        patrol<ally_beijing_tunnel_bottom_t, ally_second_step_bottom_t>(20.0);
-        if (!is_reached<ally_beijing_tunnel_bottom_t>() && !is_reached<ally_second_step_bottom_t>())
-        {
-            return { GobalState::Pose::Move, current_goal_, "Patrol" };
+        if (!target_in_big_yaw_.check()) {
+            patrol<ally_best_hit_outpost_t, ally_second_step_bottom_t>(20.0);
+            if (!is_reached<ally_best_hit_outpost_t>() && !is_reached<ally_second_step_bottom_t>())
+            {
+                return { GobalState::Pose::Move, current_goal_, "Patrol" };
+            }
+            return { GobalState::Pose::Defend, current_goal_, "Patrol" };
         }
-        return { GobalState::Pose::Defend, current_goal_, "Patrol" };
+        return { GobalState::Pose::Attack, current_pos_, "Stop" };
     }
 
 public:

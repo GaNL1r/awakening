@@ -144,20 +144,16 @@ public:
         static TimePoint last_time = Clock::now();
 
         auto now = Clock::now();
-
-        if (now - last_time < std::chrono::seconds((int)change_dt)) {
-            return;
-        }
-
-        last_time = now;
-
         using Func = void (*)(decltype(this));
 
         std::array<std::function<void()>, sizeof...(Keys)> funcs = { [this]() { go<Keys>(); }... };
+        if (now - last_time < std::chrono::seconds((int)change_dt)) {
+        } else {
+            last_time = now;
+            idx = (idx + 1) % funcs.size();
+        }
 
         funcs[idx]();
-
-        idx = (idx + 1) % funcs.size();
     }
     template<typename Key>
     void go() noexcept {

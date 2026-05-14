@@ -7,6 +7,7 @@
 #include "utils/utils.hpp"
 #include <Eigen/src/Core/Matrix.h>
 #include <array>
+#include <opencv2/core/mat.hpp>
 #include <opencv2/core/types.hpp>
 #include <opencv2/opencv.hpp>
 #include <optional>
@@ -19,6 +20,31 @@
 namespace awakening::radar_detect {
 enum class ArmorClass : int { NO1, NO2, NO3, NO4, NO5, SENTRY, OUTPOST, UNKNOWN, N };
 enum class ArmorColor : int { RED, BLUE, NONE, N };
+inline ArmorColor get_color(const cv::Mat& img, double color_diff_threshold, PixelFormat format) {
+    if (img.empty()) {
+        return ArmorColor::NONE;
+    }
+    cv::Scalar mean_val = cv::mean(img);
+    float R = 0.f, B = 0.f;
+    switch (format) {
+        case PixelFormat::BGR:
+            R = mean_val[2];
+            B = mean_val[0];
+            break;
+        case PixelFormat::RGB:
+            B = mean_val[2];
+            R = mean_val[0];
+            break;
+        case PixelFormat::GRAY:
+            break;
+    }
+    if (R - B > color_diff_threshold)
+        return ArmorColor::RED;
+    else if (B - R > color_diff_threshold)
+        return ArmorColor::BLUE;
+    else
+        return ArmorColor::NONE;
+}
 enum class SelfColor : bool { RED, BLUE };
 inline SelfColor SelfColor_from_str(const std::string& _str) {
     auto str = utils::to_upper(_str);

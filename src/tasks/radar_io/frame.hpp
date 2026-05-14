@@ -1,12 +1,12 @@
 #pragma once
 
-#include <iostream>
 #include "tasks/radar_io/crc.hpp"
 #include "utils/logger.hpp"
 #include "utils/utils.hpp"
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <iostream>
 #include <optional>
 #include <vector>
 namespace awakening::radar_io {

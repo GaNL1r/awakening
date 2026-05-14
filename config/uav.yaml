@@ -78,7 +78,7 @@ armor_tracker:
   match_gate_not_all_init_at_1m: 20000.0
   qxyz_common: [20.0, 20.0, 5.0]
   qyaw_common: 10.0
-  qxyz_output: [1.0, 1.0, 1.0]
+  qxyz_output: [5.0, 5.0, 5.0]
   qyaw_output: 0.01
   q_r: 0.0000001
   q_l: 0.0000001

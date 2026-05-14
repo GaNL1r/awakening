@@ -70,7 +70,6 @@ public:
     std::unique_ptr<ArmorDetector> detector_;
     double fps_ = 10;
 
-private:
     YAML::Node config_;
     std::unordered_map<int, One> ones_;
     std::vector<int> ones_keys_;

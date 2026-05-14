@@ -75,7 +75,7 @@ armor_detector:
     diff_threshold: 10.0
 
 armor_tracker:
-  lost_time_thres: 0.5
+  lost_time_thres: 1.5
   tracking_thres: 10
   match_gate_at_1m: 1000.0
   match_gate_not_all_init_at_1m: 10000.0
@@ -103,7 +103,7 @@ auto_aim_fsm:
 
 very_aimer:
   base_yaw_offset: -0.0
-  base_pitch_offset: -2.5
+  base_pitch_offset: -0.2
   # base_yaw_offset: -0.0
   # base_pitch_offset: -0.0
   sample_total_time: 1.0
