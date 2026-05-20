@@ -102,7 +102,7 @@ struct GimbalCmd {
     }
     inline void no_shoot() {
         fire_advice = false;
-        enable_pitch_diff = 0;
+        enable_yaw_diff = 0;
         enable_pitch_diff = 0;
     }
 };

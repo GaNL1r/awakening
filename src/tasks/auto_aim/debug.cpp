@@ -95,6 +95,15 @@ void draw_auto_aim(cv::Mat& img, const AutoAimDebugCtx& ctx) {
                 cv::Scalar(50, 255, 50),
                 2
             );
+            cv::putText(
+                img,
+                fmt::format("V_norm: {:.2f}", target_state.vel().norm()),
+                center + cv::Point2f(0, -120),
+                cv::FONT_HERSHEY_SIMPLEX,
+                1.0,
+                cv::Scalar(50, 255, 50),
+                2
+            );
         }
         if (cmd.aim_point.pose.translation().z() > 0.1) {
             auto aim_point_img_points = utils::reprojection(

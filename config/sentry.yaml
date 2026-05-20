@@ -82,8 +82,8 @@ armor_detector:
     diff_threshold: 10.0
 
 armor_tracker:
-  lost_time_thres: 0.5
-  tracking_thres: 10
+  lost_time_thres: 1.5
+  tracking_thres: 5
   match_gate_at_1m: 1000.0
   match_gate_not_all_init_at_1m: 10000.0
   qxyz_common: [20.0, 20.0, 1.0]
@@ -108,15 +108,15 @@ auto_aim_fsm:
   transfer_thresh: 50
 
 very_aimer:
-  base_yaw_offset: -1.0
-  base_pitch_offset: 0.0
+  base_yaw_offset: -0.0
+  base_pitch_offset: 0.8
   # base_yaw_offset: -0.0
   # base_pitch_offset: -0.0
   sample_total_time: 1.0
   
   sample_horizon: 200
 
-  control_delay: 0.2
+  control_delay: 0.1
   
   max_yaw_acc: 40
   #全向yaw加速度测算37
@@ -132,8 +132,8 @@ very_aimer:
   shooting_range_h: 0.12
   shooting_range_w_small: 0.12
   shooting_range_w_large: 0.24
-  min_enable_pitch_deg: 0.25
-  min_enable_yaw_deg: 0.25
+  min_enable_pitch_deg: 0.5
+  min_enable_yaw_deg: 0.5
   ballistic_trajectory:
     gravity: 9.8
     resistance: 0.001
@@ -251,7 +251,7 @@ armor_omni:
   armor_detector:
     armor_infer:
       model_type: tup
-      conf_threshold: 0.2
+      conf_threshold: 0.5
     net_detector:
       backend: openvino
       openvino:
@@ -276,9 +276,9 @@ armor_omni:
       diff_threshold: 20.0
   armor_tracker:
     lost_time_thres: 0.5
-    tracking_thres: 3
-    match_gate_at_1m: 500.0
-    match_gate_not_all_init_at_1m: 3000.0
+    tracking_thres: 2
+    match_gate_at_1m: 1000.0
+    match_gate_not_all_init_at_1m: 10000.0
     qxyz_common: [20.0, 20.0, 1.0]
     qyaw_common: 10.0
     qxyz_output: [10.0, 10.0, 0.5]

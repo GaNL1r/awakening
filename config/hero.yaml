@@ -118,7 +118,7 @@ very_aimer:
   
 
   prediction_delay: 0.00
-  aim_center_more_prediction_time: 0.2
+  aim_center_more_prediction_time: -0.4
   comming_angle: 70
   leaving_angle: 20
 

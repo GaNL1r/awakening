@@ -82,7 +82,7 @@ armor_detector:
     diff_threshold: 10.0
 
 armor_tracker:
-  lost_time_thres: 0.5
+  lost_time_thres: 1.5
   tracking_thres: 10
   match_gate_at_1m: 1000.0
   match_gate_not_all_init_at_1m: 10000.0
@@ -142,7 +142,7 @@ very_aimer:
 
 camera: 
   hik_camera:
-    target_sn: DA2166432
+    target_sn: DA2166360
     adc_bit_depth: Bits_8
     pixel_format: BayerRG8 #RGB8Packed
     reverse_x: false
@@ -152,7 +152,7 @@ camera:
     offset_x: 0
     offset_y: 0
     acquisition_frame_rate_enable: true
-    acquisition_frame_rate: 200
+    acquisition_frame_rate: 250
     exposure_time: 1500
     gain: 16.9
     gamma: 0.7 #Bayer用不了

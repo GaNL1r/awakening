@@ -306,6 +306,8 @@ int main(int argc, char** argv) {
     });
     if (serial || player) {
         s.register_task<SerialIO>("receive_serial", [&](SerialIO::second_type&& data) {
+            static std::mutex mutex;
+            std::lock_guard<std::mutex> lock(mutex);
             if (recorder) {
                 utils::dt_once(
                     [&]() { recorder->record<SerialTag>(data); },
@@ -377,6 +379,8 @@ int main(int argc, char** argv) {
     }
     if (camera) {
         s.register_task<CommonFrameIo>("auto_exposure", [&](CommonFrameIo::second_type&& frame) {
+            static std::mutex mutex;
+            std::lock_guard<std::mutex> lock(mutex);
             if (mode == Mode::Blind) {
                 camera->set_ExposureTime(5000);
                 // camera->set_AcquisitionFrameRate(30);
@@ -571,7 +575,7 @@ int main(int argc, char** argv) {
             if (auto_aim_fsm != auto_aim::AutoAimFsm::AIM_SINGLE_ARMOR
                 && target.target_number == auto_aim::ArmorClass::OUTPOST)
             {
-                auto_aim_fsm = auto_aim::AutoAimFsm::AIM_WHOLE_CAR_CENTER;
+                //   auto_aim_fsm = auto_aim::AutoAimFsm::AIM_WHOLE_CAR_CENTER;
             }
             very_aimer.set_operator_offset(operator_offset);
             cmd = very_aimer.very_aim(target, bullet_speed, auto_aim_fsm);

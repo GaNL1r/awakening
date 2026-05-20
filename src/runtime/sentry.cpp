@@ -689,36 +689,41 @@ int main(int argc, char** argv) {
             }
 
             auto batch_armors = one.armors_queue->dequeue_batch();
-            for (auto& _armors: batch_armors) {
-                auto camera_cv_in_odom = tf->pose_a_in_b(
-                    SentryFrame(_armors.frame_id),
-                    SentryFrame::ODOM,
-                    _armors.timestamp
-                );
-                _armors.frame_id = std::to_underlying(SentryFrame::ODOM);
-
-                one.target =
-                    one.tracker->track(_armors, camera_info, camera_cv_in_odom, _armors.frame_id);
-                if (!one.target.check()) {
-                    one.target.update_count = 0;
-                }
-                one.total_score = one.target.update_count;
-                auto best_target = armor_omni.update();
-                omni_armor_target.write(best_target);
-                auto latency_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-                                      std::chrono::steady_clock::now() - _armors.timestamp
-                )
-                                      .count();
-                log_ctx.omni_latency_ms_total += latency_ms;
-                log_ctx.omni_count++;
-                if (auto_aim_dbg) {
-#ifdef USE_ROS2
-                    rcl::pub_armor_target_marker(
-                        rcl_node,
-                        SentryFrame_to_str(best_target.get_target_state().frame_id),
-                        best_target
+            {
+                static std::mutex mutex;
+                std::lock_guard<std::mutex> lock(mutex);
+                for (auto& _armors: batch_armors) {
+                    auto camera_cv_in_odom = tf->pose_a_in_b(
+                        SentryFrame(_armors.frame_id),
+                        SentryFrame::ODOM,
+                        _armors.timestamp
                     );
+                    _armors.frame_id = std::to_underlying(SentryFrame::ODOM);
+
+                    one.target =
+                        one.tracker
+                            ->track(_armors, camera_info, camera_cv_in_odom, _armors.frame_id);
+                    if (!one.target.check()) {
+                        one.target.update_count = 0;
+                    }
+                    one.total_score = one.target.update_count;
+                    auto best_target = armor_omni.update();
+                    omni_armor_target.write(best_target);
+                    auto latency_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                          std::chrono::steady_clock::now() - _armors.timestamp
+                    )
+                                          .count();
+                    log_ctx.omni_latency_ms_total += latency_ms;
+                    log_ctx.omni_count++;
+                    if (auto_aim_dbg) {
+#ifdef USE_ROS2
+                        rcl::pub_armor_target_marker(
+                            rcl_node,
+                            SentryFrame_to_str(best_target.get_target_state().frame_id),
+                            best_target
+                        );
 #endif
+                    }
                 }
             }
         });

@@ -462,12 +462,12 @@ struct VeryAimer::Impl {
         const int armor_num = static_cast<int>(armors_xyza.size());
         int i_chosen = 0;
 
-        const double center_yaw = std::atan2(target_state.pos().y(), target_state.pos().x());
+        // const double center_yaw = std::atan2(target_state.pos().y(), target_state.pos().x());
 
         std::vector<double> delta_angles;
         delta_angles.reserve(armor_num);
         for (int i = 0; i < armor_num; ++i) {
-            delta_angles.push_back(angles::normalize_angle(armors_xyza[i][3] - center_yaw));
+            delta_angles.push_back(angles::normalize_angle(armors_xyza[i][3] - std::atan2(armors_xyza[i][1], armors_xyza[i][0])));
         }
 
         const auto pick_best_by_min_delta = [&](const std::vector<int>& idxs) -> int {
@@ -486,27 +486,29 @@ struct VeryAimer::Impl {
         if (auto_aim_fsm == AutoAimFsm::AIM_SINGLE_ARMOR
             && target.target_number != ArmorClass::OUTPOST && armor_num > 0)
         {
+            constexpr double in_first = 60.0 / 57.3; 
             std::vector<int> candidates;
-            constexpr double in_first = 60.0 / 57.3;
-            for (int i = 0; i < armor_num; ++i)
+            for (int i = 0; i < armor_num; ++i) {
                 if (std::abs(delta_angles[i]) <= in_first)
                     candidates.push_back(i);
-
+            }
             if (!candidates.empty()) {
-                if (candidates.size() > 1) {
-                    int a = candidates[0], b = candidates[1];
-                    if (lock_id != a && lock_id != b) {
-                        lock_id = (std::abs(delta_angles[a]) < std::abs(delta_angles[b])) ? a : b;
-                    }
-                    int pick = (lock_id >= 0 && lock_id < armor_num)
-                        ? lock_id
-                        : pick_best_by_min_delta(candidates);
-                    if (pick >= 0) {
-                        i_chosen = pick;
-                    }
-                } else {
+                int pick = -1;
+
+                if (candidates.size() == 1) {
+                    pick = candidates[0];
                     lock_id = -1;
-                    int pick = candidates[0];
+                } else {
+                    if (lock_id < 0 || (lock_id != candidates[0] && lock_id != candidates[1])) {
+                        lock_id = (std::abs(delta_angles[candidates[0]])
+                                   < std::abs(delta_angles[candidates[1]]))
+                            ? candidates[0]
+                            : candidates[1];
+                    }
+                    pick = lock_id;
+                }
+
+                if (pick >= 0 && pick < armor_num) {
                     i_chosen = pick;
                 }
             }
@@ -516,21 +518,21 @@ struct VeryAimer::Impl {
         if (armor_num > 0) {
             int best_idx = -1;
 
-            if (auto_aim_fsm == AutoAimFsm::AIM_WHOLE_CAR_ARMOR
-                && target.target_number != ArmorClass::OUTPOST) {
-                const double coming_angle = params_.comming_angle * M_PI / 180.0;
-                const double leaving_angle = params_.leaving_angle * M_PI / 180.0;
+            // if (auto_aim_fsm == AutoAimFsm::AIM_WHOLE_CAR_ARMOR
+            //     && target.target_number != ArmorClass::OUTPOST) {
+            //     const double coming_angle = params_.comming_angle * M_PI / 180.0;
+            //     const double leaving_angle = params_.leaving_angle * M_PI / 180.0;
 
-                for (int i = 0; i < armor_num; ++i) {
-                    if (std::abs(delta_angles[i]) > coming_angle)
-                        continue;
+            //     for (int i = 0; i < armor_num; ++i) {
+            //         if (std::abs(delta_angles[i]) > coming_angle)
+            //             continue;
 
-                    if (target_state.vyaw() > 0 && delta_angles[i] < leaving_angle)
-                        best_idx = i;
-                    if (target_state.vyaw() < 0 && delta_angles[i] > -leaving_angle)
-                        best_idx = i;
-                }
-            }
+            //         if (target_state.vyaw() > 0 && delta_angles[i] < leaving_angle)
+            //             best_idx = i;
+            //         if (target_state.vyaw() < 0 && delta_angles[i] > -leaving_angle)
+            //             best_idx = i;
+            //     }
+            // }
 
             if (auto_aim_fsm == AutoAimFsm::AIM_WHOLE_CAR_PAIR
                 && target.target_number != ArmorClass::OUTPOST) {
@@ -578,7 +580,7 @@ struct VeryAimer::Impl {
         cp.pitch = pitch_opt.value() + get_yaw_pitch_offset().second;
         cp.aim_point.pose = ISO3::Identity();
         cp.aim_point.pose.translation() = p;
-        cp.aim_point.d_angle = angles::shortest_angular_distance(control_yaw, armor_xyza[3]);
+        cp.aim_point.d_angle = armor_xyza[3];
         cp.aim_id = aim_id;
         return cp;
     };
@@ -630,11 +632,15 @@ struct VeryAimer::Impl {
             i_target.set_target_state([&](armor_point_motion_model::State& state) {
                 state.predict(prev_fly_time, i_target.target_number);
             });
-            auto iter_select = select_armor(i_target, fsm);
+            // auto iter_select = select_armor(i_target, fsm);
             const auto iter_armors_xyza =
                 i_target.get_target_state().get_armors_xyza(i_target.target_number);
+            // auto iter_pitch_and_fly_time_opt = ballistic_trajectory_->solve_pitch_and_flytime(
+            //     iter_armors_xyza[iter_select].head<3>(),
+            //     bullet_speed
+            // );
             auto iter_pitch_and_fly_time_opt = ballistic_trajectory_->solve_pitch_and_flytime(
-                iter_armors_xyza[iter_select].head<3>(),
+                iter_armors_xyza[roughly_select].head<3>(),
                 bullet_speed
             );
             if (!iter_pitch_and_fly_time_opt) {
@@ -675,7 +681,7 @@ struct VeryAimer::Impl {
         GimbalCmd cmd;
         bool is_same = _target.this_id == last_target_.this_id;
         double time_in_traj = 0.0;
-        if (is_same) {
+        if (is_same) { //状态完全未更新，使用第一次构建的轨迹基于时间进行推进减少重复计算
             time_in_traj = std::chrono::duration<double>(Clock::now() - last_time_).count();
         } else {
             last_target_ = _target;
@@ -809,7 +815,6 @@ struct VeryAimer::Impl {
                 );
                 aim_traj_.clear();
                 aim_traj_.reserve(horizon + 1);
-                // Trajectory<AimPoint, double> __aim_traj;
                 if (!build_traj(
                         aim_center_target_traj_,
                         aim_traj_,
@@ -857,22 +862,28 @@ struct VeryAimer::Impl {
             auto aim_point = aim_traj_.state_at(_t);
             const double distance = aim_point.pose.translation().norm();
             double shooting_range_yaw;
-            if (!is_big) {
-                shooting_range_yaw =
-                    std::abs(std::atan2(params_.shooting_range_w_small / 2, distance));
-            } else {
-                shooting_range_yaw =
-                    std::abs(std::atan2(params_.shooting_range_w_large / 2, distance));
-            }
+            double half_w =
+                is_big ? params_.shooting_range_w_large / 2 : params_.shooting_range_w_small / 2;
+            auto cos_theta = std::cos(aim_point.d_angle);
+            auto sin_theta = std::sin(aim_point.d_angle);
+            
+            auto yaw1 = std::atan2(
+                aim_point.pose.translation().y() + half_w * cos_theta,
+                aim_point.pose.translation().x() - half_w * sin_theta
+            );
+            auto yaw2 = std::atan2(
+                aim_point.pose.translation().y() - half_w * cos_theta,
+                aim_point.pose.translation().x() + half_w * sin_theta
+            );
+            auto aim_yaw =
+                std::atan2(aim_point.pose.translation().y(), aim_point.pose.translation().x());
+            shooting_range_yaw = std::min(
+                std::abs(angles::normalize_angle(yaw1 - aim_yaw)),
+                std::abs(angles::normalize_angle(yaw2 - aim_yaw))
+            );
             double shooting_range_pitch =
                 std::abs(std::atan2(params_.shooting_range_h / 2, distance));
-            const double yaw_factor = std::cos(aim_point.d_angle);
             const double pitch_factor = std::cos(FIFTTEN_DEGREE_RAD);
-            // shooting_range_yaw =
-            //     std::max(shooting_range_yaw, angles::from_degrees(params_.min_enable_yaw_deg));
-            // shooting_range_pitch =
-            //     std::max(shooting_range_pitch, angles::from_degrees(params_.min_enable_pitch_deg));
-            shooting_range_yaw *= yaw_factor;
             shooting_range_pitch *= pitch_factor;
             shooting_range_yaw =
                 std::max(shooting_range_yaw, angles::from_degrees(params_.min_enable_yaw_deg));
@@ -920,12 +931,15 @@ struct VeryAimer::Impl {
                     cmd.no_shoot();
                 }
             }
-            // if (!delay_fire(+params_.control_delay)) {
-            //     cmd.no_shoot();
-            // } else if (!cmd.fire_advice && delay_fire(-params_.control_delay)) {
-            //     cmd.fire_advice = true;
-            //     cmd.enable_yaw_diff = angles::from_degrees(params_.min_enable_yaw_deg);
-            //     cmd.enable_pitch_diff = angles::from_degrees(params_.min_enable_pitch_deg);
+            // for (int i = 1; i <= step; i++) {
+            //     double t_add = 0 - i * (dt / 2.0);
+            //     if (delay_fire(+t_add)) {
+            //         // cmd.enable_pitch_diff = params_.min_enable_pitch_deg;
+            //         // cmd.enable_yaw_diff = params_.min_enable_yaw_deg;
+            //         // cmd.enable_pitch_diff = 2.0;
+            //         // cmd.enable_yaw_diff = 2.0;
+            //         // cmd.fire_advice = true;
+            //     }
             // }
         }
 

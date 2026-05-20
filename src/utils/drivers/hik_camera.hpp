@@ -58,6 +58,7 @@ public:
     void hik_capture_loop() {
         AWAKENING_INFO("Starting image capture loop!");
         Frame frame;
+        int fail_count = 0;
         while (running_) {
             std::this_thread::sleep_for(std::chrono::milliseconds(1));
             int n_ret = MV_CC_GetImageBuffer(camera_handle_, &frame.out_frame, 100);
@@ -76,9 +77,13 @@ public:
                         );
                     }
                 );
+                fail_count = 0;
             } else {
-                AWAKENING_ERROR("Failed to get image buffer!");
-                break;
+                AWAKENING_ERROR("MV_CC_GetImageBuffer fail: {}", n_ret);
+                fail_count++;
+                if (fail_count > 10) {
+                    break;
+                }
             }
         }
         AWAKENING_INFO("Exiting image capture loop.");

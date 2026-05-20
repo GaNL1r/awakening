@@ -427,6 +427,8 @@ int main(int argc, char** argv) {
     }
     if (camera) {
         s.register_task<CommonFrameIo>("auto_exposure", [&](CommonFrameIo::second_type&& frame) {
+            static std::mutex mutex;
+            std::lock_guard<std::mutex> lock(mutex);
             struct AutoExposureCfg {
                 bool enable = false;
                 double ttarget_brightness;

@@ -93,7 +93,7 @@ public:
             auto next_tp = std::chrono::steady_clock::now();
             while (rclcpp::ok()) {
                 next_tp += std::chrono::duration_cast<std::chrono::steady_clock::duration>(
-                    std::chrono::duration<double>(1 / 2.0)
+                    std::chrono::duration<double>(1 / 10.0)
                 );
                 tick_callback();
                 std::this_thread::sleep_until(next_tp);
@@ -127,12 +127,12 @@ public:
 
     bool in_home() {
         auto& map = RMUC2026Map::instance();
-        return (current_pos_ - map.get<home_t>().head<2>()).norm() < 0.5;
+        return (current_pos_ - map.get<home_t>().head<2>()).norm() < 2.0;
     }
     template<typename Key>
     bool is_reached() {
         auto& map = RMUC2026Map::instance();
-        if ((current_pos_ - map.get<Key>().template head<2>()).norm() < 0.5) {
+        if ((current_pos_ - map.get<Key>().template head<2>()).norm() < 2.0) {
             AWAKENING_INFO("{} has reached", Key::name);
             return true;
         }
@@ -163,7 +163,15 @@ public:
     void go(const Vec3& goal, std::string name) noexcept {
         current_goal_ = goal.head<2>();
         current_goal_name_ = name;
-        AWAKENING_INFO("go to {}: x: {} y: {} z: {}", name, goal.x(), goal.y(), goal.z());
+        AWAKENING_INFO(
+            "go to {}: x: {} y: {} z: {}, current: x{} y:{}",
+            name,
+            goal.x(),
+            goal.y(),
+            goal.z(),
+            current_pos_.x(),
+            current_pos_.y()
+        );
     }
     void pub_goal_callback() noexcept {
         print_status();
@@ -185,21 +193,22 @@ public:
         utils::dt_once(
             [&]() {
                 AWAKENING_INFO(
-                    "Pose: {}, Goal: {}",
+                    "Pose: {}, Goal: {}, game_time: {}",
                     GobalState::Pose_to_str(sentry_pose),
-                    current_goal_name_
+                    current_goal_name_,
+                    state_.current_game_time_
                 );
             },
             std::chrono::duration<double>(1.0)
         );
     }
-    GobalState::Pose sentry_pose = GobalState::Pose::Attack;
+    GobalState::Pose sentry_pose = GobalState::Pose::Move;
     std::optional<Eigen::Vector2d> current_goal_;
     std::thread pub_goal_thread_;
     std::thread tick_thread_;
     GobalState state_;
     std::string current_goal_name_;
-    Eigen::Vector2d current_pos_;
+    Eigen::Vector2d current_pos_ = Eigen::Vector2d::Zero();
     Eigen::Vector2d current_pos_in_referee_map_;
     auto_aim::ArmorTarget target_in_big_yaw_;
     rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr goal_pub_;
