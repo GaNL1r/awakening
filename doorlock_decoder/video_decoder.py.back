@@ -1,0 +1,540 @@
+#!/usr/bin/env python3
+"""
+独立视频解码器 - 适配新协议（13字节头 + FEC恢复）
+用法: python3 video_decoder.py [config.yaml]
+"""
+
+import sys
+import time
+import signal
+import av
+import cv2
+import yaml
+import struct
+import queue
+from pathlib import Path
+from collections import OrderedDict
+import paho.mqtt.client as mqtt
+
+import video_stream_pb2
+
+# ---------- 协议常量（与 C++ 端一致）----------
+HEADER_FORMAT = '<IHHHHB'   # frame_id u32, frag_idx u16, frag_count u16, payload_size u16, frame_size u16, flags u8
+HEADER_SIZE   = struct.calcsize(HEADER_FORMAT)       # 13 字节
+MAX_PACKET_SIZE = 300
+MAX_PAYLOAD     = MAX_PACKET_SIZE - HEADER_SIZE      # 287 字节
+
+FLAG_KEYFRAME  = 0x01
+FLAG_FEC_PACKET = 0x02
+FLAG_MERGED     = 0x04         
+
+
+class VideoDecoder:
+    def __init__(self, config_path: str = "node_params.yaml"):
+        self.config = self._load_config(config_path)
+        decoder_cfg = self.config.get('video_decoder', {})
+        
+        # 显示参数
+        self.width           = int(decoder_cfg.get('width', 300))
+        self.height          = int(decoder_cfg.get('height', 300))
+        self.display_scale   = max(1, int(decoder_cfg.get('display_scale', 2)))
+        self.display_width   = self.width * self.display_scale
+        self.display_height  = self.height * self.display_scale
+        
+        self.crosshair_offset_x = int(decoder_cfg.get('crosshair_offset_x', 0))
+        self.crosshair_offset_y = int(decoder_cfg.get('crosshair_offset_y', 0))
+        self.crosshair_width    = max(1, int(decoder_cfg.get('crosshair_width', 2)))
+        
+        # 调试
+        self.debug_dump_enable    = bool(decoder_cfg.get('debug_dump_enable', False))
+        self.debug_dump_every_n   = int(decoder_cfg.get('debug_dump_every_n_frames', 20))
+        self.debug_dump_dir       = Path(decoder_cfg.get('debug_dump_dir', 'sniper_debug_imgs')) / 'decoder'
+        
+        # MQTT
+        self.mqtt_server       = f"tcp://{decoder_cfg.get('mqtt_ip', '127.0.0.1')}:{decoder_cfg.get('mqtt_port', 3333)}"
+        self.mqtt_topic        = decoder_cfg.get('mqtt_topic', 'CustomByteBlock')
+        self.mqtt_client_id    = decoder_cfg.get('robot_id', 'decoder_standalone')
+        self.game_status_topic = decoder_cfg.get('mqtt_game_status_topic', 'GameStatus')
+        self.enable_game_status = bool(decoder_cfg.get('enable_game_status_print', False))
+        
+        # 帧处理
+        self.frame_timeout_ms   = int(decoder_cfg.get('frame_timeout_ms', 3000))
+        self.max_frames_inflight = int(decoder_cfg.get('max_frames_inflight', 30))
+        
+        if self.debug_dump_enable:
+            self.debug_dump_dir.mkdir(parents=True, exist_ok=True)
+            print(f"Debug dump enabled: {self.debug_dump_dir}")
+        
+        # 解码器
+        self.codec = av.CodecContext.create('h264', 'r')
+        self.codec.thread_type = 'FRAME'
+        self.codec.flags |= av.codec.context.Flags.LOW_DELAY
+        
+        self.frame_count = 0
+        self.packet_count = 0
+        self.display_frame_counter = 0
+        
+        # SPS/PPS 缓存
+        self.sps_data = None
+        self.pps_data = None
+        
+        # 帧缓冲区
+        self.frame_buffers = OrderedDict()
+        self.last_cleanup  = time.time()
+        self.consecutive_errors = 0
+        self.max_consecutive_errors = 10
+        
+        # 游戏状态
+        self.last_game_status_print_time = 0.0
+        self.last_game_status_str = ""
+        
+        # 显示队列
+        self.frame_queue = queue.Queue(maxsize=5)
+        self.running = True
+        
+        # MQTT 初始化
+        self._init_mqtt()
+        
+        # 信号处理
+        signal.signal(signal.SIGINT, self._signal_handler)
+        signal.signal(signal.SIGTERM, self._signal_handler)
+        
+        print(f"Decoder initialized: {self.width}x{self.height} @ {self.display_scale}x scale")
+        print(f"MQTT: {self.mqtt_server} topic={self.mqtt_topic}")
+        print("Press 'q' in display window to quit, Ctrl+C to exit")
+    
+    # ---------- 配置加载 ----------
+    def _load_config(self, path_str):
+        path = Path(path_str)
+        if not path.exists():
+            print(f"Config file not found: {path_str}, using defaults")
+            return {}
+        try:
+            with open(path) as f:
+                cfg = yaml.safe_load(f)
+            print(f"Loaded config from: {path_str}")
+            return cfg or {}
+        except Exception as e:
+            print(f"Failed to load config: {e}")
+            return {}
+    
+    def _signal_handler(self, signum, frame):
+        print(f"\nReceived signal {signum}, shutting down...")
+        self.running = False
+    
+    # ==================== NAL 工具 ====================
+    def _extract_nal_units(self, data: bytes) -> list:
+        nals = []
+        i = 0
+        while i + 3 < len(data):
+            start_code_len = 0
+            if data[i:i+4] == b'\x00\x00\x00\x01':
+                start_code_len = 4
+            elif data[i:i+3] == b'\x00\x00\x01':
+                start_code_len = 3
+            
+            if start_code_len > 0 and i + start_code_len < len(data):
+                nal_type = data[i + start_code_len] & 0x1F
+                j = i + start_code_len + 1
+                while j + 3 < len(data):
+                    if data[j:j+4] == b'\x00\x00\x00\x01' or data[j:j+3] == b'\x00\x00\x01':
+                        break
+                    j += 1
+                nals.append((nal_type, i, j))
+                i = j
+            else:
+                i += 1
+        return nals
+    
+    def _cache_sps_pps(self, data: bytes):
+        for nal_type, start, end in self._extract_nal_units(data):
+            if nal_type == 7:   # SPS
+                self.sps_data = bytes(data[start:end])
+            elif nal_type == 8: # PPS
+                self.pps_data = bytes(data[start:end])
+    
+    def _ensure_sps_pps(self, data: bytes) -> bytes:
+        nals = self._extract_nal_units(data)
+        has_sps = any(nt == 7 for nt, _, _ in nals)
+        has_pps = any(nt == 8 for nt, _, _ in nals)
+        if has_sps and has_pps:
+            return data
+        
+        result = bytearray()
+        if not has_sps and self.sps_data:
+            result.extend(self.sps_data)
+        if not has_pps and self.pps_data:
+            result.extend(self.pps_data)
+        result.extend(data)
+        return bytes(result)
+    
+    # ==================== 包头解析（新 13 字节）====================
+    def _parse_header(self, data: bytes) -> dict:
+        if len(data) < HEADER_SIZE:
+            return None
+        try:
+            fid, fidx, fcnt, psz, fsize, flg = struct.unpack(HEADER_FORMAT, data[:HEADER_SIZE])
+            if fcnt == 0 or fidx >= fcnt or psz == 0 or psz > MAX_PAYLOAD:
+                return None
+            return {
+                'frame_id':     fid,
+                'frag_idx':     fidx,
+                'frag_count':   fcnt,           # 期望的总分片数（含 FEC 时为 3）
+                'payload_size': psz,
+                'frame_size':   fsize,          # ★ 原始帧字节数（恢复/截取用）
+                'is_keyframe':  bool(flg & FLAG_KEYFRAME),
+                'is_fec':       bool(flg & FLAG_FEC_PACKET),
+                'is_merged':    bool(flg & FLAG_MERGED),           # 新增
+                'num_subframes': (flg >> 3) & 0x1F,                # 新增
+                'flags':        flg,                               # 新增
+                'payload':      data[HEADER_SIZE:HEADER_SIZE + psz]
+            }
+        except struct.error:
+            return None
+    
+    # ==================== 数据包处理 ====================
+    def process_packet(self, pkt_data: bytes):
+        if len(pkt_data) != MAX_PACKET_SIZE:
+            return
+        
+        hdr = self._parse_header(pkt_data)
+        if hdr is None:
+            return
+        
+        self.packet_count += 1
+        fid = hdr['frame_id']
+        is_keyframe = hdr['is_keyframe']
+        is_fec = hdr['is_fec']
+        
+        # 初始化帧缓冲
+        if fid not in self.frame_buffers:
+            self.frame_buffers[fid] = {
+                'frags':        {},
+                'missing':      set(range(hdr['frag_count'])),
+                'is_keyframe':  is_keyframe,
+                'frame_size':   hdr['frame_size'],
+                'time':         time.time(),
+                'total_frags':  hdr['frag_count'],
+                'has_fec':      False,
+                'flags':        hdr.get('flags', 0)          
+            }
+            if is_keyframe:
+                print(f"🆕 IDR frame #{fid}: {hdr['frag_count']} frags (FEC capable)")
+        
+        buf = self.frame_buffers[fid]
+
+        # 存储分片（重复包忽略）
+        frag_idx = hdr['frag_idx']
+        if frag_idx not in buf['frags']:
+            buf['frags'][frag_idx] = hdr['payload']
+            buf['missing'].discard(frag_idx)
+        if is_fec:
+            buf['has_fec'] = True
+        
+        # 检查是否所有分片都已到达
+        self._try_decode_frame(fid)
+        
+        # 定期清理
+        self._cleanup()
+    
+    # 辅助函数：根据索引顺序组装完整帧数据
+    def _assemble_from_indices(self, buf, indices, frame_size):
+        data = bytearray()
+        for idx in indices:
+            data.extend(buf['frags'][idx])
+        return bytes(data[:frame_size])
+    # ==================== 帧解码（包含 FEC 恢复）====================
+    def _try_decode_frame(self, fid):
+        buf = self.frame_buffers[fid]
+        total_frags = buf['total_frags']
+        frame_size  = buf['frame_size']
+        flags       = buf['flags']
+        is_merged   = bool(flags & FLAG_MERGED)
+        fec_idx     = total_frags - 1 if buf['has_fec'] else -1
+        assembled   = None
+
+        # 所有分片到齐
+        if len(buf['missing']) == 0:
+            data_indices = sorted([k for k in buf['frags'] if k != fec_idx])
+            assembled = self._assemble_from_indices(buf, data_indices, frame_size)
+
+        # 只缺 FEC 包
+        elif (buf['has_fec'] and len(buf['missing']) == 1 and fec_idx in buf['missing']):
+            data_indices = sorted([k for k in buf['frags'] if k != fec_idx])
+            assembled = self._assemble_from_indices(buf, data_indices, frame_size)
+
+        # 缺一个数据分片且 FEC 包存在
+        elif (buf['has_fec'] and len(buf['missing']) == 1 and fec_idx in buf['frags']):
+            missing_idx = next(iter(buf['missing']))
+            if missing_idx != fec_idx:
+                other_frags = {k:v for k,v in buf['frags'].items() if k != missing_idx and k != fec_idx}
+                fec_data = buf['frags'][fec_idx]
+                received_size = sum(len(p) for p in other_frags.values())
+                missing_size = frame_size - received_size
+                if missing_size <= 0 or missing_size > MAX_PAYLOAD:
+                    return
+                recovered = bytearray(MAX_PAYLOAD)
+                for p in other_frags.values():
+                    for i in range(len(p)):
+                        recovered[i] ^= p[i]
+                for i in range(min(len(fec_data), MAX_PAYLOAD)):
+                    recovered[i] ^= fec_data[i]
+                buf['frags'][missing_idx] = bytes(recovered[:missing_size])
+                buf['missing'].discard(missing_idx)
+                data_indices = sorted([k for k in buf['frags'] if k != fec_idx])
+                assembled = self._assemble_from_indices(buf, data_indices, frame_size)
+                print(f"🔧 FEC recovered missing frag {missing_idx} for frame {fid}")
+
+        if assembled is None:
+            return   # 还不能解码
+
+        # --- 根据是否合并，分别处理 ---
+        if is_merged:
+            num_frames = (flags >> 3) & 0x1F   # 从 flags 高位取子帧数
+            try:
+                num = assembled[0]
+                lengths = []
+                offset = 1
+                for _ in range(num):
+                    (l,) = struct.unpack('<H', assembled[offset:offset+2])
+                    lengths.append(l)
+                    offset += 2
+                for i in range(num):
+                    if offset + lengths[i] > len(assembled):
+                        raise ValueError("bad length")
+                    sub_data = assembled[offset:offset+lengths[i]]
+                    offset += lengths[i]
+                    # 子帧都是 P 帧，传递 is_keyframe=False
+                    success = self._decode_single_frame(sub_data, False)
+                    if not success:
+                        print(f"Merged subframe {i} decode failed, skipping rest")
+                        break   # 解码器已重置，后续子帧无法解码
+            except Exception as e:
+                print(f"Merge parse error for frame {fid}: {e}")
+                if self.codec:
+                    self.codec.close()
+                self.codec = av.CodecContext.create('h264', 'r')
+                self.codec.thread_type = 'FRAME'
+                self.codec.flags |= av.codec.context.Flags.LOW_DELAY
+                self.sps_data = None
+                self.pps_data = None
+        else:
+            # 普通单帧
+            self._decode_and_display(assembled, buf['is_keyframe'])
+
+        # 解码完成（或失败后无论如何都要删除缓冲区）
+        del self.frame_buffers[fid]
+
+
+    def _decode_single_frame(self, nal_data: bytes, is_keyframe: bool) -> bool:
+        """解码一帧（单帧或合并帧中的某一子帧），成功返回 True，失败重置解码器并返回 False"""
+        if is_keyframe:
+            self._cache_sps_pps(nal_data)
+        nal_data = self._ensure_sps_pps(nal_data)
+
+        try:
+            for packet in self.codec.parse(nal_data):
+                for frame in self.codec.decode(packet):
+                    self._handle_frame(frame)
+            self.consecutive_errors = 0
+            return True
+        except av.AVError:
+            # 重置解码器
+            if self.codec:
+                self.codec.close()
+            self.codec = av.CodecContext.create('h264', 'r')
+            self.codec.thread_type = 'FRAME'
+            self.codec.flags |= av.codec.context.Flags.LOW_DELAY
+            self.sps_data = None
+            self.pps_data = None
+            self.consecutive_errors = 0
+            return False
+        
+    def _decode_and_display(self, nal_data: bytes, is_keyframe: bool):
+        succeeded = self._decode_single_frame(nal_data, is_keyframe)
+        if not succeeded:
+            # 重置已经在 _decode_single_frame 中完成
+            print("Frame decode failed, decoder reset.")
+    
+    def _handle_frame(self, frame):
+        if frame is None:
+            return
+        img = frame.to_ndarray(format='bgr24')
+        if img is not None and img.size > 0:
+            self.frame_count += 1
+            if self.debug_dump_enable and self.frame_count <= 5:
+                path = self.debug_dump_dir / f'frame_{self.frame_count:05d}.png'
+                cv2.imwrite(str(path), img)
+            try:
+                self.frame_queue.put_nowait(img)
+            except queue.Full:
+                pass
+    
+    # ==================== 清理 ====================
+    def _cleanup(self):
+        now = time.time()
+        if now - self.last_cleanup < 1.0:
+            return
+        self.last_cleanup = now
+
+        # 超时清理
+        stale = [fid for fid, buf in self.frame_buffers.items()
+                 if (now - buf['time']) * 1000 > self.frame_timeout_ms]
+        for fid in stale:
+            buf = self.frame_buffers[fid]
+            print(f"⏰ Timeout frame #{fid}: {len(buf['frags'])}/{buf['total_frags']} frags")
+            del self.frame_buffers[fid]
+        
+        # 溢出保护
+        while len(self.frame_buffers) > self.max_frames_inflight:
+            oldest = next(iter(self.frame_buffers))
+            print(f"💥 Overflow: dropping frame #{oldest}")
+            del self.frame_buffers[oldest]
+    
+    # ==================== MQTT 相关 ====================
+    def _init_mqtt(self):
+        print(f"MQTT client_id: {self.mqtt_client_id}")
+        self.mqtt_client = mqtt.Client(
+            client_id=self.mqtt_client_id,
+            callback_api_version=mqtt.CallbackAPIVersion.VERSION1,
+            clean_session=True
+        )
+        self.mqtt_client.on_connect = self._on_connect
+        self.mqtt_client.on_disconnect = self._on_disconnect
+        
+        server = self.mqtt_server
+        port = 3333
+        if '://' in server:
+            server = server.split('://')[1]
+        if ':' in server:
+            parts = server.split(':')
+            server = parts[0]
+            port = int(parts[1]) if len(parts) > 1 else 3333
+        
+        self.mqtt_client.connect(server, port, keepalive=20)
+        self.mqtt_client.loop_start()
+        print(f"Connecting to MQTT broker at {server}:{port}...")
+    
+    def _on_connect(self, client, userdata, flags, rc):
+        if rc == 0:
+            print("MQTT connected successfully")
+            client.subscribe(self.mqtt_topic, qos=0)
+            client.message_callback_add(self.mqtt_topic, self._on_video_message)
+            if self.enable_game_status:
+                client.subscribe(self.game_status_topic, qos=0)
+                client.message_callback_add(self.game_status_topic, self._on_game_status)
+            else:
+                print("Game status printing is DISABLED")
+        else:
+            print(f"MQTT connection failed, rc={rc}")
+    
+    def _on_disconnect(self, client, userdata, rc):
+        if self.running:
+            print(f"MQTT disconnected unexpectedly (rc={rc})")
+        else:
+            print(f"MQTT disconnected normally (rc={rc})")
+    
+    def _on_video_message(self, client, userdata, msg):
+        try:
+            block = video_stream_pb2.CustomByteBlock()
+            block.ParseFromString(msg.payload)
+            self.process_packet(block.data)
+        except Exception as e:
+            print(f"Video message parse error: {e}")
+    
+    def _on_game_status(self, client, userdata, msg):
+        try:
+            status = video_stream_pb2.GameStatus()
+            status.ParseFromString(msg.payload)
+            status_str = f"{status.current_round},{status.total_rounds}"
+            now = time.time()
+            if now - self.last_game_status_print_time > 10.0 or status_str != self.last_game_status_str:
+                print(f"=== Game Status: Round {status.current_round}/{status.total_rounds}  Score R:{status.red_score} B:{status.blue_score}  Paused:{status.is_paused}")
+                self.last_game_status_print_time = now
+                self.last_game_status_str = status_str
+        except Exception:
+            pass
+    
+    # ==================== 显示 ====================
+    def _sharpen_center(self, img):
+        h, w = img.shape[:2]
+        cw, ch = int(w * 0.4), int(h * 0.4)
+        x0, y0 = max(0, (w - cw)//2), max(0, (h - ch)//2)
+        x1, y1 = min(w, x0 + cw), min(h, y0 + ch)
+        roi = img[y0:y1, x0:x1]
+        blurred = cv2.GaussianBlur(roi, (0,0), 0.5)
+        sharp = cv2.addWeighted(roi, 1.5, blurred, -0.5, 0)
+        img[y0:y1, x0:x1] = sharp
+        return img
+    
+    def _draw_overlay(self, img):
+        h, w = img.shape[:2]
+        cx = max(0, min(w-1, w//2 + self.crosshair_offset_x))
+        cy = max(0, min(h-1, h//2 + self.crosshair_offset_y))
+        cv2.line(img, (0, cy), (w-1, cy), (230, 190, 235), self.crosshair_width, cv2.LINE_AA)
+        cv2.line(img, (cx, 0), (cx, h-1), (230, 190, 235), self.crosshair_width, cv2.LINE_AA)
+        cv2.circle(img, (w//2, h//2), 24, (170, 255, 170), 1, cv2.LINE_AA)
+    
+    def display_loop(self):
+        cv2.namedWindow('Doorlock Decoder', cv2.WINDOW_NORMAL)
+        cv2.resizeWindow('Doorlock Decoder', self.display_width, self.display_height)
+        last_stat = time.time()
+        while self.running:
+            try:
+                img = self.frame_queue.get(timeout=0.05)
+                if img is None or img.size == 0:
+                    continue
+                img_disp = cv2.resize(img, (self.display_width, self.display_height), interpolation=cv2.INTER_NEAREST)
+                img_disp = self._sharpen_center(img_disp)
+                self._draw_overlay(img_disp)
+                
+                if time.time() - last_stat >= 5.0:
+                    fps = self.frame_count / max(1, time.time() - last_stat)
+                    print(f"FPS: {fps:.1f}, Frames: {self.frame_count}, Packets: {self.packet_count}, Buffer: {len(self.frame_buffers)}")
+                    last_stat = time.time()
+                
+                cv2.imshow('Doorlock Decoder', img_disp)
+                if self.debug_dump_enable:
+                    self.display_frame_counter += 1
+                    if self.display_frame_counter % self.debug_dump_every_n == 0:
+                        fid = f'{self.display_frame_counter:08d}'
+                        cv2.imwrite(str(self.debug_dump_dir / f'decoder_{fid}.png'), img_disp)
+                
+                key = cv2.waitKey(1) & 0xFF
+                if key == ord('q') or key == 27:
+                    self.running = False
+                    break
+            except queue.Empty:
+                continue
+        cv2.destroyAllWindows()
+    
+    def run(self):
+        self.display_loop()
+        print("Shutting down...")
+        self.mqtt_client.loop_stop()
+        self.mqtt_client.disconnect()
+        print(f"Decoded {self.frame_count} frames total")
+
+
+def main():
+    config_path = "node_params.yaml"
+    if len(sys.argv) > 1:
+        config_path = sys.argv[1]
+    print("=" * 50)
+    print("  Video Decoder (Standalone)")
+    print("=" * 50)
+    decoder = VideoDecoder(config_path)
+    try:
+        decoder.run()
+    except KeyboardInterrupt:
+        print("\nInterrupted by user")
+    except Exception as e:
+        print(f"Fatal error: {e}")
+        import traceback
+        traceback.print_exc()
+    finally:
+        print("Decoder stopped")
+
+
+if __name__ == '__main__':
+    main()

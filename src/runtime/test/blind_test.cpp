@@ -127,7 +127,7 @@ int main(int argc, char** argv) {
         mqtt_topic = config["mqtt"]["topic"].as<std::string>("CustomByteBlock");
         mqtt::connect_options opts;
         opts.set_keep_alive_interval(20);
-        opts.set_clean_session(true);
+        opts.set_clean_session(false);
         try {
             mqtt_client->connect(opts)->wait();
             AWAKENING_INFO("MQTT connected");
@@ -172,7 +172,6 @@ int main(int argc, char** argv) {
     if (serial) serial->start<SerialTag>("serial");
     
 
-    // ========== 编码线程 ==========
     // 编码线程
     // 独立推流线程（只推不拉）
     std::thread push_thread([&]() {
@@ -211,7 +210,7 @@ int main(int argc, char** argv) {
                 encoder.push_frame(latest_frame);
                 has_new = false;
             }
-            next_push = std::max(now, next_push + frame_interval);
+            next_push = std::max(now, next_push + milliseconds(100));
         }
     });
     
@@ -228,7 +227,7 @@ int main(int argc, char** argv) {
             encoder.pull_and_packetize();
             eyes_of_blind::BlindSend pkg;
             while (encoder.try_pop_packet(pkg)) {
-                // 严格 20ms 间隔
+                // 20ms 间隔
                 auto now = steady_clock::now();
                 if (now < next_send) {
                     std::this_thread::sleep_until(next_send);
@@ -241,7 +240,7 @@ int main(int argc, char** argv) {
                     serial->write(utils::to_vector(send));
                 } else if (use_mqtt && mqtt_client && mqtt_client->is_connected()) {
                     if (loss_sim.should_drop()) {
-                    next_send += milliseconds(20);  // 严格间隔，保留
+                    next_send += milliseconds(25);  
                     continue;}
                     
                     std::array<uint8_t, eyes_of_blind::MAX_PACKET_SIZE> raw{};
@@ -252,7 +251,7 @@ int main(int argc, char** argv) {
                     if (block.SerializeToString(&serialized))
                         mqtt_client->publish(mqtt::make_message(mqtt_topic, serialized));
                 }
-                next_send = std::max(now, next_send + milliseconds(20));
+                next_send = std::max(now, next_send + milliseconds(25));
             }
             std::this_thread::sleep_for(milliseconds(1));
         }

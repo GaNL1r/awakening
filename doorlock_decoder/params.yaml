@@ -1,0 +1,22 @@
+video_decoder:
+
+  display: true
+
+  width: 128
+  height: 128
+  display_scale: 4
+  raid_redundancy: 2  
+  p_redundancy: 2
+  mqtt_ip: "127.0.0.1"
+  mqtt_port: 3333
+  mqtt_topic: "CustomByteBlock"
+
+  frame_timeout_ms: 500
+
+  max_frames_inflight: 16
+
+  max_consecutive_incomplete: 8
+
+  crosshair_offset_x: 0
+  crosshair_offset_y: 0
+  crosshair_width: 1

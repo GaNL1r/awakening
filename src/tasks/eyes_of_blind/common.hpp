@@ -10,7 +10,7 @@ static constexpr std::size_t MAX_PACKET_SIZE = 300;
 static constexpr uint8_t FLAG_KEYFRAME   = 0x01;   // bit0: IDR 帧
 static constexpr uint8_t FLAG_FEC_PACKET = 0x02;   // bit1: 冗余包
 static constexpr uint8_t FLAG_MERGED     = 0x04;   // 此帧为合并帧
-// flags bits [7:3] 用于存储子帧数（当 FLAG_MERGED 置位时）
+// flags bits [7:3]: 当 FLAG_MERGED 置位时，存储子帧数；否则存储冗余包数 r (0-7)
 #pragma pack(push, 1)
 struct PacketHeader
 {

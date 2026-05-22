@@ -1,11 +1,14 @@
 encoder:
   # ----- 编码器参数 -----
-  fps: 30                       # 输出帧率
-  target_bitrate: 65            # 目标比特率（kbps）
+  test_mode: false
+  fps: 20                       # 输出帧率
+  target_bitrate: 60            # 目标比特率（kbps）
   max_packets_per_sec: 50       # 每秒最大包数（令牌桶速率）
+  raid_redundancy: 2
+  p_redundancy: 2
 
   # ----- 图像预处理参数 -----
-  crop_size: 300                # 中心裁剪区域大小
+  crop_size: 200                # 中心裁剪区域大小
   output_w: 128                 # 编码输出宽度
   output_h: 128                 # 编码输出高度
 
@@ -22,7 +25,7 @@ encoder:
 
 camera: 
   hik_camera:
-    target_sn: DA2166465
+    target_sn: DA3038934
     adc_bit_depth: Bits_8
     pixel_format: BayerRG8 #RGB8Packed
     reverse_x: false
@@ -139,4 +142,4 @@ mqtt:
 
 # 丢包模拟配置
 packet_loss_sim:
-  loss_rate: 0.0  # 丢包率，0.0~1.0
+  loss_rate: 0.30  # 丢包率，0.0~1.0

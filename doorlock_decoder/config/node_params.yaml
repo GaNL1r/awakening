@@ -1,0 +1,116 @@
+#  Hik Camera 节点参数
+hik_camera:
+  ros__parameters:
+    exposure_time: 12000.0     # 曝光时间（单位：微秒）
+    gain: 10.0                 # 增益（放大亮度）
+    use_sensor_data_qos: true  # 是否使用 sensor_data QoS（低延迟）
+    camera_name: "hik_camera"  # 相机名称（用于CameraInfo匹配）
+    camera_info_url: "package://hik_camera/config/camera.yaml" # 相机标定文件路径
+
+#  编码器节点参数（核心）
+video_encoder:
+  ros__parameters:
+    input_topic: /image_raw    # 输入图像话题（必须和 Hik Camera 输出一致）
+    target_bitrate: 115        # 目标比特率（kbps）
+    x264_preset: veryslow      # x264编码预设（ultrafast, superfast, veryfast, faster, fast, medium, slow, slower, veryslow）
+    output_fps: 50             # 输出帧率
+    enable_display: true       # 是否开启编码端显示窗口
+    #  调试图像保存
+    debug_dump_enable: false           # 是否保存调试图像
+    debug_dump_every_n_frames: 1       # 每N帧保存一次
+    debug_dump_save_raw: false         # 保存原始图像
+    debug_dump_save_roi: true          # 保存ROI区域
+    debug_dump_save_static: false      # 保存静态背景
+    debug_dump_save_final: true        # 保存最终输出
+    debug_dump_dir: ""                 # 保存路径（launch里动态给）
+  
+    #  ROI / 分辨率
+    crop_size: 200                     # 中心裁剪区域大小
+    output_size: 300                   # 编码输出分辨率
+
+    #  运动检测参数
+    motion_threshold: 14               # 运动检测阈值：像素亮度变化超过此值判定为运动（越低越敏感）
+                                       # 影响：阈值越低，暗物体/慢运动越可能产生拖影；过高则拖影少
+
+    motion_erode_px: 2                 # 运动掩膜腐蚀（缩小运动区域，消除噪声）
+                                       # 影响：值越大拖影区域越“内收”，可减少杂乱拖影；太小拖影会扩散到背景
+
+    motion_dilate_px: 6                # 运动掩膜膨胀（扩大运动区域，填补孔洞）
+                                       # 影响：值越大拖影轮廓越“肥厚”，利于暗物体产生连续拖影；太大会导致拖影粘连
+
+    motion_trail_frames: 20            # 拖影历史帧数：保留最近N帧在运动区域做最大值叠加
+                                       # 影响：越大拖影尾巴越长（50fps 下 20 帧 ≈ 0.4 秒），设为0则完全关闭拖影
+
+    trail_disable_motion_ratio: 0.01   # 拖影抑制运动比例阈值：当画面中运动像素占比超过该值时，自动关闭拖影
+                                       # 影响：避免镜头大范围移动时满屏残影。值越小越保守，设为1.0则永不抑制
+
+    #  背景建模
+    bg_update_alpha: 0.01              # 背景更新速度
+    bg_blur_sigma: 0.1                 # 静态区域模糊强度
+
+    # 中心保护区域（不做压缩）
+    center_clear_size: 150
+
+    # 是否强制灰度图(只保留中间受保护区域的色彩)
+    force_monochrome: false
+
+    #  带宽控制
+    bandwidth_limit_kbytes: 15.0       # 最大带宽（kB/s）
+    bandwidth_window_s: 1.0            # 滑动窗口时间
+
+    # 最大发送延迟
+    max_tx_delay_s: 0.5
+
+    #  MQTT 参数 (调试用：127.0.0.1)
+    use_mqtt: true                      # 是否使用 MQTT 发送数据
+    mqtt_ip: 127.0.0.1 # 192.168.12.1   # MQTT 服务器 IP
+    mqtt_port: 3333                     # MQTT 服务器端口
+    mqtt_topic: "CustomByteBlock"       # MQTT 话题  
+    robot_id: "mqtt"                    # 机器人 ID（用于 MQTT 消息）
+    # 机器人ID：
+    # 红：“1”
+    # 蓝：“101”
+    # 串口参数
+    serial_output: false
+    serial_port: "/dev/ttyACM0"        # 串口设备
+    baud_rate: 115200                  # 串口波特率
+
+
+ 
+# 解码节点参数
+video_decoder:
+  ros__parameters:
+    # ==================== 基本参数 ====================
+    topic: /video_stream         # 订阅视频流话题(ROS2用)
+    display: true                # 是否显示窗口
+    width: 300                   # 解码分辨率（必须和编码一致）
+    height: 300
+    display_scale: 2             # 显示放大倍数
+    
+    # ==================== 准星参数 ====================
+    crosshair_offset_x: 0
+    crosshair_offset_y: 0
+    crosshair_width: 1
+
+    # ==================== 调试保存 ====================
+    debug_dump_enable: false
+    debug_dump_every_n_frames: 1
+    debug_dump_save_decoder: true
+    debug_dump_dir: "sniper_debug_imgs"
+
+    # ==================== 传输方式 ====================
+    use_mqtt: true
+    mqtt_ip: "192.168.12.1" #192.168.12.1
+    mqtt_port: 3333
+    mqtt_topic: "CustomByteBlock"
+    robot_id: "101"              # 机器人ID: 红="1", 蓝="101"
+
+    # ==================== 游戏状态 ====================
+    enable_game_status_print: false
+    mqtt_game_status_topic: "GameStatus"
+
+    # ==================== 帧组装与丢包处理 ====================
+    frame_timeout_ms: 500            # 帧组装超时(ms)，超过此时间未收齐则丢弃
+    max_frames_inflight: 8           # 最大缓存帧数，超过则丢弃最老帧
+    max_consecutive_incomplete: 5    # 连续不完整帧数，超过则重置解码器
+    packet_loss_threshold_pct: 30    # 丢包率阈值(%), 超过则告警

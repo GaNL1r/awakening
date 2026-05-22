@@ -19,18 +19,68 @@
 
 namespace awakening::eyes_of_blind {
 
+// 全局 GF(2^8) 表（生成元 0x03）
+static uint8_t gf_exp[512];
+static uint8_t gf_log[256];
+static bool gf_ready = false;
+
+static void init_gf() {
+    if (gf_ready) return;
+    gf_ready = true;
+    int x = 1;
+    for (int i = 0; i < 255; ++i) {
+        gf_exp[i] = x;
+        gf_exp[i + 255] = x;
+        gf_log[x] = i;
+        x <<= 1;
+        if (x & 0x100) x ^= 0x11d;
+    }
+    gf_log[0] = 0; // 未使用
+}
+
+static uint8_t gf_mul(uint8_t a, uint8_t b) {
+    if (a == 0 || b == 0) return 0;
+    return gf_exp[gf_log[a] + gf_log[b]];
+}
+
+// RS 编码：k 个数据分片，生成 r 个冗余包
+// 矩阵：编码矩阵为范德蒙矩阵，第 j 行 (0..r-1) 系数为 (1+i)^(j)，i 从 0..k-1
+static std::vector<std::vector<uint8_t>> generate_rs_fec(
+    const std::vector<std::vector<uint8_t>>& fragments,
+    int k, int r)
+{
+    init_gf();
+    std::vector<std::vector<uint8_t>> fec(r, std::vector<uint8_t>(PAYLOAD_SIZE, 0));
+    for (int j = 0; j < r; ++j) {
+        for (int i = 0; i < k; ++i) {
+            uint8_t coeff = 1;
+            // 计算 (i+1)^j
+            for (int p = 0; p < j; ++p) coeff = gf_mul(coeff, i + 1);
+            for (size_t b = 0; b < fragments[i].size(); ++b) {
+                fec[j][b] ^= gf_mul(fragments[i][b], coeff);
+            }
+        }
+    }
+    return fec;
+}
+
 struct Encoder::Impl {
     struct Params {
         int out_w {}, out_h {}, fps {};
         int target_bitrate {};
         int max_packets_per_sec = 30;
+        int raid_redundancy = 2;   
+        int p_redundancy = 1;   
+        bool test_mode = false;
 
         void load(const YAML::Node& config) {
             out_w = config["output_w"].as<int>();
             out_h = config["output_h"].as<int>();
             fps = config["fps"].as<int>();
             target_bitrate = config["target_bitrate"].as<int>();
-
+            raid_redundancy = config["raid_redundancy"].as<int>(2);
+            p_redundancy   = config["p_redundancy"].as<int>(1);
+            test_mode = config["test_mode"].as<bool>(false);
             if (config["max_packets_per_sec"])
                 max_packets_per_sec = config["max_packets_per_sec"].as<int>();
 
@@ -121,6 +171,10 @@ struct Encoder::Impl {
     int merge_frame_count_ = 0;                  // 当前缓存的子帧数量
     static constexpr int MERGE_MAX_FRAMES = 4;   // 最多合并 4 个 P 帧
 
+    bool test_mode_;
+    int test_frame_counter_ = 0;
+
+
     std::chrono::steady_clock::time_point last_merge_time_;
     std::atomic<bool> pipeline_alive_{true}; 
 
@@ -154,84 +208,118 @@ struct Encoder::Impl {
     }
 
     void send_encoded_frame(const uint8_t* data, size_t size, uint32_t frame_id, uint8_t flags) {
-        const size_t frag_payload = PAYLOAD_SIZE;  // 287
+        const size_t frag_payload = PAYLOAD_SIZE;
         uint16_t frag_count = (size + frag_payload - 1) / frag_payload;
         if (frag_count == 0) frag_count = 1;
 
-        // FEC 决策：合并帧或分片数 ≥ 2 时使用
-        bool use_fec = ((flags & FLAG_MERGED) || (frag_count >= 2));
-        uint16_t total_frags = use_fec ? frag_count + 1 : frag_count;
+        // 数据分片（所有分片填充到 PAYLOAD_SIZE 以保证 RS 编码正确）
+        std::vector<std::vector<uint8_t>> fragments(frag_count);
+        for (uint16_t i = 0; i < frag_count; ++i) {
+            size_t offset = i * frag_payload;
+            size_t copy   = std::min(frag_payload, size - offset);
+            fragments[i].resize(PAYLOAD_SIZE, 0);
+            std::memcpy(fragments[i].data(), data + offset, copy);
+        }
 
-        // 原子申请令牌
+        int r = 0;
+        bool is_idr = (flags & FLAG_KEYFRAME);
+        if (is_idr && frag_count >= 2) {
+            r = params_.raid_redundancy;
+            if (r < 2) r = 2;
+        } else {
+            r = params_.p_redundancy;
+            if (r < 0) r = 0;
+        }
+
+        uint16_t total_frags = frag_count + r;
+
         if (!bucket_.try_consume_bulk(total_frags)) {
-            AWAKENING_WARN("Dropping frame#{}: rate limit exceeded (need {}, have {})", frame_id, total_frags, bucket_.tokens);
+            AWAKENING_WARN("Dropping frame#{}: rate limit", frame_id);
             return;
         }
 
         std::vector<BlindSend> packets;
 
-        // 生成数据分片
+        // 编码 r 值到 flags 的 [7:3] 位（当 FLAG_MERGED 未置位时）
+        uint8_t flags_with_r = flags;
+        if (!(flags & FLAG_MERGED)) {
+            flags_with_r |= ((r & 0x1F) << 3);
+        }
+
+        // 计算最后一个分片的有效大小
+        size_t last_frag_size = size - (frag_count - 1) * frag_payload;
+
+        // 发送数据分片（总是发送完整的 PAYLOAD_SIZE，包括填充零）
         for (uint16_t i = 0; i < frag_count; ++i) {
             BlindSend pkt{};
             pkt.header.frame_id     = frame_id;
             pkt.header.frag_idx     = i;
             pkt.header.frag_count   = total_frags;
-            pkt.header.payload_size = static_cast<uint16_t>(std::min(frag_payload, size - i * frag_payload));
+            // 发送完整大小（包括填充），这样 RS 编解码一致
+            pkt.header.payload_size = PAYLOAD_SIZE;
             pkt.header.frame_size   = static_cast<uint16_t>(size);
-            pkt.header.flags        = flags;
-            std::memcpy(pkt.data.data(), data + i * frag_payload, pkt.header.payload_size);
+            pkt.header.flags        = flags_with_r;
+            std::memcpy(pkt.data.data(), fragments[i].data(), PAYLOAD_SIZE);
             packets.push_back(pkt);
         }
 
-        // 生成 FEC 包
-        if (use_fec) {
-            BlindSend fec_pkt{};
-            fec_pkt.header.frame_id     = frame_id;
-            fec_pkt.header.frag_idx     = frag_count;    // 索引为数据分片数
-            fec_pkt.header.frag_count   = total_frags;
-            fec_pkt.header.frame_size   = static_cast<uint16_t>(size);
-            fec_pkt.header.flags        = flags | FLAG_FEC_PACKET;
-
-            std::vector<uint8_t> fec_data(PAYLOAD_SIZE, 0);
+        // 生成 r 个冗余包
+        if (r > 0) {
             if (frag_count == 1) {
-                // 1+1：复制数据包内容
-                std::copy(packets[0].data.begin(), packets[0].data.begin() + PAYLOAD_SIZE, fec_data.begin());
+                // 单 P 帧：冗余包直接拷贝 r 份
+                for (int j = 0; j < r; ++j) {
+                    BlindSend fec{};
+                    fec.header.frame_id     = frame_id;
+                    fec.header.frag_idx     = frag_count + j;
+                    fec.header.frag_count   = total_frags;
+                    fec.header.payload_size = static_cast<uint16_t>(fragments[0].size());
+                    fec.header.frame_size   = static_cast<uint16_t>(size);
+                    fec.header.flags        = flags_with_r | FLAG_FEC_PACKET;
+                    std::memcpy(fec.data.data(), fragments[0].data(), fragments[0].size());
+                    packets.push_back(fec);
+                }
             } else {
-                for (auto& p : packets)
-                    for (size_t j = 0; j < PAYLOAD_SIZE; ++j)
-                        fec_data[j] ^= p.data[j];
+                // 多分片：使用 RS 编码生成 r 个冗余包
+                auto fecs = generate_rs_fec(fragments, frag_count, r);
+                for (int j = 0; j < r; ++j) {
+                    BlindSend fec{};
+                    fec.header.frame_id     = frame_id;
+                    fec.header.frag_idx     = frag_count + j;
+                    fec.header.frag_count   = total_frags;
+                    fec.header.payload_size = PAYLOAD_SIZE;
+                    fec.header.frame_size   = static_cast<uint16_t>(size);
+                    fec.header.flags        = flags_with_r | FLAG_FEC_PACKET;
+                    std::memcpy(fec.data.data(), fecs[j].data(), PAYLOAD_SIZE);
+                    packets.push_back(fec);
+                }
             }
-            fec_pkt.header.payload_size = PAYLOAD_SIZE;
-            std::memcpy(fec_pkt.data.data(), fec_data.data(), PAYLOAD_SIZE);
-            packets.push_back(fec_pkt);
         }
 
-        // 入队（队列溢出时丢弃最旧包）
+        // 入队（同前）
         {
             std::lock_guard<std::mutex> qlock(pkg_mutex_);
             for (auto& p : packets) {
-                if (pkg_queue_.size() >= max_queue_packets_)
-                    pkg_queue_.pop_front();
+                if (pkg_queue_.size() >= max_queue_packets_) pkg_queue_.pop_front();
                 pkg_queue_.push_back(p);
             }
         }
 
-        std::string frame_type;
-        if (flags & FLAG_MERGED) {
-            int merged_cnt = (flags >> 3) & 0x1F;
-            frame_type = "MERGED(" + std::to_string(merged_cnt) + ")";
-        } else if (flags & FLAG_KEYFRAME) {
-            frame_type = "IDR";
-        } else {
-            frame_type = "P";
-        }
-
+        std::string fec_str = r > 0 ? ("RS(" + std::to_string(frag_count) + "+" + std::to_string(r) + ")") : "NO";
         AWAKENING_INFO("Frame#{} {} : {} bytes, data_frags={}, total_frags={}, FEC={}",
-            frame_id, frame_type, size, frag_count, total_frags, use_fec ? "YES" : "NO");
+                    frame_id, is_idr ? "IDR" : "P", size, frag_count, total_frags, fec_str);
     }
 
     Impl(const YAML::Node& config) {
         params_.load(config);
+
+        test_mode_ = params_.test_mode;
+        if (test_mode_) {
+            // 不初始化 GStreamer
+            bucket_.init(params_.max_packets_per_sec, params_.max_packets_per_sec);
+            max_queue_packets_ = params_.max_packets_per_sec * 8;
+            preprocessor_ = std::make_unique<ImagePreprocessor>(config);
+            return;
+        }
 
         bucket_.init(params_.max_packets_per_sec, params_.max_packets_per_sec);
 
@@ -284,7 +372,7 @@ struct Encoder::Impl {
         );
         gst_caps_unref(caps_in);
 
-        // ----- 低延迟配置（延迟低，清晰度稍差）-----
+
         g_object_set(
             encoder,
             "bitrate",          params_.target_bitrate,   // 目标码率 (kbps)
@@ -292,31 +380,30 @@ struct Encoder::Impl {
             "tune",             0x00000001,                
             "bframes",          0,
             "ref",              1,
-            "key-int-max",      20,
+            "key-int-max",      30,
             "rc-lookahead",     0,
             "sync-lookahead",   0,
             "sliced-threads",   FALSE,
             "byte-stream",      TRUE,
             "aud",              TRUE,
-            "vbv-buf-capacity", 500,    // ms
+            "vbv-buf-capacity", 100,    // ms
             "option-string",            
             "repeat-headers=1:"
-            "vbv-maxrate=60:"           // kbps
+            "vbv-maxrate=50:"           // kbps
             "force-cfr=1:"
             "scenecut=0:"
             "open-gop=0:"
-            "b-adapt=2:"
             "me=hex:"
-            "me-range=32:"
+            "me-range=16:"
             "subme=7:"
             "trellis=2:"
             "deblock=0,0:"
-            "aq-mode=2:"
-            "aq-strength=1.2:"
+            // "aq-mode=2:"
+            // "aq-strength=1.2:"
             "psy-rd=0.4,0.0",
             nullptr
         );
-
+        
         // h264parse 配置
         // config-interval=-1: 仅在 IDR 帧前插入 SPS/PPS（默认行为）
         g_object_set(parser, "config-interval", -1, "disable-passthrough", TRUE, nullptr);
@@ -446,6 +533,7 @@ struct Encoder::Impl {
     }
 
     void pull_stream_and_packetize() {
+        if (test_mode_) return;
         static int pull_count = 0;
         // AWAKENING_INFO("pull_stream_and_packetize called (#{})", ++pull_count);
         if (appsink_ && gst_app_sink_is_eos(GST_APP_SINK(appsink_))) {
@@ -455,7 +543,7 @@ struct Encoder::Impl {
 
         GstSample* sample = gst_app_sink_try_pull_sample(GST_APP_SINK(appsink_), 0);
         if (!sample) {
-            // 不刷屏，每秒最多打印一次
+            // 每秒最多打印一次
             static int no_sample_count = 0;
             static auto last_warn = std::chrono::steady_clock::now();
             no_sample_count++;
@@ -551,6 +639,22 @@ struct Encoder::Impl {
     }
     
     void push_frame(const cv::Mat& frame) {
+        if (test_mode_) {
+            // 生成固定大小的测试帧，内容为 0,1,2...
+            constexpr int TEST_SIZE = 100;   // 可调整
+            std::vector<uint8_t> data(TEST_SIZE);
+            for (int i = 0; i < TEST_SIZE; ++i)
+                data[i] = static_cast<uint8_t>(test_frame_counter_ + i);
+            test_frame_counter_++;
+
+            uint8_t flags = 0;
+            // 每 10 帧设置一个 IDR 标志方便观察
+            if (test_frame_counter_ % 10 == 0)
+                flags = FLAG_KEYFRAME;
+
+            send_encoded_frame(data.data(), data.size(), frame_id_++, flags);
+            return;
+        }
         if (frame.empty())
             return;
 
