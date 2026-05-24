@@ -116,7 +116,7 @@ void draw_auto_aim(cv::Mat& img, const AutoAimDebugCtx& ctx) {
             cv::Point2f center = aim_point_img_points[0];
             double r = camera_info.camera_matrix.at<double>(0, 0) * R
                 / cmd.aim_point.pose.translation().z();
-            cv::circle(img, center, r, cv::Scalar(255, 255, 255), 2);
+            cv::circle(img, center, r, cv::Scalar(50, 50, 255), 2);
             if (cmd.fire_advice) {
                 int size = 50;
                 cv::line(

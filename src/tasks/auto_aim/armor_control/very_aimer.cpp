@@ -313,33 +313,18 @@ struct VeryAimer::Impl {
                     return false;
                 };
 
+
                 while (seg.max_acc() > max_acc) {
                     bool expanded = false;
 
-                    if (l > 0 || r < N - 1)
+   
+                    if (l > 0 || r < N - 1) {
                         expanded = try_candidate(l - 1, r + 1);
-
-                    if (!expanded && l > 0)
-                        expanded = try_candidate(l - 1, r);
-
-                    if (!expanded && r < N - 1)
-                        expanded = try_candidate(l, r + 1);
-
-                    if (!expanded && (l > 0 || r < N - 1)) {
-                        int nl = std::max(0, l - 1);
-                        int nr = std::min(N - 1, r + 1);
-                        QuinticSegment forceSeg = buildSeg(nl, nr);
-
-                        if (forceSeg.max_acc() < seg.max_acc() || (nl == 0 && nr == N - 1)) {
-                            l = nl;
-                            r = nr;
-                            seg = std::move(forceSeg);
-                            expanded = true;
-                        }
                     }
 
                     if (!expanded)
                         break;
+
                     if (l == 0 && r == N - 1 && seg.max_acc() > max_acc)
                         break;
                 }
@@ -362,7 +347,6 @@ struct VeryAimer::Impl {
             for (size_t i = 0; i < traj.segs.size(); ++i)
                 traj.seg_prefix_time[i + 1] = traj.seg_prefix_time[i] + traj.segs[i].duration();
         }
-
         void build_limit(double max_yaw_acc, double max_pitch_acc, double current_time) noexcept {
             auto& cp_vec = get_cp_vec();
             auto prefix = get_prefix();
@@ -462,14 +446,15 @@ struct VeryAimer::Impl {
         const int armor_num = static_cast<int>(armors_xyza.size());
         int i_chosen = 0;
 
-        // const double center_yaw = std::atan2(target_state.pos().y(), target_state.pos().x());
-
+        const double center_yaw = std::atan2(target_state.pos().y(), target_state.pos().x());
+        auto coming = center_yaw
+            + (target_state.vyaw() > 0 ? -angles::from_degrees(30) : angles::from_degrees(30));
         std::vector<double> delta_angles;
         delta_angles.reserve(armor_num);
         for (int i = 0; i < armor_num; ++i) {
-            delta_angles.push_back(angles::normalize_angle(armors_xyza[i][3] - std::atan2(armors_xyza[i][1], armors_xyza[i][0])));
+            auto facing = std::atan2(armors_xyza[i][1], armors_xyza[i][0]);
+            delta_angles.push_back(angles::normalize_angle(armors_xyza[i][3] - center_yaw));
         }
-
         const auto pick_best_by_min_delta = [&](const std::vector<int>& idxs) -> int {
             int best = -1;
             double best_val = std::numeric_limits<double>::infinity();
@@ -486,7 +471,7 @@ struct VeryAimer::Impl {
         if (auto_aim_fsm == AutoAimFsm::AIM_SINGLE_ARMOR
             && target.target_number != ArmorClass::OUTPOST && armor_num > 0)
         {
-            constexpr double in_first = 60.0 / 57.3; 
+            constexpr double in_first = 60.0 / 57.3;
             std::vector<int> candidates;
             for (int i = 0; i < armor_num; ++i) {
                 if (std::abs(delta_angles[i]) <= in_first)
@@ -517,22 +502,6 @@ struct VeryAimer::Impl {
         }
         if (armor_num > 0) {
             int best_idx = -1;
-
-            // if (auto_aim_fsm == AutoAimFsm::AIM_WHOLE_CAR_ARMOR
-            //     && target.target_number != ArmorClass::OUTPOST) {
-            //     const double coming_angle = params_.comming_angle * M_PI / 180.0;
-            //     const double leaving_angle = params_.leaving_angle * M_PI / 180.0;
-
-            //     for (int i = 0; i < armor_num; ++i) {
-            //         if (std::abs(delta_angles[i]) > coming_angle)
-            //             continue;
-
-            //         if (target_state.vyaw() > 0 && delta_angles[i] < leaving_angle)
-            //             best_idx = i;
-            //         if (target_state.vyaw() < 0 && delta_angles[i] > -leaving_angle)
-            //             best_idx = i;
-            //     }
-            // }
 
             if (auto_aim_fsm == AutoAimFsm::AIM_WHOLE_CAR_PAIR
                 && target.target_number != ArmorClass::OUTPOST) {
@@ -866,7 +835,7 @@ struct VeryAimer::Impl {
                 is_big ? params_.shooting_range_w_large / 2 : params_.shooting_range_w_small / 2;
             auto cos_theta = std::cos(aim_point.d_angle);
             auto sin_theta = std::sin(aim_point.d_angle);
-            
+
             auto yaw1 = std::atan2(
                 aim_point.pose.translation().y() + half_w * cos_theta,
                 aim_point.pose.translation().x() - half_w * sin_theta
@@ -936,9 +905,9 @@ struct VeryAimer::Impl {
             //     if (delay_fire(+t_add)) {
             //         // cmd.enable_pitch_diff = params_.min_enable_pitch_deg;
             //         // cmd.enable_yaw_diff = params_.min_enable_yaw_deg;
-            //         // cmd.enable_pitch_diff = 2.0;
-            //         // cmd.enable_yaw_diff = 2.0;
-            //         // cmd.fire_advice = true;
+            //         cmd.enable_pitch_diff = 2.0;
+            //         cmd.enable_yaw_diff = 2.0;
+            //         cmd.fire_advice = true;
             //     }
             // }
         }

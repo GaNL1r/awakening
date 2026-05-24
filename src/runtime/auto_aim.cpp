@@ -365,8 +365,9 @@ int main(int argc, char** argv) {
     });
     if (serial || player) {
         s.register_task<SerialIO>("receive_serial", [&](SerialIO::second_type&& data) {
-            static std::mutex mutex;
-            std::lock_guard<std::mutex> lock(mutex);
+            // static std::mutex mutex;
+            // std::lock_guard<std::mutex> lock(mutex);
+            auto now = std::chrono::steady_clock::now();
             if (recorder) {
                 utils::dt_once(
                     [&]() { recorder->record<SerialTag>(data); },
@@ -377,10 +378,28 @@ int main(int argc, char** argv) {
             log_ctx.serial_count++;
             if (robo_opt.has_value()) {
                 auto robo = robo_opt.value();
+                static uint32_t last_pc = -1;
+                static uint32_t delay = 0;
+                if (robo.time_stamp_pc != last_pc) {
+                    last_pc = robo.time_stamp_pc;
+                    delay = (std::chrono::duration_cast<std::chrono::microseconds>(now - start_tp)
+                                 .count()
+                             - robo.time_stamp_pc
+                             - (robo.time_stamp_send_micro - robo.time_stamp_receive_micro))
+                        / 2.0;
+                }
 
+                // std::cout << robo.time_stamp_pc << "  " << robo.time_stamp_receive_micro << "  "
+                //           << robo.time_stamp_send_micro << "  "
+                //           << std::chrono::duration_cast<std::chrono::microseconds>(
+                //                  std::chrono::steady_clock::now() - start_tp
+                //              )
+                //                  .count()<<"  "<<delay<<"  "<<serial_send_to_image_microseconds
+                //           << std::endl;
+                // std::chrono::time_point<std::chrono::steady_clock> packet_time =
+                //     now + std::chrono::microseconds(serial_send_to_image_microseconds);
                 std::chrono::time_point<std::chrono::steady_clock> packet_time =
-                    std::chrono::steady_clock::now()
-                    + std::chrono::microseconds(serial_send_to_image_microseconds);
+                    now - std::chrono::microseconds(delay);
                 double yaw = angles::from_degrees(robo.yaw);
                 double pitch = angles::from_degrees(robo.pitch);
                 double roll = angles::from_degrees(robo.roll);

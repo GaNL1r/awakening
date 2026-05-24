@@ -328,7 +328,6 @@ struct ArmorInfer::Impl {
             key_points.points[std::to_underlying(I::LEFT_BOTTOM)] = cv::Point2f(x2, y2);
             key_points.points[std::to_underlying(I::RIGHT_BOTTOM)] = cv::Point2f(x3, y3);
             key_points.points[std::to_underlying(I::RIGHT_TOP)] = cv::Point2f(x4, y4);
-            // net.tmp_points.push_back(key_points.points);
             net.confidence = confidence;
             out_objs.push_back(std::move(obj));
         }

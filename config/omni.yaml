@@ -8,7 +8,7 @@ serial:
   baud_rate: 115200
   char_size: 8
   read_buf_size: 4096
-serial_send_to_image_microseconds: 2500
+serial_send_to_image_microseconds: 0
 use_sim: false
 
 recorder:
@@ -76,8 +76,8 @@ armor_tracker:
   tracking_thres: 10
   match_gate_at_1m: 1000.0
   match_gate_not_all_init_at_1m: 10000.0
-  qxyz_common: [20.0, 20.0, 1.0]
-  qyaw_common: 10.0
+  qxyz_common: [30.0, 30.0, 1.0]
+  qyaw_common: 100.0
   qxyz_output: [1.0, 1.0, 0.5]
   qyaw_output: 0.01
   q_r: 0.0000001
@@ -91,7 +91,7 @@ armor_tracker:
 auto_aim_fsm:
   single_whole_up: 1.5 
   single_whole_down: 1.0
-  whole_pair_up: 10.5 
+  whole_pair_up: 16.5 
   whole_pair_down: 9.5 #1s内至少换2次板子  2pi  否则轨迹规划无意义
   pair_center_up: 16.5
   pair_center_down: 15.0
@@ -99,7 +99,7 @@ auto_aim_fsm:
 
 
 very_aimer:
-  base_yaw_offset: -1.0
+  base_yaw_offset: -0.5
   base_pitch_offset: -2.0
   # base_yaw_offset: -0.0
   # base_pitch_offset: -0.0
@@ -107,7 +107,7 @@ very_aimer:
   
   sample_horizon: 200
 
-  control_delay: 0.1
+  control_delay: 0.05
   
   max_yaw_acc: 40
   max_pitch_acc: 50

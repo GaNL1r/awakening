@@ -306,9 +306,9 @@ bool ArmorTarget::update(
     measure_ctx.camera_cv_in_odom = camera_cv_in_odom;
 
     Measure measure { .ctx = measure_ctx };
-    VecZ z_pred;
-    measure.h(target_state.x, z_pred);
-    auto measurement = get_measurement(armor, z_pred, mt);
+    // VecZ z_pred;
+    // measure.h(target_state.x, z_pred);
+    auto measurement = get_measurement(armor);
     esekf.value().setMeasureFunc(measure);
 
     target_state.x = esekf.value().update(measurement);

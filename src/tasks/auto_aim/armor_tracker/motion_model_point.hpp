@@ -141,18 +141,10 @@ inline void project_points_jets(
     img_pts_jet.clear();
     img_pts_jet.reserve(obj_pts.size());
 
-    const T eps = T(1e-8);
-
     for (const auto& pt3: obj_pts) {
         Eigen::Matrix<T, 3, 1> Pw(T(pt3.x), T(pt3.y), T(pt3.z));
         Eigen::Matrix<T, 3, 1> Pc = R * Pw + t;
         T Xc = Pc(0), Yc = Pc(1), Zc = Pc(2);
-
-        if (Zc < eps) {
-            img_pts_jet.emplace_back(T(0), T(0));
-            continue;
-        }
-
         T xp = Xc / Zc;
         T yp = Yc / Zc;
 
