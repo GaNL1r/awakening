@@ -1,0 +1,359 @@
+#include "rune_detector.hpp"
+#include "tasks/base/common.hpp"
+#include "utils/common/image.hpp"
+#include <opencv2/core/mat.hpp>
+#include <vector>
+namespace awakening::auto_buff {
+struct RuneDetector::Impl {
+    struct Params {
+        int bin_threshold;
+        int color_diff_thresh;
+        double rune_center_min_area;
+        double rune_center_max_area;
+        double rune_center_1x1ratio_tol;
+        double rune_center_fill_ratio_min;
+        double rune_pan_min_area;
+        double rune_pan_max_area;
+        double rune_pan_cluster_radius;
+        double rune_pan_max_square_ratio;
+        void load(const YAML::Node& config) {
+            bin_threshold = config["bin_threshold"].as<int>();
+            color_diff_thresh = config["color_diff_thresh"].as<int>();
+            rune_center_min_area = config["rune_center_min_area"].as<double>();
+            rune_center_max_area = config["rune_center_max_area"].as<double>();
+            rune_center_1x1ratio_tol = config["rune_center_1x1ratio_tol"].as<double>();
+            rune_center_fill_ratio_min = config["rune_center_fill_ratio_min"].as<double>();
+            rune_pan_min_area = config["rune_pan_min_area"].as<double>();
+            rune_pan_max_area = config["rune_pan_max_area"].as<double>();
+            rune_pan_cluster_radius = config["rune_pan_cluster_radius"].as<double>();
+            rune_pan_max_square_ratio = config["rune_pan_max_square_ratio"].as<double>();
+        }
+    } params_;
+    Impl(const YAML::Node& config) {
+        params_.load(config);
+    }
+    cv::Mat preprocess(const cv::Mat& src) {
+        cv::Mat bin;
+        cv::cvtColor(src, bin, cv::COLOR_RGB2GRAY);
+        cv::threshold(bin, bin, params_.bin_threshold, 255, cv::THRESH_BINARY);
+
+        return bin;
+    };
+    void color_filter(
+        const cv::Mat& color,
+        PixelFormat format,
+        const std::vector<std::vector<cv::Point>>& contours,
+        std::vector<bool>& used_flags,
+        EnemyColor enemy_color
+    ) {
+        bool need_red = enemy_color == EnemyColor::BLUE;
+        for (int i = 0; i < contours.size(); i++) {
+            cv::Rect r = cv::boundingRect(contours[i]);
+            if (r.width < 5 || r.height < 5)
+                continue;
+
+            cv::Rect rr = r & cv::Rect(0, 0, color.cols, color.rows);
+            if (rr.width < 2 || rr.height < 2)
+                continue;
+
+            const cv::Mat roi = color(rr);
+            const cv::Scalar avg = cv::mean(roi);
+            double B, G, R;
+            switch (format) {
+                case PixelFormat::BGR:
+                    B = avg[0];
+                    G = avg[1];
+                    R = avg[2];
+                    break;
+                case PixelFormat::RGB:
+                    R = avg[0];
+                    G = avg[1];
+                    B = avg[2];
+                    break;
+                default:
+                    B = avg[0];
+                    G = avg[1];
+                    R = avg[2];
+                    break;
+            }
+
+            const double diff_RB = R - B;
+            const double diff_BR = B - R;
+
+            const bool is_red = (diff_RB > params_.color_diff_thresh);
+            const bool is_blue = (diff_BR > params_.color_diff_thresh);
+
+            bool invalid = false;
+
+            if (!need_red) {
+                if (is_red)
+                    invalid = true;
+            } else {
+                if (is_blue)
+                    invalid = true;
+            }
+
+            used_flags[i] = !invalid;
+
+            if (!used_flags[i]) {
+                // if (!debug_img.empty())
+                //     cv::drawContours(debug_img, contours, i, cv::Scalar(255, 0, 0), 2);
+            }
+        }
+    }
+    struct RuneCenter {
+        cv::Point2f center;
+        cv::RotatedRect rr;
+        bool is_valid = false;
+        RuneCenter() = default;
+        RuneCenter(cv::RotatedRect rect): rr(rect) {
+            center = rect.center;
+            is_valid = rr.size.area() > 0;
+        }
+    };
+    RuneCenter get_rune_center(
+        const std::vector<std::vector<cv::Point>>& contours,
+        const std::vector<cv::Vec4i>& hierarchy,
+        std::vector<bool>& used_flags,
+        cv::Point2f img_center
+    ) {
+        RuneCenter result;
+        struct Node {
+            cv::Point2f center;
+            int idx;
+            cv::RotatedRect rr;
+        };
+
+        std::vector<Node> nodes;
+
+        for (int i = 0; i < contours.size(); i++) {
+            if (used_flags[i])
+                continue;
+            if (hierarchy[i][3] != -1)
+                continue;
+
+            double area = cv::contourArea(contours[i]);
+            if (area < params_.rune_center_min_area || area > params_.rune_center_max_area)
+                continue;
+
+            cv::RotatedRect rr = cv::minAreaRect(contours[i]);
+            float w = rr.size.width;
+            float h = rr.size.height;
+
+            if (w < 5 || h < 5)
+                continue;
+
+            double ratio = (w > h ? w / h : h / w);
+            if (ratio - 1.0 > params_.rune_center_1x1ratio_tol)
+                continue;
+
+            double rect_area = w * h;
+            if (rect_area <= 1e-5)
+                continue;
+
+            double fill_ratio = area / rect_area;
+            if (fill_ratio < params_.rune_center_fill_ratio_min)
+                continue;
+
+            nodes.push_back({ rr.center, i, rr });
+        }
+
+        if (nodes.empty())
+            return result;
+
+        double best_dist = 1e18;
+        int best_idx = -1;
+        cv::RotatedRect best_rr;
+
+        for (auto& n: nodes) {
+            double dx = n.center.x - img_center.x;
+            double dy = n.center.y - img_center.y;
+            double dist2 = dx * dx + dy * dy;
+
+            if (dist2 < best_dist) {
+                best_dist = dist2;
+                best_idx = n.idx;
+                best_rr = n.rr;
+            }
+        }
+
+        return RuneCenter(best_rr);
+    }
+    struct RunePan {
+        cv::Point2f center;
+        std::vector<cv::Point2f> corners;
+        bool is_valid = false;
+        bool has_refer = false;
+
+
+    };
+    inline int find_top_parent(int idx, const std::vector<cv::Vec4i>& hierarchy) {
+        int p = hierarchy[idx][3]; // parent
+        while (p != -1 && hierarchy[p][3] != -1) {
+            p = hierarchy[p][3]; // 一直追溯到最顶层 parent
+        }
+        return p; // 若 p == -1 表示 contour 本身就是顶层轮廓
+    }
+    std::vector<RunePan> get_rune_pans(
+        const std::vector<std::vector<cv::Point>>& contours,
+        const std::vector<cv::Vec4i>& hierarchy,
+        std::vector<bool>& used_flags
+    ) {
+        std::vector<RunePan> results;
+        if (hierarchy.empty())
+            return results;
+
+        struct Node {
+            int idx;
+            cv::Point2f center;
+            int parent_top_id;
+        };
+        std::vector<Node> candidates;
+        for (int i = 0; i < contours.size(); i++) {
+            if (used_flags[i])
+                continue;
+
+            const auto& cnt = contours[i];
+
+            double contour_area = cv::contourArea(cnt);
+            if (contour_area < params_.rune_pan_min_area
+                || contour_area > params_.rune_pan_max_area)
+                continue;
+
+            cv::Moments m = cv::moments(cnt);
+            if (m.m00 == 0)
+                continue;
+
+            cv::Point2f center(m.m10 / m.m00, m.m01 / m.m00);
+            int top_parent = find_top_parent(i, hierarchy);
+            candidates.push_back({ i, center, top_parent });
+        }
+
+        if (candidates.size() < 3)
+            return results;
+
+        std::unordered_map<int, std::vector<int>> groups;
+        for (int i = 0; i < candidates.size(); i++) {
+            groups[candidates[i].parent_top_id].push_back(i);
+        }
+
+        for (auto& [parent_top_id, idx_list]: groups) {
+            int M = idx_list.size();
+            if (M < 3 || M > 7)
+                continue;
+
+            std::vector<int> cluster_id(M, -1);
+            int cluster_count = 0;
+
+            for (int i = 0; i < M; i++) {
+                if (cluster_id[i] != -1)
+                    continue;
+
+                cluster_id[i] = cluster_count;
+
+                std::queue<int> q;
+                q.push(i);
+
+                while (!q.empty()) {
+                    int u = q.front();
+                    q.pop();
+
+                    for (int v = 0; v < M; v++) {
+                        if (cluster_id[v] != -1)
+                            continue;
+
+                        auto& cu = candidates[idx_list[u]].center;
+                        auto& cv = candidates[idx_list[v]].center;
+
+                        double dx = cu.x - cv.x;
+                        double dy = cu.y - cv.y;
+                        double dist = std::sqrt(dx * dx + dy * dy);
+
+                        if (dist <= params_.rune_pan_cluster_radius) {
+                            cluster_id[v] = cluster_count;
+                            q.push(v);
+                        }
+                    }
+                }
+                cluster_count++;
+            }
+
+            std::vector<int> cluster_size(cluster_count, 0);
+            for (int id: cluster_id)
+                cluster_size[id]++;
+
+            std::vector<std::vector<cv::Point2f>> cluster_points(cluster_count);
+
+            for (int i = 0; i < M; i++) {
+                int cid = cluster_id[i];
+
+                if (cluster_size[cid] >= 3) {
+                    int contour_index = candidates[idx_list[i]].idx;
+                    used_flags[contour_index] = true;
+                    cluster_points[cid].push_back(candidates[idx_list[i]].center);
+                }
+            }
+
+            for (int cid = 0; cid < cluster_count; cid++) {
+                if (cluster_points[cid].size() < 3)
+                    continue;
+
+                cv::RotatedRect rr = cv::minAreaRect(cluster_points[cid]);
+                double w = rr.size.width;
+                double h = rr.size.height;
+
+                if (w < 1 || h < 1)
+                    continue;
+
+                double ratio = (w > h ? w / h : h / w);
+                if (ratio > params_.rune_pan_max_square_ratio)
+                    continue;
+
+                std::vector<std::pair<double, cv::Point2f>> dist_list;
+                dist_list.reserve(cluster_points[cid].size());
+
+                for (auto& p: cluster_points[cid]) {
+                    double dx = p.x - rr.center.x;
+                    double dy = p.y - rr.center.y;
+                    double dist = dx * dx + dy * dy;
+                    dist_list.emplace_back(dist, p);
+                }
+
+                std::sort(dist_list.begin(), dist_list.end(), [](auto& a, auto& b) {
+                    return a.first > b.first;
+                });
+
+                std::vector<cv::Point2f> corner_points;
+                for (int i = 0; i < 4 && i < dist_list.size(); i++)
+                    corner_points.push_back(dist_list[i].second);
+
+                RunePan pan;
+                pan.center = rr.center;
+                pan.corners = corner_points;
+                if (corner_points.size() > 3)
+                    pan.is_valid = true;
+
+                results.push_back(pan);
+            }
+        }
+        return results;
+    }
+    void detect(const CommonFrame& frame, EnemyColor enemy_color) {
+        cv::Mat roi = frame.img_frame.src_img(frame.expanded);
+        auto bin = preprocess(roi);
+        std::vector<std::vector<cv::Point>> contours;
+        std::vector<cv::Vec4i> hierarchy;
+        cv::findContours(bin, contours, hierarchy, cv::RETR_TREE, cv::CHAIN_APPROX_SIMPLE);
+        std::vector<bool> used_flags;
+        used_flags.assign(contours.size(), false);
+        color_filter(roi, frame.img_frame.format, contours, used_flags, enemy_color);
+        auto rune_center = get_rune_center(
+            contours,
+            hierarchy,
+            used_flags,
+            cv::Point2f(roi.cols * 0.5f, roi.rows * 0.5f)
+        );
+        auto rune_pans = get_rune_pans(contours, hierarchy, used_flags);
+    }
+};
+} // namespace awakening::auto_buff

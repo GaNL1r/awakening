@@ -313,11 +313,9 @@ struct VeryAimer::Impl {
                     return false;
                 };
 
-
                 while (seg.max_acc() > max_acc) {
                     bool expanded = false;
 
-   
                     if (l > 0 || r < N - 1) {
                         expanded = try_candidate(l - 1, r + 1);
                     }
