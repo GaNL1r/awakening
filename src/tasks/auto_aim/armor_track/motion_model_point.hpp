@@ -1,5 +1,5 @@
 #pragma once
-#include "KalmanHyLib/kalman_hybird_lib.hpp"
+#include "KalmanHyLib/error_state_extended_kalman_filter.hpp"
 #include "tasks/auto_aim/type.hpp"
 #include "tasks/base/common.hpp"
 #include "utils/common/type_common.hpp"
@@ -369,8 +369,8 @@ struct State {
     }
 };
 
-using RobotStateEKF = kalman_hybird_lib::ExtendedKalmanFilter<X_N, Z_N, Predict, Measure>;
+// using RobotStateEKF = kalman_hybird_lib::ExtendedKalmanFilter<X_N, Z_N, Predict, Measure>;
 
-using RobotStateESEKF = kalman_hybird_lib::ErrorStateEKF<X_N, Z_N, Predict, Measure>;
+using RobotStateESEKF = kalman_hybird_lib::ErrorStateEKF<X_N, Predict>;
 
 } // namespace awakening::armor_point_motion_model

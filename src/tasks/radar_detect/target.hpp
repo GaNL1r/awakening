@@ -68,7 +68,7 @@ struct Measure {
     }
 };
 
-using ESEKF = kalman_hybird_lib::ErrorStateEKF<X_N, Z_N, Predict, Measure>;
+using ESEKF = kalman_hybird_lib::ErrorStateEKF<X_N, Predict>;
 struct State {
     VecX x;
     TimePoint timestamp;
@@ -127,7 +127,6 @@ struct PointTarget {
         Eigen::DiagonalMatrix<double, X_N> p0;
         p0.diagonal() << 1, 64, 1, 64, 1, 64;
         const auto f = Predict { .dt = 0.05, .use_vel = use_vel };
-        const auto h = Measure();
         const auto u_q = [this]() {
             Eigen::Matrix<double, X_N, X_N> q;
             return q;
@@ -137,28 +136,20 @@ struct PointTarget {
             Eigen::Matrix<double, Z_N, Z_N> r;
             return r;
         };
-        esekf = ESEKF(f, h, u_q, u_r, p0);
-        esekf->setResidualFunc([this](
-                                   const Eigen::Matrix<double, Z_N, 1>& z_pred,
-                                   const Eigen::Matrix<double, Z_N, 1>& z
-                               ) {
-            Eigen::Matrix<double, Z_N, 1> r = z - z_pred;
-            r[0] = angles::shortest_angular_distance(z_pred[idx::YPD_Y],
-                                                     z[idx::YPD_Y]); // yaw
-            return r;
-        });
-        esekf->setIterationNum(target_config.esekf_iter_num);
-        esekf->setInjectFunc([this](
-                                 const Eigen::Matrix<double, X_N, 1>& delta,
-                                 Eigen::Matrix<double, X_N, 1>& nominal
-                             ) {
+        const auto inject = [this](
+                                const Eigen::Matrix<double, X_N, 1>& delta,
+                                Eigen::Matrix<double, X_N, 1>& nominal
+                            ) {
             for (int i = 0; i < X_N; i++) {
                 nominal[i] += delta[i];
             }
-        });
+        };
+        esekf = ESEKF(f, u_q, inject, p0);
+        esekf->set_iteration_num(target_config.esekf_iter_num);
+
         state.x = Eigen::VectorXd::Zero(X_N);
         state.x << init_p.x(), 0, init_p.y(), 0, init_p.z(), 0;
-        esekf->setState(state.x);
+        esekf->set_state(state.x);
         last_update = t;
         state.timestamp = t;
         is_inited = true;
@@ -202,9 +193,9 @@ struct PointTarget {
     void predict_ekf(const TimePoint& t) {
         auto dt = std::chrono::duration<double>(t - state.timestamp).count();
 
-        esekf->setPredictFunc(Predict { .dt = dt, .use_vel = use_vel });
+        esekf->set_predict_func(Predict { .dt = dt, .use_vel = use_vel });
         const auto u_q = [dt, this]() { return compute_process_noise(dt); };
-        esekf->setUpdateQ(u_q);
+        esekf->set_update_Q(u_q);
         state.x = esekf->predict();
         state.timestamp = t;
     }
@@ -221,16 +212,23 @@ struct PointTarget {
         const auto u_r = [this](const Eigen::Matrix<double, Z_N, 1>& z) {
             return this->compute_measurement_covariance(z);
         };
-        esekf->setUpdateR(u_r);
         auto measurement = getMeasure(p);
-        esekf->setMeasureFunc(Measure());
-        state.x = esekf->update(measurement);
+        const auto cal_residual = [this](
+                                      const Eigen::Matrix<double, Z_N, 1>& z_pred,
+                                      const Eigen::Matrix<double, Z_N, 1>& z
+                                  ) {
+            Eigen::Matrix<double, Z_N, 1> r = z - z_pred;
+            r[0] = angles::shortest_angular_distance(z_pred[idx::YPD_Y],
+                                                     z[idx::YPD_Y]); // yaw
+            return r;
+        };
+        state.x = esekf->update<Z_N>(measurement, Measure(), u_r, cal_residual);
         last_update = t;
         state.timestamp = t;
     }
     void set_ekf_state(const State& s) {
         state = s;
-        esekf->setState(state.x);
+        esekf->set_state(state.x);
     }
     State state;
     TimePoint last_update;

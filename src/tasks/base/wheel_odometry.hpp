@@ -65,7 +65,7 @@ namespace wheel_motion_model {
             z[idx::ZVZ] = x[idx::VZ];
         }
     };
-    using RobotStateESEKF = kalman_hybird_lib::ErrorStateEKF<X_N, Z_N, Predict, Measure>;
+    using RobotStateESEKF = kalman_hybird_lib::ErrorStateEKF<X_N, Predict>;
     struct State {
         VecX x;
         TimePoint timestamp;
@@ -120,38 +120,28 @@ public:
             Eigen::Matrix<double, wheel_motion_model::Z_N, wheel_motion_model::Z_N> r;
             return r;
         };
+        const auto inject = [this](
+                                const Eigen::Matrix<double, wheel_motion_model::X_N, 1>& delta,
+                                Eigen::Matrix<double, wheel_motion_model::X_N, 1>& nominal
+                            ) {
+            for (int i = 0; i < wheel_motion_model::X_N; i++) {
+                nominal[i] += delta[i];
+            }
+        };
         esekf = wheel_motion_model::RobotStateESEKF(
             wheel_motion_model::Predict {
                 .dt = 0.005,
             },
-            wheel_motion_model::Measure {},
             u_q,
-            u_r,
+            inject,
             p0
         );
-        esekf.value().setResidualFunc(
-            [this](
-                const Eigen::Matrix<double, wheel_motion_model::Z_N, 1>& z_pred,
-                const Eigen::Matrix<double, wheel_motion_model::Z_N, 1>& z
-            ) {
-                Eigen::Matrix<double, wheel_motion_model::Z_N, 1> r = z - z_pred;
-                return r;
-            }
-        );
-        esekf.value().setIterationNum(1);
-        esekf.value().setInjectFunc(
-            [this](
-                const Eigen::Matrix<double, wheel_motion_model::X_N, 1>& delta,
-                Eigen::Matrix<double, wheel_motion_model::X_N, 1>& nominal
-            ) {
-                for (int i = 0; i < wheel_motion_model::X_N; i++) {
-                    nominal[i] += delta[i];
-                }
-            }
-        );
+
+        esekf.value().set_iteration_num(1);
+
         state.x = Eigen::VectorXd::Zero(wheel_motion_model::X_N);
         state.x << 0, 0, 0, 0, 0, 0;
-        esekf.value().setState(state.x);
+        esekf.value().set_state(state.x);
         is_inited = true;
         last_update = t;
         AWAKENING_INFO("wheel odometry reset");
@@ -199,8 +189,8 @@ public:
             throw std::runtime_error("ESEKF is not initialized");
         }
         auto dt = std::chrono::duration<double>(timestamp - state.timestamp).count();
-        esekf.value().setPredictFunc(wheel_motion_model::Predict { .dt = dt });
-        esekf.value().setUpdateQ([&]() { return process_noise(dt); });
+        esekf.value().set_predict_func(wheel_motion_model::Predict { .dt = dt });
+        esekf.value().set_update_Q([&]() { return process_noise(dt); });
         state.x = esekf.value().predict();
         state.timestamp = timestamp;
     }
@@ -208,14 +198,21 @@ public:
         if (!esekf) {
             throw std::runtime_error("ESEKF is not initialized");
         }
-        esekf.value().setUpdateR([&](const Eigen::Matrix<double, wheel_motion_model::Z_N, 1>& z) {
+        const auto u_r = [&](const Eigen::Matrix<double, wheel_motion_model::Z_N, 1>& z) {
             return measurement_covariance(z);
-        });
+        };
+        const auto cal_residual =
+            [this](
+                const Eigen::Matrix<double, wheel_motion_model::Z_N, 1>& z_pred,
+                const Eigen::Matrix<double, wheel_motion_model::Z_N, 1>& z
+            ) {
+                Eigen::Matrix<double, wheel_motion_model::Z_N, 1> r = z - z_pred;
+                return r;
+            };
         wheel_motion_model::Measure measure;
         wheel_motion_model::VecZ z;
         z << v.x(), v.y(), v.z();
-        esekf.value().setMeasureFunc(measure);
-        state.x = esekf.value().update(z);
+        state.x = esekf.value().update<wheel_motion_model::Z_N>(z, measure, u_r, cal_residual);
 
         last_update = t;
         state.timestamp = t;

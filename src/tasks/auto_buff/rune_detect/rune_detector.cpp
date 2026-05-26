@@ -1,6 +1,8 @@
 #include "rune_detector.hpp"
+#include "tasks/auto_buff/type.hpp"
 #include "tasks/base/common.hpp"
 #include "utils/common/image.hpp"
+#include <memory>
 #include <opencv2/core/mat.hpp>
 #include <vector>
 namespace awakening::auto_buff {
@@ -8,10 +10,10 @@ struct RuneDetector::Impl {
     struct Params {
         int bin_threshold;
         int color_diff_thresh;
-        double rune_center_min_area;
-        double rune_center_max_area;
-        double rune_center_1x1ratio_tol;
-        double rune_center_fill_ratio_min;
+        double rune_r_min_area;
+        double rune_r_max_area;
+        double rune_r_1x1ratio_tol;
+        double rune_r_fill_ratio_min;
         double rune_pan_min_area;
         double rune_pan_max_area;
         double rune_pan_cluster_radius;
@@ -19,10 +21,10 @@ struct RuneDetector::Impl {
         void load(const YAML::Node& config) {
             bin_threshold = config["bin_threshold"].as<int>();
             color_diff_thresh = config["color_diff_thresh"].as<int>();
-            rune_center_min_area = config["rune_center_min_area"].as<double>();
-            rune_center_max_area = config["rune_center_max_area"].as<double>();
-            rune_center_1x1ratio_tol = config["rune_center_1x1ratio_tol"].as<double>();
-            rune_center_fill_ratio_min = config["rune_center_fill_ratio_min"].as<double>();
+            rune_r_min_area = config["rune_r_min_area"].as<double>();
+            rune_r_max_area = config["rune_r_max_area"].as<double>();
+            rune_r_1x1ratio_tol = config["rune_r_1x1ratio_tol"].as<double>();
+            rune_r_fill_ratio_min = config["rune_r_fill_ratio_min"].as<double>();
             rune_pan_min_area = config["rune_pan_min_area"].as<double>();
             rune_pan_max_area = config["rune_pan_max_area"].as<double>();
             rune_pan_cluster_radius = config["rune_pan_cluster_radius"].as<double>();
@@ -32,7 +34,7 @@ struct RuneDetector::Impl {
     Impl(const YAML::Node& config) {
         params_.load(config);
     }
-    cv::Mat preprocess(const cv::Mat& src) {
+    cv::Mat preprocess(const cv::Mat& src) const noexcept {
         cv::Mat bin;
         cv::cvtColor(src, bin, cv::COLOR_RGB2GRAY);
         cv::threshold(bin, bin, params_.bin_threshold, 255, cv::THRESH_BINARY);
@@ -45,7 +47,7 @@ struct RuneDetector::Impl {
         const std::vector<std::vector<cv::Point>>& contours,
         std::vector<bool>& used_flags,
         EnemyColor enemy_color
-    ) {
+    ) const noexcept {
         bool need_red = enemy_color == EnemyColor::BLUE;
         for (int i = 0; i < contours.size(); i++) {
             cv::Rect r = cv::boundingRect(contours[i]);
@@ -101,23 +103,23 @@ struct RuneDetector::Impl {
             }
         }
     }
-    struct RuneCenter {
+    struct RuneR {
         cv::Point2f center;
         cv::RotatedRect rr;
         bool is_valid = false;
-        RuneCenter() = default;
-        RuneCenter(cv::RotatedRect rect): rr(rect) {
+        RuneR() = default;
+        RuneR(cv::RotatedRect rect): rr(rect) {
             center = rect.center;
             is_valid = rr.size.area() > 0;
         }
     };
-    RuneCenter get_rune_center(
+    RuneR get_rune_r(
         const std::vector<std::vector<cv::Point>>& contours,
         const std::vector<cv::Vec4i>& hierarchy,
         std::vector<bool>& used_flags,
-        cv::Point2f img_center
-    ) {
-        RuneCenter result;
+        cv::Point2f center_ref
+    ) const noexcept {
+        RuneR result;
         struct Node {
             cv::Point2f center;
             int idx;
@@ -133,7 +135,7 @@ struct RuneDetector::Impl {
                 continue;
 
             double area = cv::contourArea(contours[i]);
-            if (area < params_.rune_center_min_area || area > params_.rune_center_max_area)
+            if (area < params_.rune_r_min_area || area > params_.rune_r_max_area)
                 continue;
 
             cv::RotatedRect rr = cv::minAreaRect(contours[i]);
@@ -144,7 +146,7 @@ struct RuneDetector::Impl {
                 continue;
 
             double ratio = (w > h ? w / h : h / w);
-            if (ratio - 1.0 > params_.rune_center_1x1ratio_tol)
+            if (ratio - 1.0 > params_.rune_r_1x1ratio_tol)
                 continue;
 
             double rect_area = w * h;
@@ -152,7 +154,7 @@ struct RuneDetector::Impl {
                 continue;
 
             double fill_ratio = area / rect_area;
-            if (fill_ratio < params_.rune_center_fill_ratio_min)
+            if (fill_ratio < params_.rune_r_fill_ratio_min)
                 continue;
 
             nodes.push_back({ rr.center, i, rr });
@@ -166,8 +168,8 @@ struct RuneDetector::Impl {
         cv::RotatedRect best_rr;
 
         for (auto& n: nodes) {
-            double dx = n.center.x - img_center.x;
-            double dy = n.center.y - img_center.y;
+            double dx = n.center.x - center_ref.x;
+            double dy = n.center.y - center_ref.y;
             double dist2 = dx * dx + dy * dy;
 
             if (dist2 < best_dist) {
@@ -177,17 +179,15 @@ struct RuneDetector::Impl {
             }
         }
 
-        return RuneCenter(best_rr);
+        return RuneR(best_rr);
     }
     struct RunePan {
         cv::Point2f center;
         std::vector<cv::Point2f> corners;
         bool is_valid = false;
         bool has_refer = false;
-
-
     };
-    inline int find_top_parent(int idx, const std::vector<cv::Vec4i>& hierarchy) {
+    inline int find_top_parent(int idx, const std::vector<cv::Vec4i>& hierarchy) const noexcept {
         int p = hierarchy[idx][3]; // parent
         while (p != -1 && hierarchy[p][3] != -1) {
             p = hierarchy[p][3]; // 一直追溯到最顶层 parent
@@ -198,7 +198,7 @@ struct RuneDetector::Impl {
         const std::vector<std::vector<cv::Point>>& contours,
         const std::vector<cv::Vec4i>& hierarchy,
         std::vector<bool>& used_flags
-    ) {
+    ) const noexcept {
         std::vector<RunePan> results;
         if (hierarchy.empty())
             return results;
@@ -338,7 +338,8 @@ struct RuneDetector::Impl {
         }
         return results;
     }
-    void detect(const CommonFrame& frame, EnemyColor enemy_color) {
+    RuneDetection detect(const CommonFrame& frame, EnemyColor enemy_color) const noexcept {
+        RuneDetection result;
         cv::Mat roi = frame.img_frame.src_img(frame.expanded);
         auto bin = preprocess(roi);
         std::vector<std::vector<cv::Point>> contours;
@@ -347,13 +348,36 @@ struct RuneDetector::Impl {
         std::vector<bool> used_flags;
         used_flags.assign(contours.size(), false);
         color_filter(roi, frame.img_frame.format, contours, used_flags, enemy_color);
-        auto rune_center = get_rune_center(
+        auto rune_r = get_rune_r(
             contours,
             hierarchy,
             used_flags,
             cv::Point2f(roi.cols * 0.5f, roi.rows * 0.5f)
         );
         auto rune_pans = get_rune_pans(contours, hierarchy, used_flags);
+        if (rune_r.is_valid) {
+            result.r_tag = rune_r.center;
+        }
+        for (const auto& pan: rune_pans) {
+            if (pan.is_valid && pan.corners.size() >= 4) {
+                RuneDetection::RunePan p;
+                p.center = pan.center;
+                for (int i = 0; i < 4; i++) {
+                    p.corners[i] = pan.corners[i];
+                }
+                result.pans.push_back(p);
+            }
+        }
+        return result;
     }
 };
+RuneDetector::RuneDetector(const YAML::Node& config) {
+    _impl = std::make_unique<Impl>(config);
+}
+RuneDetector::~RuneDetector() noexcept {
+    _impl.reset();
+}
+RuneDetection RuneDetector::detect(const CommonFrame& frame, EnemyColor enemy_color) {
+    return _impl->detect(frame, enemy_color);
+}
 } // namespace awakening::auto_buff

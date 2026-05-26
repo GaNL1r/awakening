@@ -1,5 +1,5 @@
 #pragma once
-#include "tasks/auto_aim/armor_tracker/armor_target.hpp"
+#include "tasks/auto_aim/armor_track/armor_target.hpp"
 #include "tasks/auto_aim/auto_aim_fsm.hpp"
 #include "tasks/base/common.hpp"
 #include "utils/impl.hpp"

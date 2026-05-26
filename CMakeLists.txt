@@ -7,8 +7,7 @@ set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/bin)
-set(CMAKE_BUILD_TYPE "Debug")
-
+set(CMAKE_BUILD_TYPE "Release")
 message(STATUS "--------------------CMAKE_BUILD_TYPE: ${CMAKE_BUILD_TYPE}--------------------")
 
 
@@ -95,6 +94,11 @@ target_link_libraries(${PROJECT_NAME}_utils
 file(GLOB_RECURSE AUTO_AIM_SOURCES  src/tasks/auto_aim/*.cpp)
 add_library(${PROJECT_NAME}_auto_aim SHARED ${AUTO_AIM_SOURCES})
 target_link_libraries(${PROJECT_NAME}_auto_aim
+     ${PROJECT_NAME}_utils
+)
+file(GLOB_RECURSE AUTO_BUFF_SOURCES  src/tasks/auto_buff/*.cpp)
+add_library(${PROJECT_NAME}_auto_buff SHARED ${AUTO_BUFF_SOURCES})
+target_link_libraries(${PROJECT_NAME}_auto_buff
      ${PROJECT_NAME}_utils
 )
 if(BUILD_HERO)
@@ -226,6 +230,7 @@ add_common_executable(uvc_detect_test src/runtime/test/uvc_detect_test.cpp)
 
 target_link_libraries(auto_aim
     ${PROJECT_NAME}_auto_aim
+    ${PROJECT_NAME}_auto_buff
 )
 target_link_libraries(uvc_detect_test
     ${PROJECT_NAME}_auto_aim
@@ -284,6 +289,7 @@ target_link_libraries(sentry
     ${PROJECT_NAME}_rcl
     ${PROJECT_NAME}_utils
     ${PROJECT_NAME}_auto_aim
+    ${PROJECT_NAME}_auto_buff
     ${PROJECT_NAME}_sentry_brain
 )
 

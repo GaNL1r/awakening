@@ -36,8 +36,6 @@ public:
         std::string goal_name;
     };
 
-private:
-    // --- 辅助函数 ---
     void send_current_pose() {
         if (!serial_)
             return;

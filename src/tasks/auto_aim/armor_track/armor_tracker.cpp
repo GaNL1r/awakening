@@ -1,6 +1,6 @@
 #include "armor_tracker.hpp"
 #include "angles.h"
-#include "tasks/auto_aim/armor_tracker/armor_target.hpp"
+#include "armor_target.hpp"
 #include "tasks/auto_aim/type.hpp"
 #include "utils/common/type_common.hpp"
 #include "utils/logger.hpp"

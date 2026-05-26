@@ -2,7 +2,6 @@
 #include "backward-cpp/backward.hpp"
 #include "config.hpp"
 #include "param_deliver.h"
-#include "tasks/auto_aim/armor_tracker/motion_model_point.hpp"
 #include "tasks/base/ballistic_trajectory.hpp"
 #include "tasks/base/common.hpp"
 #include "tasks/base/packet_typedef_receive.hpp"

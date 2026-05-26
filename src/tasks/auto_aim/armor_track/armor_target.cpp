@@ -1,6 +1,6 @@
 #include "armor_target.hpp"
 #include "angles.h"
-#include "tasks/auto_aim/armor_tracker/motion_model_point.hpp"
+#include "tasks/auto_aim/armor_track/motion_model_point.hpp"
 #include "tasks/auto_aim/type.hpp"
 #include "tasks/base/common.hpp"
 #include "utils/common/type_common.hpp"
@@ -52,22 +52,7 @@ void ArmorTarget::reset(
         Eigen::Matrix<double, Z_N, Z_N> r;
         return r;
     };
-    esekf = RobotStateESEKF(
-        Predict { .dt = 0.005, .armor_number = target_number },
-        Measure { .ctx = measure_ctx },
-        u_q,
-        u_r,
-        p0
-    );
-    esekf.value().setResidualFunc([this](
-                                      const Eigen::Matrix<double, Z_N, 1>& z_pred,
-                                      const Eigen::Matrix<double, Z_N, 1>& z
-                                  ) {
-        Eigen::Matrix<double, Z_N, 1> r = z - z_pred;
-        return r;
-    });
-    esekf.value().setIterationNum(cfg.esekf_iter_num);
-    esekf.value().setInjectFunc(
+    const auto inject =
         [this](const Eigen::Matrix<double, X_N, 1>& delta, Eigen::Matrix<double, X_N, 1>& nominal) {
             for (int i = 0; i < X_N; i++) {
                 if (i == idx::YAW)
@@ -75,8 +60,12 @@ void ArmorTarget::reset(
                 nominal[i] += delta[i];
             }
             nominal[idx::YAW] = angles::normalize_angle(nominal[idx::YAW] + delta[idx::YAW]);
-        }
-    );
+        };
+    esekf =
+        RobotStateESEKF(Predict { .dt = 0.005, .armor_number = target_number }, u_q, inject, p0);
+
+    esekf.value().set_iteration_num(cfg.esekf_iter_num);
+
     armor_pnp(a, camera_info, camera_cv_in_odom);
     auto pos = a.pose.translation();
     const double xa = pos.x();
@@ -95,7 +84,7 @@ void ArmorTarget::reset(
     target_state.x << xc, 0, yc, 0, zc, 0, yaw, 0, r, l, h;
     target_state.timestamp = timestamp;
     target_state.frame_id = frame_id;
-    esekf.value().setState(target_state.x);
+    esekf.value().set_state(target_state.x);
 
     last_update = timestamp;
     is_inited = true;
@@ -262,8 +251,8 @@ void ArmorTarget::predict_ekf(const TimePoint& timestamp) {
         throw std::runtime_error("ESEKF is not initialized");
     }
     auto dt = std::chrono::duration<double>(timestamp - target_state.timestamp).count();
-    esekf.value().setPredictFunc(Predict { .dt = dt, .armor_number = target_number });
-    esekf.value().setUpdateQ([&]() { return process_noise(dt); });
+    esekf.value().set_predict_func(Predict { .dt = dt, .armor_number = target_number });
+    esekf.value().set_update_Q([&]() { return process_noise(dt); });
     target_state.x = esekf.value().predict();
     target_state.timestamp = timestamp;
     this_id = GOBAL_ID++;
@@ -298,10 +287,17 @@ bool ArmorTarget::update(
     }
     last_match_id = id;
     MeasureType mt = MeasureType::ARMOR;
-    esekf.value().setUpdateR([&](const Eigen::Matrix<double, Z_N, 1>& z) {
+    const auto u_r = [&](const Eigen::Matrix<double, Z_N, 1>& z) {
         return measurement_covariance(z);
-    });
+    };
 
+    const auto cal_residual = [this](
+                                  const Eigen::Matrix<double, Z_N, 1>& z_pred,
+                                  const Eigen::Matrix<double, Z_N, 1>& z
+                              ) {
+        Eigen::Matrix<double, Z_N, 1> r = z - z_pred;
+        return r;
+    };
     measure_ctx.id = id;
     measure_ctx.camera_cv_in_odom = camera_cv_in_odom;
 
@@ -309,9 +305,8 @@ bool ArmorTarget::update(
     // VecZ z_pred;
     // measure.h(target_state.x, z_pred);
     auto measurement = get_measurement(armor);
-    esekf.value().setMeasureFunc(measure);
 
-    target_state.x = esekf.value().update(measurement);
+    target_state.x = esekf.value().update<Z_N>(measurement, measure, u_r, cal_residual);
     target_state.timestamp = timestamp;
     last_update = timestamp;
     this_id = GOBAL_ID++;
