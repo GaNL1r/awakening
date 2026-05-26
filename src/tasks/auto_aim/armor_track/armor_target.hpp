@@ -111,6 +111,12 @@ public:
         const CameraInfo& camera_info,
         const ISO3& camera_cv_in_odom
     );
+    bool update(
+        std::vector<std::pair<int, Armor>>& a,
+        const TimePoint& timestamp,
+        const CameraInfo& camera_info,
+        const ISO3& camera_cv_in_odom
+    );
     std::vector<std::pair<int, Armor>>
     match(std::vector<Armor>& armors, const CameraInfo& camera_info, const ISO3& camera_cv_in_odom)
         const noexcept;

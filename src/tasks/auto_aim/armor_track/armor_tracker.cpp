@@ -115,6 +115,9 @@ struct ArmorTracker::Impl {
             angles::normalize_angle(std::atan2(target_state.pos().y(), target_state.pos().x()));
         for (const auto& a: armors.armors) {
             if (a.number == target.target_number) {
+                if (a.color == ArmorColor::NONE || a.color == ArmorColor::PURPLE) {
+                    continue;
+                }
                 candidates.emplace_back(a);
             }
         }
@@ -125,16 +128,12 @@ struct ArmorTracker::Impl {
         int updated = 0;
         auto matches = target.match(candidates, camera_info, camera_cv_in_odom);
 
-        for (auto& m: matches) {
-            if (m.second.color == ArmorColor::NONE || m.second.color == ArmorColor::PURPLE) {
-                // if (++is_none_purple_count_ > 100)
-                continue;
-            } else {
-                is_none_purple_count_ = 0;
-            }
-
-            if (target.update(m, armors.timestamp, camera_info, camera_cv_in_odom))
-                ++updated;
+        // for (auto& m: matches) {
+        //     if (target.update(m, armors.timestamp, camera_info, camera_cv_in_odom))
+        //         ++updated;
+        // }
+        if (target.update(matches, armors.timestamp, camera_info, camera_cv_in_odom)) {
+            updated += matches.size();
         }
 
         return updated > 0;

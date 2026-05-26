@@ -286,7 +286,6 @@ bool ArmorTarget::update(
         }
     }
     last_match_id = id;
-    MeasureType mt = MeasureType::ARMOR;
     const auto u_r = [&](const Eigen::Matrix<double, Z_N, 1>& z) {
         return measurement_covariance(z);
     };
@@ -300,10 +299,7 @@ bool ArmorTarget::update(
     };
     measure_ctx.id = id;
     measure_ctx.camera_cv_in_odom = camera_cv_in_odom;
-
     Measure measure { .ctx = measure_ctx };
-    // VecZ z_pred;
-    // measure.h(target_state.x, z_pred);
     auto measurement = get_measurement(armor);
 
     target_state.x = esekf.value().update<Z_N>(measurement, measure, u_r, cal_residual);
@@ -311,6 +307,66 @@ bool ArmorTarget::update(
     last_update = timestamp;
     this_id = GOBAL_ID++;
     update_count++;
+    return true;
+}
+bool ArmorTarget::update(
+    std::vector<std::pair<int, Armor>>& matched,
+    const TimePoint& timestamp,
+    const CameraInfo& camera_info,
+    const ISO3& camera_cv_in_odom
+) {
+    if (matched.empty()) {
+        return false;
+    }
+    if (matched.size() == 1) {
+        return update(matched[0], timestamp, camera_info, camera_cv_in_odom);
+    }
+    std::vector<std::shared_ptr<RobotStateESEKF::ObsBase>> obs;
+    const auto u_r = [&](const Eigen::Matrix<double, Z_N, 1>& z) {
+        return measurement_covariance(z);
+    };
+
+    const auto cal_residual = [this](
+                                  const Eigen::Matrix<double, Z_N, 1>& z_pred,
+                                  const Eigen::Matrix<double, Z_N, 1>& z
+                              ) {
+        Eigen::Matrix<double, Z_N, 1> r = z - z_pred;
+        return r;
+    };
+    for (const auto& a: matched) {
+        auto armor = a.second;
+        const auto id = a.first;
+        if (id != 0) {
+            jumped = true;
+        }
+        if (outpost_has_all_and_has_set_ids) {
+            if (!outpost_has_all_and_has_set_ids.value().first) {
+                outpost_has_all_and_has_set_ids.value().second[id] = true;
+                int count = 0;
+                for (auto has_id: outpost_has_all_and_has_set_ids.value().second) {
+                    if (has_id) {
+                        count++;
+                    }
+                }
+                if (count >= outpost_has_all_and_has_set_ids->second.size()) {
+                    outpost_has_all_and_has_set_ids->first = true;
+                }
+            }
+        }
+        last_match_id = id;
+        measure_ctx.id = id;
+        measure_ctx.camera_cv_in_odom = camera_cv_in_odom;
+        Measure measure { .ctx = measure_ctx };
+        auto measurement = get_measurement(armor);
+        obs.push_back(esekf.value().make_obs(measurement, measure, u_r, cal_residual));
+        update_count++;
+    }
+
+    target_state.x = esekf.value().update_multi(obs);
+    target_state.timestamp = timestamp;
+    last_update = timestamp;
+    this_id = GOBAL_ID++;
+
     return true;
 }
 std::vector<std::pair<int, Armor>> ArmorTarget::match(

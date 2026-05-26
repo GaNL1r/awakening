@@ -6,6 +6,8 @@
 #include <ceres/jet.h>
 #include <functional>
 #include <limits>
+#include <memory>
+#include <vector>
 
 namespace kalman_hybird_lib {
 
@@ -63,12 +65,11 @@ public:
             F.row(i) = x_pred_jet[i].v.transpose();
         }
 
-        // error propagation
         delta_x = F * delta_x;
 
-        // covariance
         Q = update_Q();
-        P_delta = F * P_delta * F.transpose() + Q;
+        P_delta = F * P_delta * F.transpose();
+        P_delta += Q;
         P_delta = 0.5 * (P_delta + P_delta.transpose());
 
         return x_nominal;
@@ -89,14 +90,15 @@ public:
         MatrixX1 delta_iter = delta_x;
         MatrixXX P_iter = P_delta;
 
-        MatrixZX H = MatrixZX::Zero();
-        MatrixXZ K = MatrixXZ::Zero();
-        MatrixZZ R = MatrixZZ::Zero();
+        MatrixZX H;
+        MatrixXZ K;
+        MatrixZZ R;
 
         for (int iter = 0; iter < iteration_num; ++iter) {
             MatrixX1 x_eval = x_nominal;
-            if (inject_state)
+            if (inject_state) {
                 inject_state(delta_iter, x_eval);
+            }
 
             std::array<ceres::Jet<double, N_X>, N_X> x_jet;
             for (int i = 0; i < N_X; ++i) {
@@ -114,22 +116,170 @@ public:
                 H.row(i) = z_jet[i].v.transpose();
             }
 
-            // residual
-            MatrixZ1 residual = cal_residual(z_pred, z);
-
-            // covariance
+            const MatrixZ1 residual = cal_residual(z_pred, z);
             R = update_R(z);
-            MatrixZZ S = H * P_iter * H.transpose() + R;
-            K = P_iter * H.transpose() * S.ldlt().solve(MatrixZZ::Identity());
-            delta_iter += K * residual;
+
+            const MatrixZZ S = H * P_iter * H.transpose() + R;
+            const auto ldlt = S.ldlt();
+
+            const MatrixXZ PHt = P_iter * H.transpose();
+            K = ldlt.solve(PHt.transpose()).transpose();
+
+            delta_iter.noalias() += K * residual;
         }
 
-        // --- inject ---
-        if (inject_state)
+        if (inject_state) {
             inject_state(delta_iter, x_nominal);
+        }
 
-        // --- covariance update ---
-        MatrixXX I = MatrixXX::Identity();
+        const MatrixXX I = MatrixXX::Identity();
+        P_delta = (I - K * H) * P_iter * (I - K * H).transpose() + K * R * K.transpose();
+
+        P_delta = 0.5 * (P_delta + P_delta.transpose());
+
+        return x_nominal;
+    }
+
+    struct ObsBase {
+        virtual ~ObsBase() = default;
+        virtual int dim() const = 0;
+
+        virtual void evaluate(
+            const Eigen::VectorXd& x,
+            Eigen::MatrixXd& H,
+            Eigen::VectorXd& residual,
+            Eigen::MatrixXd& R
+        ) const = 0;
+    };
+
+    template<int N_Z, class MeasureFunc, class UpdateRFunc, class ResidualFunc>
+    struct ObsImpl: public ObsBase {
+        using MatrixZ1 = Eigen::Matrix<double, N_Z, 1>;
+
+        MatrixZ1 z;
+        MeasureFunc h;
+        UpdateRFunc update_R;
+        ResidualFunc residual_func;
+
+        ObsImpl(
+            const MatrixZ1& z,
+            const MeasureFunc& h,
+            const UpdateRFunc& r,
+            const ResidualFunc& res
+        ):
+            z(z),
+            h(h),
+            update_R(r),
+            residual_func(res) {}
+
+        int dim() const override {
+            return N_Z;
+        }
+
+        void evaluate(
+            const Eigen::VectorXd& x,
+            Eigen::MatrixXd& H,
+            Eigen::VectorXd& residual,
+            Eigen::MatrixXd& R
+        ) const override {
+            std::array<ceres::Jet<double, N_X>, N_X> x_jet;
+
+            for (int i = 0; i < N_X; ++i) {
+                x_jet[i].a = x[i];
+                x_jet[i].v.setZero();
+                x_jet[i].v[i] = 1.0;
+            }
+
+            std::array<ceres::Jet<double, N_X>, N_Z> z_jet;
+            h(x_jet.data(), z_jet.data());
+
+            H.resize(N_Z, N_X);
+            residual.resize(N_Z);
+            R.resize(N_Z, N_Z);
+
+            MatrixZ1 z_pred;
+            for (int i = 0; i < N_Z; ++i) {
+                z_pred[i] = z_jet[i].a;
+                H.row(i) = z_jet[i].v.transpose();
+            }
+
+            residual = residual_func(z_pred, z);
+            R = update_R(z);
+        }
+    };
+
+    template<int N_Z, class MeasureFunc, class UpdateRFunc, class ResidualFunc>
+    auto make_obs(
+        const Eigen::Matrix<double, N_Z, 1>& z,
+        MeasureFunc&& h,
+        UpdateRFunc&& r,
+        ResidualFunc&& res
+    ) {
+        using ObsT = ObsImpl<
+            N_Z,
+            std::decay_t<MeasureFunc>,
+            std::decay_t<UpdateRFunc>,
+            std::decay_t<ResidualFunc>>;
+
+        return std::make_shared<ObsT>(
+            z,
+            std::forward<MeasureFunc>(h),
+            std::forward<UpdateRFunc>(r),
+            std::forward<ResidualFunc>(res)
+        );
+    }
+
+    MatrixX1 update_multi(const std::vector<std::shared_ptr<ObsBase>>& obs_list) noexcept {
+        int total_dim = 0;
+        for (const auto& obs: obs_list) {
+            total_dim += obs->dim();
+        }
+
+        Eigen::MatrixXd H(total_dim, N_X);
+        Eigen::VectorXd residual(total_dim);
+        Eigen::MatrixXd R = Eigen::MatrixXd::Zero(total_dim, total_dim);
+
+        MatrixX1 delta_iter = delta_x;
+        MatrixXX P_iter = P_delta;
+        Eigen::MatrixXd K(N_X, total_dim);
+
+        for (int iter = 0; iter < iteration_num; ++iter) {
+            MatrixX1 x_eval = x_nominal;
+            if (inject_state) {
+                inject_state(delta_iter, x_eval);
+            }
+
+            int offset = 0;
+            for (auto& obs: obs_list) {
+                Eigen::MatrixXd Hk, Rk;
+                Eigen::VectorXd rk;
+
+                obs->evaluate(x_eval, Hk, rk, Rk);
+
+                int d = obs->dim();
+                H.block(offset, 0, d, N_X) = Hk;
+                residual.segment(offset, d) = rk;
+                R.block(offset, offset, d, d) = Rk;
+
+                offset += d;
+            }
+
+            const Eigen::MatrixXd S = H * P_iter * H.transpose() + R;
+            const auto ldlt = S.ldlt();
+
+            Eigen::MatrixXd PHt = P_iter * H.transpose();
+            K = ldlt.solve(PHt.transpose()).transpose();
+
+            delta_iter.noalias() += K * residual;
+        }
+
+        if (inject_state) {
+            inject_state(delta_iter, x_nominal);
+        }
+
+        delta_x.setZero();
+
+        const MatrixXX I = MatrixXX::Identity();
         P_delta = (I - K * H) * P_iter * (I - K * H).transpose() + K * R * K.transpose();
 
         P_delta = 0.5 * (P_delta + P_delta.transpose());
