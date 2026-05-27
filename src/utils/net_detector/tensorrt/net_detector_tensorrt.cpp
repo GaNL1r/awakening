@@ -1,3 +1,4 @@
+#include <cstddef>
 #ifdef USE_TRT
     #include "net_detector_tensorrt.hpp"
     #include "utils/buffer.hpp"
@@ -106,8 +107,8 @@ struct NetDetectorTensorrt::Impl {
             ctx.context.reset(engine_->createExecutionContext());
             if (params_.use_cuda_preproces)
                 ctx.letter_box = std::make_shared<__cuda::LetterBox>(config_);
-            TRT_CHECK(cudaMalloc(&ctx.device_buffers[input_idx_], input_sz_ * sizeof(float)));
-            TRT_CHECK(cudaMalloc(&ctx.device_buffers[output_idx_], output_sz_ * sizeof(float)));
+            TRT_CHECK(cudaMalloc(&ctx.device_buffers[INPUT_IDX], input_sz_ * sizeof(float)));
+            TRT_CHECK(cudaMalloc(&ctx.device_buffers[OUTPUT_IDX], output_sz_ * sizeof(float)));
             ctx.output_buffer.resize(output_sz_);
             TRT_CHECK(cudaStreamCreate(&ctx.stream));
             ctx_buffers_.add_resource(std::move(ctx));
@@ -222,15 +223,15 @@ struct NetDetectorTensorrt::Impl {
                 if (!tensor) {
                     return output;
                 }
-                ctx.device_buffers[input_idx_] = tensor;
+                ctx.device_buffers[INPUT_IDX] = tensor;
                 output.resized_img = ctx.letter_box->tensor_to_mat(
-                    static_cast<float*>(ctx.device_buffers[input_idx_]),
+                    static_cast<float*>(ctx.device_buffers[INPUT_IDX]),
                     ctx.stream,
                     format != config_.target_format
                 );
             } else {
                 TRT_CHECK(cudaMemcpyAsync(
-                    ctx.device_buffers[input_idx_],
+                    ctx.device_buffers[INPUT_IDX],
                     blob.ptr<float>(),
                     input_sz_ * sizeof(float),
                     cudaMemcpyHostToDevice,
@@ -238,8 +239,8 @@ struct NetDetectorTensorrt::Impl {
                 ));
             }
 
-            ctx.context->setTensorAddress(input_name_, ctx.device_buffers[input_idx_]);
-            ctx.context->setTensorAddress(output_name_, ctx.device_buffers[output_idx_]);
+            ctx.context->setTensorAddress(input_name_, ctx.device_buffers[INPUT_IDX]);
+            ctx.context->setTensorAddress(output_name_, ctx.device_buffers[OUTPUT_IDX]);
 
             if (!ctx.context->enqueueV3(ctx.stream)) {
                 AWAKENING_ERROR("enqueueV3 failed");
@@ -248,7 +249,7 @@ struct NetDetectorTensorrt::Impl {
 
             TRT_CHECK(cudaMemcpyAsync(
                 ctx.output_buffer.data(),
-                ctx.device_buffers[output_idx_],
+                ctx.device_buffers[OUTPUT_IDX],
                 output_sz_ * sizeof(float),
                 cudaMemcpyDeviceToHost,
                 ctx.stream
@@ -274,8 +275,9 @@ struct NetDetectorTensorrt::Impl {
         __cuda::LetterBox::Ptr letter_box;
     };
     ResourcePool<Ctx> ctx_buffers_;
+    constexpr static size_t INPUT_IDX = 0;
+    constexpr static size_t OUTPUT_IDX = 1;
 
-    int input_idx_ { 0 }, output_idx_ { 1 };
     size_t input_sz_ { 0 }, output_sz_ { 0 };
 
     nvinfer1::Dims input_dims_ {};

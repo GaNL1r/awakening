@@ -3,6 +3,7 @@
 #include <Eigen/Dense>
 #include <algorithm>
 #include <array>
+#include <cassert>
 #include <ceres/jet.h>
 #include <functional>
 #include <limits>
@@ -41,8 +42,8 @@ public:
     void set_update_Q(const UpdateQFunc& u_q) {
         update_Q = u_q;
     }
-    void set_predict_func(const PredicFunc& f) {
-        this->f = f;
+    void set_predict_func(const PredicFunc& f_) {
+        f = f_;
     }
     void set_inject_state(const InjectFunc& inject) {
         inject_state = inject;
@@ -65,11 +66,13 @@ public:
             F.row(i) = x_pred_jet[i].v.transpose();
         }
 
+        // error propagation
         delta_x = F * delta_x;
 
         Q = update_Q();
-        P_delta = F * P_delta * F.transpose();
-        P_delta += Q;
+        P_delta = F * P_delta * F.transpose() + Q;
+
+        // enforce symmetry
         P_delta = 0.5 * (P_delta + P_delta.transpose());
 
         return x_nominal;
@@ -96,10 +99,14 @@ public:
 
         for (int iter = 0; iter < iteration_num; ++iter) {
             MatrixX1 x_eval = x_nominal;
-            if (inject_state) {
-                inject_state(delta_iter, x_eval);
-            }
 
+            // inject error-state
+            if (inject_state)
+                inject_state(delta_iter, x_eval);
+            else
+                x_eval += delta_iter;
+
+            // auto diff
             std::array<ceres::Jet<double, N_X>, N_X> x_jet;
             for (int i = 0; i < N_X; ++i) {
                 x_jet[i].a = x_eval[i];
@@ -128,9 +135,12 @@ public:
             delta_iter.noalias() += K * residual;
         }
 
-        if (inject_state) {
+        if (inject_state)
             inject_state(delta_iter, x_nominal);
-        }
+        else
+            x_nominal += delta_iter;
+
+        delta_x.setZero();
 
         const MatrixXX I = MatrixXX::Identity();
         P_delta = (I - K * H) * P_iter * (I - K * H).transpose() + K * R * K.transpose();
@@ -162,15 +172,15 @@ public:
         ResidualFunc residual_func;
 
         ObsImpl(
-            const MatrixZ1& z,
-            const MeasureFunc& h,
-            const UpdateRFunc& r,
-            const ResidualFunc& res
+            const MatrixZ1& z_,
+            const MeasureFunc& h_,
+            const UpdateRFunc& r_,
+            const ResidualFunc& res_
         ):
-            z(z),
-            h(h),
-            update_R(r),
-            residual_func(res) {}
+            z(z_),
+            h(h_),
+            update_R(r_),
+            residual_func(res_) {}
 
         int dim() const override {
             return N_Z;
@@ -182,8 +192,9 @@ public:
             Eigen::VectorXd& residual,
             Eigen::MatrixXd& R
         ) const override {
-            std::array<ceres::Jet<double, N_X>, N_X> x_jet;
+            assert(x.size() == N_X);
 
+            std::array<ceres::Jet<double, N_X>, N_X> x_jet;
             for (int i = 0; i < N_X; ++i) {
                 x_jet[i].a = x[i];
                 x_jet[i].v.setZero();
@@ -231,9 +242,8 @@ public:
 
     MatrixX1 update_multi(const std::vector<std::shared_ptr<ObsBase>>& obs_list) noexcept {
         int total_dim = 0;
-        for (const auto& obs: obs_list) {
+        for (const auto& obs: obs_list)
             total_dim += obs->dim();
-        }
 
         Eigen::MatrixXd H(total_dim, N_X);
         Eigen::VectorXd residual(total_dim);
@@ -245,9 +255,11 @@ public:
 
         for (int iter = 0; iter < iteration_num; ++iter) {
             MatrixX1 x_eval = x_nominal;
-            if (inject_state) {
+
+            if (inject_state)
                 inject_state(delta_iter, x_eval);
-            }
+            else
+                x_eval += delta_iter;
 
             int offset = 0;
             for (auto& obs: obs_list) {
@@ -273,9 +285,10 @@ public:
             delta_iter.noalias() += K * residual;
         }
 
-        if (inject_state) {
+        if (inject_state)
             inject_state(delta_iter, x_nominal);
-        }
+        else
+            x_nominal += delta_iter;
 
         delta_x.setZero();
 

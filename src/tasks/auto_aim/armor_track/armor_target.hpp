@@ -10,7 +10,7 @@
 #include <utility>
 #include <vector>
 namespace awakening::auto_aim {
-using namespace armor_point_motion_model;
+
 struct ArmorTrackerCfg {
     int esekf_iter_num;
     double lost_time_thres;
@@ -98,12 +98,15 @@ public:
         const CameraInfo& camera_info,
         const cv::Size& image_size
     ) const noexcept;
-    [[nodiscard]] Eigen::Matrix<double, Z_N, Z_N>
-    measurement_covariance(const Eigen::Matrix<double, Z_N, 1>& z) const noexcept;
-    [[nodiscard]] Eigen::Matrix<double, X_N, X_N> process_noise(double dt) const noexcept;
-    [[nodiscard]] Eigen::Matrix<double, Z_N, 1> get_measurement(Armor& a) const noexcept;
-    [[nodiscard]] Eigen::Matrix<double, Z_N, 1>
-    get_measurement(Armor& a, const VecZ& z_pred, MeasureType mt) const noexcept;
+    [[nodiscard]] Eigen::
+        Matrix<double, armor_point_motion_model::Z_N, armor_point_motion_model::Z_N>
+        measurement_covariance(const Eigen::Matrix<double, armor_point_motion_model::Z_N, 1>& z
+        ) const noexcept;
+    [[nodiscard]] Eigen::
+        Matrix<double, armor_point_motion_model::X_N, armor_point_motion_model::X_N>
+        process_noise(double dt) const noexcept;
+    [[nodiscard]] Eigen::Matrix<double, armor_point_motion_model::Z_N, 1> get_measurement(Armor& a
+    ) const noexcept;
     void predict_ekf(const TimePoint& timestamp);
     bool update(
         std::pair<int, Armor>& a,
@@ -120,10 +123,10 @@ public:
     std::vector<std::pair<int, Armor>>
     match(std::vector<Armor>& armors, const CameraInfo& camera_info, const ISO3& camera_cv_in_odom)
         const noexcept;
-    Measure::Ctx measure_ctx;
-    std::optional<RobotStateESEKF> esekf;
+    armor_point_motion_model::Measure::Ctx measure_ctx;
+    std::optional<armor_point_motion_model::RobotStateESEKF> esekf;
     ArmorTrackerCfg cfg;
-    const State& get_target_state() const {
+    const armor_point_motion_model::State& get_target_state() const {
         return target_state;
     }
     template<typename F>
@@ -187,6 +190,6 @@ public:
     }
 
 private:
-    State target_state;
+    armor_point_motion_model::State target_state;
 };
 } // namespace awakening::auto_aim

@@ -292,6 +292,65 @@ inline std::vector<cv::Point2f> reprojection(
     cv::projectPoints(object_points, rvec, tvec, camera_matrix, dist_coeffs, pts_2d);
     return pts_2d;
 }
+template<typename T>
+inline void project_points_jets(
+    const std::vector<cv::Point3f>& obj_pts,
+    const Eigen::Transform<T, 3, Eigen::Isometry>& pose_cam,
+    const cv::Mat& K,
+    const cv::Mat& dist_coeffs,
+    std::vector<Eigen::Matrix<T, 2, 1>>& img_pts_jet
+) {
+    if (obj_pts.empty())
+        return;
+    if (K.empty() || K.rows != 3 || K.cols != 3)
+        throw std::runtime_error("Invalid K");
+    if (dist_coeffs.empty())
+        throw std::runtime_error("Invalid dist_coeffs");
+
+    const Eigen::Matrix<T, 3, 3>& R = pose_cam.linear();
+    const Eigen::Matrix<T, 3, 1>& t = pose_cam.translation();
+
+    const T fx = T(K.at<double>(0, 0));
+    const T fy = T(K.at<double>(1, 1));
+    const T cx = T(K.at<double>(0, 2));
+    const T cy = T(K.at<double>(1, 2));
+
+    auto get_dist = [&](int i) -> double {
+        return (dist_coeffs.rows == 1) ? dist_coeffs.at<double>(0, i)
+                                       : dist_coeffs.at<double>(i, 0);
+    };
+
+    const int n_dist = dist_coeffs.rows * dist_coeffs.cols;
+    const T k1 = n_dist > 0 ? T(get_dist(0)) : T(0);
+    const T k2 = n_dist > 1 ? T(get_dist(1)) : T(0);
+    const T p1 = n_dist > 2 ? T(get_dist(2)) : T(0);
+    const T p2 = n_dist > 3 ? T(get_dist(3)) : T(0);
+    const T k3 = n_dist > 4 ? T(get_dist(4)) : T(0);
+
+    img_pts_jet.clear();
+    img_pts_jet.reserve(obj_pts.size());
+
+    for (const auto& pt3: obj_pts) {
+        Eigen::Matrix<T, 3, 1> Pw(T(pt3.x), T(pt3.y), T(pt3.z));
+        Eigen::Matrix<T, 3, 1> Pc = R * Pw + t;
+        T Xc = Pc(0), Yc = Pc(1), Zc = Pc(2);
+        T xp = Xc / Zc;
+        T yp = Yc / Zc;
+
+        T r2 = xp * xp + yp * yp;
+        T r4 = r2 * r2;
+        T r6 = r4 * r2;
+
+        T radial = T(1) + k1 * r2 + k2 * r4 + k3 * r6;
+        T xd = xp * radial + T(2) * p1 * xp * yp + p2 * (r2 + T(2) * xp * xp);
+        T yd = yp * radial + p1 * (r2 + T(2) * yp * yp) + T(2) * p2 * xp * yp;
+
+        T u = fx * xd + cx;
+        T v = fy * yd + cy;
+
+        img_pts_jet.emplace_back(u, v);
+    }
+}
 [[nodiscard]] inline double lerp_angle(double a0, double a1, double t) noexcept {
     double d = std::remainder(a1 - a0, 2.0 * M_PI);
     return a0 + t * d;

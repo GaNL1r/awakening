@@ -293,7 +293,7 @@ int main(int argc, char** argv) {
                             )
                                           .clone()),
                         .format = PixelFormat::RGB,
-                        .timestamp = rcl_node.form_ros_time(i->header.stamp),
+                        .timestamp = Clock::now(),
                     };
                     return std::make_tuple(std::optional<CameraIO::second_type>(std::move(img_frame)
                     ));
@@ -303,8 +303,13 @@ int main(int argc, char** argv) {
         rcl_node.push_sub(img_sub);
         s.add_rate_source<>("get_sim_tf", 200.0, [&]() {
             if (use_sim) {
-                auto ros_now = rcl_node.rclcpp->now();
-                auto __tf = rcl_tf.get_transform<double>("gimbal_link", "odom", ros_now);
+                auto ros_now = rcl_node.rclcpp->get_clock()->now();
+                auto __tf = rcl_tf.get_transform<double>(
+                    "gimbal_link",
+                    "odom",
+                    ros_now,
+                    rclcpp::Duration::from_seconds(0.1)
+                );
                 if (__tf) {
                     ISO3 gimbal_in_gimbal_odom = ISO3::Identity();
                     gimbal_in_gimbal_odom.translation() = Vec3(0, 0, 0);
@@ -312,7 +317,7 @@ int main(int argc, char** argv) {
                     tf->push(
                         SimpleFrame::GIMBAL_ODOM,
                         SimpleFrame::GIMBAL,
-                        rcl_node.form_ros_time(ros_now),
+                        Clock::now(),
                         gimbal_in_gimbal_odom.inverse()
                     );
                 }

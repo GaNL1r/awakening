@@ -17,6 +17,7 @@
 #include <utility>
 #include <vector>
 namespace awakening::auto_aim {
+using namespace armor_point_motion_model;
 void ArmorTarget::reset(
     Armor& a,
     const ArmorTrackerCfg& c,
@@ -71,9 +72,8 @@ void ArmorTarget::reset(
     const double xa = pos.x();
     const double ya = pos.y();
     const double za = pos.z();
-    auto ypr = utils::matrix2euler(a.pose.linear(), utils::EulerOrder::ZYX);
-    const double yaw = ypr[0];
-
+    auto ypr = utils::matrix2euler(a.pose.linear(), utils::EulerOrder::XYZ);
+    const double yaw = ypr[2];
     target_state.x = Eigen::VectorXd::Zero(X_N);
     const double r = r_pre;
     const double xc = xa + r * cos(yaw);
@@ -125,10 +125,10 @@ void ArmorTarget::armor_pnp(
     // auto tvec = tvecs[0];
     cv::Mat R_cv_armor_in_camera_cv;
     cv::Rodrigues(rvec, R_cv_armor_in_camera_cv);
-    Mat3 R_eigen_armor_in_camera_cv = Mat3::Zero();
+    Mat3 R_eigen_armor_in_camera_cv;
     cv::cv2eigen(R_cv_armor_in_camera_cv, R_eigen_armor_in_camera_cv);
 
-    Vec3 t_eigen_armor_in_camera_cv = Vec3::Zero();
+    Vec3 t_eigen_armor_in_camera_cv;
     cv::cv2eigen(tvec, t_eigen_armor_in_camera_cv);
     a.pose.translation() = t_eigen_armor_in_camera_cv;
     a.pose.linear() = R_eigen_armor_in_camera_cv;
@@ -141,10 +141,16 @@ ArmorTarget::measurement_covariance(const Eigen::Matrix<double, Z_N, 1>& z) cons
 
     double u_r =
         std::max(cfg.r_uv_at_1m * log((1.0 / target_state.pos().norm()) + 1), cfg.r_uv_min);
-
-    r << u_r, 0, 0, 0, 0, 0, 0, 0, 0, u_r, 0, 0, 0, 0, 0, 0, 0, 0, u_r, 0, 0, 0, 0, 0, 0, 0, 0, u_r,
-        0, 0, 0, 0, 0, 0, 0, 0, u_r, 0, 0, 0, 0, 0, 0, 0, 0, u_r, 0, 0, 0, 0, 0, 0, 0, 0, u_r, 0, 0,
-        0, 0, 0, 0, 0, 0, u_r;
+    // clang-format off
+    r <<    u_r, 0, 0, 0, 0, 0, 0, 0,
+            0, u_r, 0, 0, 0, 0, 0, 0,
+            0, 0, u_r, 0, 0, 0, 0, 0,
+            0, 0, 0, u_r, 0, 0, 0, 0,
+            0, 0, 0, 0, u_r, 0, 0, 0,
+            0, 0, 0, 0, 0, u_r, 0, 0,
+            0, 0, 0, 0, 0, 0, u_r, 0, 
+            0, 0, 0, 0, 0, 0, 0, u_r;
+    // clang-format on
     return r;
 }
 Eigen::Matrix<double, X_N, X_N> ArmorTarget::process_noise(double dt) const noexcept {
@@ -204,48 +210,7 @@ Eigen::Matrix<double, X_N, X_N> ArmorTarget::process_noise(double dt) const noex
     z[idx::RIGHT_TOP_Y] = key_points[std::to_underlying(ArmorKeyPointsIndex::RIGHT_TOP)].y;
     return z;
 }
-[[nodiscard]] Eigen::Matrix<double, Z_N, 1>
-ArmorTarget::get_measurement(Armor& a, const VecZ& z_pred, MeasureType mt) const noexcept {
-    Eigen::Matrix<double, Z_N, 1> z;
-    switch (mt) {
-        case ARMOR: {
-            z = get_measurement(a);
-            break;
-        }
 
-        case L_LIGHT: {
-            auto key_points = a.key_points.landmarks();
-            z[idx::LEFT_TOP_X] = key_points[std::to_underlying(ArmorKeyPointsIndex::LEFT_TOP)].x;
-            z[idx::LEFT_TOP_Y] = key_points[std::to_underlying(ArmorKeyPointsIndex::LEFT_TOP)].y;
-            z[idx::LEFT_BOTTOM_X] =
-                key_points[std::to_underlying(ArmorKeyPointsIndex::LEFT_BOTTOM)].x;
-            z[idx::LEFT_BOTTOM_Y] =
-                key_points[std::to_underlying(ArmorKeyPointsIndex::LEFT_BOTTOM)].y;
-            z[idx::RIGHT_BOTTOM_X] = z_pred[idx::RIGHT_BOTTOM_X];
-            z[idx::RIGHT_BOTTOM_Y] = z_pred[idx::RIGHT_BOTTOM_Y];
-            z[idx::RIGHT_TOP_X] = z_pred[idx::RIGHT_TOP_X];
-            z[idx::RIGHT_TOP_Y] = z_pred[idx::RIGHT_TOP_Y];
-            break;
-        }
-
-        case R_LIGHT: {
-            auto key_points = a.key_points.landmarks();
-            z[idx::RIGHT_TOP_X] = key_points[std::to_underlying(ArmorKeyPointsIndex::RIGHT_TOP)].x;
-            z[idx::RIGHT_TOP_Y] = key_points[std::to_underlying(ArmorKeyPointsIndex::RIGHT_TOP)].y;
-            z[idx::RIGHT_BOTTOM_X] =
-                key_points[std::to_underlying(ArmorKeyPointsIndex::RIGHT_BOTTOM)].x;
-            z[idx::RIGHT_BOTTOM_Y] =
-                key_points[std::to_underlying(ArmorKeyPointsIndex::RIGHT_BOTTOM)].y;
-            z[idx::LEFT_BOTTOM_X] = z_pred[idx::LEFT_BOTTOM_X];
-            z[idx::LEFT_BOTTOM_Y] = z_pred[idx::LEFT_BOTTOM_Y];
-            z[idx::LEFT_TOP_X] = z_pred[idx::LEFT_TOP_X];
-            z[idx::LEFT_TOP_Y] = z_pred[idx::LEFT_TOP_Y];
-        }
-
-        break;
-    }
-    return z;
-}
 void ArmorTarget::predict_ekf(const TimePoint& timestamp) {
     if (!esekf) {
         throw std::runtime_error("ESEKF is not initialized");
