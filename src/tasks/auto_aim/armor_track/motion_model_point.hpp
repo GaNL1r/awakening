@@ -102,6 +102,8 @@ struct Predict {
     }
 };
 
+
+
 struct Measure {
     struct Ctx {
         int armor_num { 4 };
