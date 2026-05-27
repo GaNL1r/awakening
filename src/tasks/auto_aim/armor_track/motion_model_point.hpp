@@ -21,7 +21,19 @@ using VecX = Eigen::Matrix<double, X_N, 1>;
 using VecZ = Eigen::Matrix<double, Z_N, 1>;
 
 namespace idx {
-    enum { CX, VCX, CY, VCY, CZ, VCZ, YAW, VYAW, R, P1, P2 };
+    enum {
+        CX,
+        VCX,
+        CY,
+        VCY,
+        CZ,
+        VCZ,
+        YAW,
+        VYAW,
+        R,
+        P1,
+        P2,
+    };
     constexpr int L = P1;
     constexpr int H = P2;
     constexpr int OUTPOST01DZ = P1;
@@ -102,8 +114,6 @@ struct Predict {
     }
 };
 
-
-
 struct Measure {
     struct Ctx {
         int armor_num { 4 };
@@ -115,19 +125,7 @@ struct Measure {
 
     template<typename T>
     inline void operator()(const T x[X_N], T z[Z_N]) const {
-        T ax, ay, az, yaw;
-        armor_pose(x, ax, ay, az, yaw);
-        Eigen::Transform<T, 3, Eigen::Isometry> pose_in_odom;
-        pose_in_odom.translation() << ax, ay, az;
-
-        const T armor_pitch = (ctx.armor_number == auto_aim::ArmorClass::OUTPOST)
-            ? T(-auto_aim::FIFTTEN_DEGREE_RAD)
-            : T(auto_aim::FIFTTEN_DEGREE_RAD);
-
-        Eigen::Quaternion<T> q_yaw(Eigen::AngleAxis<T>(yaw, Eigen::Vector3<T>::UnitZ()));
-        Eigen::Quaternion<T> q_pitch(Eigen::AngleAxis<T>(armor_pitch, Eigen::Vector3<T>::UnitY()));
-        Eigen::Quaternion<T> q_roll(Eigen::AngleAxis<T>(T(0.0), Eigen::Vector3<T>::UnitX()));
-        pose_in_odom.linear() = (q_yaw * q_pitch * q_roll).toRotationMatrix();
+        auto pose_in_odom = armor_pose(x);
 
         Eigen::Transform<T, 3, Eigen::Isometry> camera_cv_in_odom_jet;
         camera_cv_in_odom_jet.matrix() = ctx.camera_cv_in_odom.matrix().template cast<T>();
@@ -174,25 +172,54 @@ struct Measure {
     }
 
     template<typename T>
-    inline void armor_pose(const T x[X_N], T& ax, T& ay, T& az, T& yaw) const {
-        yaw = normalize_angle(x[idx::YAW] + T(ctx.id) * T(2.0 * M_PI / ctx.armor_num));
+    inline Eigen::Transform<T, 3, Eigen::Isometry> armor_pose(const T x[X_N]) const {
+        auto yaw = normalize_angle(x[idx::YAW] + T(ctx.id) * T(2.0 * M_PI / ctx.armor_num));
 
         const bool outpost = (ctx.armor_number == auto_aim::ArmorClass::OUTPOST);
         const bool use_lh = (ctx.armor_num == 4) && (ctx.id & 1);
 
         const T r = get_armor_r(x);
 
-        ax = x[idx::CX] - ceres::cos(yaw) * r;
-        ay = x[idx::CY] - ceres::sin(yaw) * r;
-
+        auto ax = -ceres::cos(yaw) * r;
+        auto ay = -ceres::sin(yaw) * r;
+        T az;
         if (outpost) {
-            az = (ctx.id == 0)  ? x[idx::CZ]
-                : (ctx.id == 1) ? x[idx::CZ] + x[idx::OUTPOST01DZ]
-                : (ctx.id == 2) ? x[idx::CZ] + x[idx::OUTPOST02DZ]
-                                : x[idx::CZ];
+            az = (ctx.id == 0)  ? T(0)
+                : (ctx.id == 1) ? T(0) + x[idx::OUTPOST01DZ]
+                : (ctx.id == 2) ? T(0) + x[idx::OUTPOST02DZ]
+                                : T(0);
         } else {
-            az = use_lh ? x[idx::CZ] + x[idx::H] : x[idx::CZ];
+            az = use_lh ? T(0) + x[idx::H] : T(0);
         }
+        Eigen::Transform<T, 3, Eigen::Isometry> pose_in_car;
+        pose_in_car.translation() << ax, ay, az;
+
+        const T armor_pitch = (ctx.armor_number == auto_aim::ArmorClass::OUTPOST)
+            ? T(-auto_aim::FIFTTEN_DEGREE_RAD)
+            : T(auto_aim::FIFTTEN_DEGREE_RAD);
+
+        Eigen::Quaternion<T> q_yaw_in_car(Eigen::AngleAxis<T>(yaw, Eigen::Vector3<T>::UnitZ()));
+        Eigen::Quaternion<T> q_pitch_in_car(
+            Eigen::AngleAxis<T>(armor_pitch, Eigen::Vector3<T>::UnitY())
+        );
+        Eigen::Quaternion<T> q_roll_in_car(Eigen::AngleAxis<T>(T(0.0), Eigen::Vector3<T>::UnitX()));
+        pose_in_car.linear() = (q_yaw_in_car * q_pitch_in_car * q_roll_in_car).toRotationMatrix();
+        Eigen::Transform<T, 3, Eigen::Isometry> car_in_odom =
+            Eigen::Transform<T, 3, Eigen::Isometry>::Identity();
+        car_in_odom.translation() << x[idx::CX], x[idx::CY], x[idx::CZ];
+        // Eigen::Quaternion<T> q_yaw_car_in_odom(
+        //     Eigen::AngleAxis<T>(T(0.0), Eigen::Vector3<T>::UnitZ())
+        // );
+        // Eigen::Quaternion<T> q_pitch_car_in_odom(
+        //     Eigen::AngleAxis<T>(x[idx::W_P], Eigen::Vector3<T>::UnitY())
+        // );
+        // Eigen::Quaternion<T> q_roll_car_in_odom(
+        //     Eigen::AngleAxis<T>(x[idx::W_R], Eigen::Vector3<T>::UnitX())
+        // );
+        // car_in_odom.linear() =
+        //     (q_yaw_car_in_odom * q_pitch_car_in_odom * q_roll_car_in_odom).toRotationMatrix();
+        Eigen::Transform<T, 3, Eigen::Isometry> pose_in_odom = car_in_odom * pose_in_car;
+        return pose_in_odom;
     }
 };
 struct State {
@@ -212,9 +239,13 @@ struct State {
             Measure m {
                 .ctx = ctx,
             };
+            auto pose_in_odom = m.armor_pose(x.data());
             double ax, ay, az, ayaw;
-            m.armor_pose(x.data(), ax, ay, az, ayaw);
-            ISO3 pose;
+            ax = pose_in_odom.translation().x();
+            ay = pose_in_odom.translation().y();
+            az = pose_in_odom.translation().z();
+            auto ypr = utils::matrix2euler(pose_in_odom.linear(), utils::EulerOrder::ZYX);
+            ayaw = ypr[0];
             r.push_back({ ax, ay, az, ayaw });
         }
         return r;
@@ -235,13 +266,7 @@ struct State {
             Measure m {
                 .ctx = ctx,
             };
-            double ax, ay, az, ayaw;
-            m.armor_pose(x.data(), ax, ay, az, ayaw);
-            ISO3 pose;
-            auto p = Vec3 { ax, ay, az };
-            pose.translation() = p;
-            Mat3 R = utils::euler2matrix(Vec3 { ayaw, armor_pitch, 0 }, utils::EulerOrder::ZYX);
-            pose.linear() = R;
+            ISO3 pose = m.armor_pose(x.data());
 
             r.push_back(pose);
         }

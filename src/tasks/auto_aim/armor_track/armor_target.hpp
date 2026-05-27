@@ -186,7 +186,6 @@ public:
             j_target_state["r"] = web::val(target_state.r());
             j_target_state["l"] = web::val(target_state.l());
             j_target_state["h"] = web::val(target_state.h());
-            
         });
     }
 

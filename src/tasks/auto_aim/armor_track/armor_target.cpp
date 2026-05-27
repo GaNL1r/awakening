@@ -81,6 +81,8 @@ void ArmorTarget::reset(
     const double zc = za;
     double l = 0.0;
     double h = 0.0;
+    // double roll = ypr[0];
+    // double w_p =0;
     target_state.x << xc, 0, yc, 0, zc, 0, yaw, 0, r, l, h;
     target_state.timestamp = timestamp;
     target_state.frame_id = frame_id;

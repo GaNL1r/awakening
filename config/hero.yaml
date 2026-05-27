@@ -110,18 +110,15 @@ very_aimer:
   
   sample_horizon: 200
 
-  control_delay: 0.25
+  fire_delay_min: 0.01
+  fire_delay_max: 0.05
   
   max_yaw_acc: 40
-  #全向yaw加速度测算37
   max_pitch_acc: 50
   
 
   prediction_delay: 0.00
-  aim_center_more_prediction_time: -0.4
-  comming_angle: 70
-  leaving_angle: 20
-
+  aim_center_more_prediction_time: 0.0
 
   shooting_range_h: 0.12
   shooting_range_w_small: 0.12

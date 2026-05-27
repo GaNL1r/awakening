@@ -399,13 +399,12 @@ struct VeryAimer::Impl {
     struct Params {
         double sample_total_time;
         int sample_horizon;
-        double control_delay;
+        double fire_delay_min;
+        double fire_delay_max;
         double max_yaw_acc;
         double max_pitch_acc;
         double prediction_delay;
         double aim_center_more_prediction_time;
-        double comming_angle;
-        double leaving_angle;
         double shooting_range_h;
         double shooting_range_w_small;
         double shooting_range_w_large;
@@ -415,14 +414,13 @@ struct VeryAimer::Impl {
         void load(const YAML::Node& config) {
             sample_total_time = config["sample_total_time"].as<double>();
             sample_horizon = config["sample_horizon"].as<int>();
-            control_delay = config["control_delay"].as<double>();
+            fire_delay_min = config["fire_delay_min"].as<double>();
+            fire_delay_max = config["fire_delay_max"].as<double>();
             max_yaw_acc = config["max_yaw_acc"].as<double>();
             max_pitch_acc = config["max_pitch_acc"].as<double>();
             prediction_delay = config["prediction_delay"].as<double>();
             aim_center_more_prediction_time =
                 config["aim_center_more_prediction_time"].as<double>();
-            comming_angle = config["comming_angle"].as<double>();
-            leaving_angle = config["leaving_angle"].as<double>();
             shooting_range_h = config["shooting_range_h"].as<double>();
             shooting_range_w_small = config["shooting_range_w_small"].as<double>();
             shooting_range_w_large = config["shooting_range_w_large"].as<double>();
@@ -891,23 +889,15 @@ struct VeryAimer::Impl {
                        ))
                     < delay_enable.second;
             };
-            int step = params_.control_delay / (dt / 2.0);
-            for (int i = 1; i <= step; i++) {
-                double t_add = 0 + i * (dt / 2.0);
-                if (!delay_fire(+t_add)) {
-                    cmd.no_shoot();
+            {
+                double t_check = 0 + params_.fire_delay_min;
+                while (t_check < (0 + params_.fire_delay_max) && t_check <= horizon / 2.0) {
+                    if (!delay_fire(+t_check)) {
+                        cmd.no_shoot();
+                    }
+                    t_check += (dt / 2.0);
                 }
             }
-            // for (int i = 1; i <= step; i++) {
-            //     double t_add = 0 - i * (dt / 2.0);
-            //     if (delay_fire(+t_add)) {
-            //         // cmd.enable_pitch_diff = params_.min_enable_pitch_deg;
-            //         // cmd.enable_yaw_diff = params_.min_enable_yaw_deg;
-            //         cmd.enable_pitch_diff = 2.0;
-            //         cmd.enable_yaw_diff = 2.0;
-            //         cmd.fire_advice = true;
-            //     }
-            // }
         }
 
         return cmd;

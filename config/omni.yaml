@@ -107,7 +107,8 @@ very_aimer:
   
   sample_horizon: 200
 
-  control_delay: 0.05
+  fire_delay_min: 0.03
+  fire_delay_max: 0.07
   
   max_yaw_acc: 40
   max_pitch_acc: 50
@@ -115,9 +116,6 @@ very_aimer:
 
   prediction_delay: 0.00
   aim_center_more_prediction_time: 0.0
-  comming_angle: 55
-  leaving_angle: 35
-
 
   shooting_range_h: 0.12
   shooting_range_w_small: 0.12

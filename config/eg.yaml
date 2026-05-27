@@ -101,25 +101,22 @@ very_aimer:
   base_pitch_offset: 2.0 # pitch补偿 两个都调好理论上发出弹丸会与可视化弹道重现重合，可以在没有靶车的时候临时调整
   # base_yaw_offset: -0.0
   # base_pitch_offset: -0.0
-  sample_total_time: 1.0 
+  sample_total_time: 1.0
   
   sample_horizon: 200
 
-  control_delay: 0.2 #发弹延迟 当前轨迹时间后发弹延迟如果最佳控制打不中则提前不开火，反之以最小允许误差尝试开火
+  fire_delay_min: 0.01
+  fire_delay_max: 0.05
   
-  max_yaw_acc: 40 
-  #全向yaw加速度测算37
+  max_yaw_acc: 40
   max_pitch_acc: 50
   
 
-  prediction_delay: 0.00 #预测时间调整 可通过击打平移单装甲板靶调试出
+  prediction_delay: 0.00
   aim_center_more_prediction_time: 0.0
-  comming_angle: 55
-  leaving_angle: 20
 
-
-  shooting_range_h: 0.12 #目标装甲板高 
-  shooting_range_w_small: 0.12 #宽 两个影响开火允许误差
+  shooting_range_h: 0.12
+  shooting_range_w_small: 0.12
   shooting_range_w_large: 0.24
   min_enable_pitch_deg: 0.25
   min_enable_yaw_deg: 0.25
