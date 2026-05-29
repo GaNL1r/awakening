@@ -1,6 +1,6 @@
 #include "armor_target.hpp"
 #include "angles.h"
-#include "tasks/auto_aim/armor_track/motion_model_point.hpp"
+#include "tasks/auto_aim/armor_track/motion_model.hpp"
 #include "tasks/auto_aim/type.hpp"
 #include "tasks/base/common.hpp"
 #include "utils/common/type_common.hpp"
@@ -32,6 +32,7 @@ void ArmorTarget::reset(
     uvmeasure_ctx.armor_number = a.number;
     uvmeasure_ctx.camera_cv_in_odom = camera_cv_in_odom;
     uvmeasure_ctx.camera_info = camera_info.clone();
+    uvmeasure_ctx.enable_whole_car_roll_pitch = cfg.enable_whole_car_roll_pitch;
     ypdmeasure_ctx.armor_num = armor_num_by_armor_class(a.number);
     ypdmeasure_ctx.id = 0;
     ypdmeasure_ctx.armor_number = a.number;
@@ -219,28 +220,9 @@ ArmorTarget::uvmeasurement_covariance(const Eigen::Matrix<double, UVZ_N, 1>& z) 
 
     double u_r =
         std::max(cfg.r_uv_at_1m * log((1.0 / target_state.pos().norm()) + 1), cfg.r_uv_min);
-    // clang-format off
-    // r<< u_r, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-    //     0, u_r, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-    //     0, 0, u_r, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-    //     0, 0, 0, u_r, 0, 0, 0, 0, 0, 0, 0, 0,
-    //     0, 0, 0, 0, u_r, 0, 0, 0, 0, 0, 0, 0,
-    //     0, 0, 0, 0, 0, u_r, 0, 0, 0, 0, 0, 0,
-    //     0, 0, 0, 0, 0, 0, u_r, 0, 0, 0, 0, 0,
-    //     0, 0, 0, 0, 0, 0, 0, u_r, 0, 0, 0, 0,
-    //     0, 0, 0, 0, 0, 0, 0, 0, u_r, 0, 0, 0,
-    //     0, 0, 0, 0, 0, 0, 0, 0, 0, u_r, 0, 0,
-    //     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, u_r, 0,
-    //     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, u_r;
-    r << u_r, 0, 0, 0, 0, 0, 0, 0,
-     0, u_r, 0, 0, 0, 0, 0, 0,
-     0, 0, u_r, 0, 0, 0, 0, 0,
-     0, 0, 0, u_r, 0, 0, 0, 0,
-     0, 0, 0, 0, u_r, 0, 0, 0,
-     0, 0, 0, 0, 0, u_r, 0, 0,
-     0, 0, 0, 0, 0, 0, u_r, 0,
-     0, 0, 0, 0, 0, 0, 0, u_r;
-    // clang-format on
+
+    r.setZero();
+    r.diagonal().setConstant(u_r);
     return r;
 }
 [[nodiscard]] Eigen::Matrix<double, UVZ_N, 1> ArmorTarget::get_uvmeasurement(Armor& a
@@ -270,10 +252,11 @@ ArmorTarget::uvmeasurement_covariance(const Eigen::Matrix<double, UVZ_N, 1>& z) 
     Eigen::Matrix<double, YPDZ_N, YPDZ_N> r;
     const double delta_angle = angles::normalize_angle(z[idx::ROT_YAW] - z[idx::YPD_Y]);
     // clang-format off
-        r <<4e-3, 0, 0, 0,
-                0, 4e-3 , 0, 0,
-                0, 0, log(std::abs(delta_angle) + 1) +z[idx::YPD_D]*z[idx::YPD_D]*0.1, 0,
-                0, 0, 0,log(std::abs(z[idx::YPD_D]) + 1) / 200 + 9e-2;
+    r.setZero();  // 全零
+    r(idx::YPD_Y, idx::YPD_Y) = 4e-3;
+    r(idx::YPD_P, idx::YPD_P) = 4e-3;
+    r(idx::YPD_D, idx::YPD_D) = log(std::abs(delta_angle) + 1) + z[idx::YPD_D]*z[idx::YPD_D]*0.1;
+    r(idx::ROT_YAW, idx::ROT_YAW) = log(std::abs(z[idx::YPD_D]) + 1) / 200 + 9e-2;
     // clang-format on
     return r;
 }
@@ -448,6 +431,7 @@ bool ArmorTarget::update(
         Eigen::Matrix<double, UVZ_N, 1> r = z - z_pred;
         return r;
     };
+
     // const auto u_r = [&](const Eigen::Matrix<double, YPDZ_N, 1>& z) {
     //     return ypdmeasurement_covariance(z);
     // };

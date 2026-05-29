@@ -60,7 +60,7 @@ public:
         Frame frame;
         int fail_count = 0;
         while (running_) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            // std::this_thread::sleep_for(std::chrono::milliseconds(1));
             int n_ret = MV_CC_GetImageBuffer(camera_handle_, &frame.out_frame, 100);
             if (n_ret == MV_OK) {
                 const auto current_time = std::chrono::steady_clock::now();

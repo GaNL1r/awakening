@@ -48,7 +48,7 @@ public:
         BYTE* raw;
         int fail_count = 0;
         while (running_) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            // std::this_thread::sleep_for(std::chrono::milliseconds(1));
 
             auto status = CameraGetImageBuffer(h_camera_, &head, &raw, 100);
             if (status == CAMERA_STATUS_SUCCESS) {

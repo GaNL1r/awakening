@@ -114,6 +114,7 @@ struct UVMeasure {
         ISO3 camera_cv_in_odom = ISO3::Identity();
         CameraInfo camera_info;
         auto_aim::ArmorClass armor_number = auto_aim::ArmorClass::UNKNOWN;
+        bool enable_whole_car_roll_pitch = false;
     } ctx;
 
     template<typename T>
@@ -211,18 +212,20 @@ struct UVMeasure {
         Eigen::Quaternion<T> q_yaw_car_in_odom(
             Eigen::AngleAxis<T>(T(0.0), Eigen::Vector3<T>::UnitZ())
         );
-        Eigen::Quaternion<T> q_pitch_car_in_odom(
-            Eigen::AngleAxis<T>(T(0.0), Eigen::Vector3<T>::UnitY())
-        );
-        Eigen::Quaternion<T> q_roll_car_in_odom(
-            Eigen::AngleAxis<T>(T(0.0), Eigen::Vector3<T>::UnitX())
-        );
         // Eigen::Quaternion<T> q_pitch_car_in_odom(
-        //     Eigen::AngleAxis<T>(x[idx::W_P], Eigen::Vector3<T>::UnitY())
+        //     Eigen::AngleAxis<T>(T(0.0), Eigen::Vector3<T>::UnitY())
         // );
         // Eigen::Quaternion<T> q_roll_car_in_odom(
-        //     Eigen::AngleAxis<T>(x[idx::W_R], Eigen::Vector3<T>::UnitX())
+        //     Eigen::AngleAxis<T>(T(0.0), Eigen::Vector3<T>::UnitX())
         // );
+        Eigen::Quaternion<T> q_pitch_car_in_odom(Eigen::AngleAxis<T>(
+            ctx.enable_whole_car_roll_pitch ? x[idx::W_P] : T(0.0),
+            Eigen::Vector3<T>::UnitY()
+        ));
+        Eigen::Quaternion<T> q_roll_car_in_odom(Eigen::AngleAxis<T>(
+            ctx.enable_whole_car_roll_pitch ? x[idx::W_R] : T(0.0),
+            Eigen::Vector3<T>::UnitX()
+        ));
         car_in_odom.linear() =
             (q_roll_car_in_odom * q_pitch_car_in_odom * q_yaw_car_in_odom).toRotationMatrix();
         Eigen::Transform<T, 3, Eigen::Isometry> pose_in_odom = car_in_odom * pose_in_car;

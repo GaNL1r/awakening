@@ -1,5 +1,5 @@
 #include "ascii_banner.hpp"
-#include "tasks/auto_aim/armor_track/motion_model_point.hpp"
+#include "tasks/auto_aim/armor_track/motion_model.hpp"
 #include "tasks/base/ballistic_trajectory.hpp"
 #include "tasks/base/wheel_odometry.hpp"
 #include "utils/drivers/mv_camera.hpp"
@@ -530,7 +530,7 @@ int main(int argc, char** argv) {
         auto batch_armors = armors_queue.dequeue_batch();
         if (auto_aim_dbg && is_web_running()) {
             auto_aim_dbg->expanded.set(frame.expanded);
-            auto_aim_dbg->img_frame.set(std::move(frame.img_frame.clone()));
+            auto_aim_dbg->img_frame.set(std::move(frame.img_frame));
         }
 
         return std::make_tuple(std::optional<DetIo::second_type>(std::move(batch_armors)));

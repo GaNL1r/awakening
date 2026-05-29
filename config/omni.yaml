@@ -35,12 +35,12 @@ bullet_pick_up:
   
 auto_exposure:
   enable: true
-  target_brightness: 35.0
+  target_brightness: 25.0
   tolerance: 3.0
   step_gain: 15.0
   decay_step: 1.0
   exposure_min: 200.0
-  exposure_max: 5500.0
+  exposure_max: 3500.0
   control_interval_ms: 300
 
 
@@ -84,7 +84,8 @@ armor_tracker:
   q_l: 0.0000001
   q_h: 0.0000001
   q_outpost_dz: 0.5
-  q_whole_car_roll_pitch: 0.1
+  q_whole_car_roll_pitch: 0.0000001
+  enable_whole_car_roll_pitch: false
   r_uv_at_1m: 70.0
   r_uv_min: 30.0
   esekf_iter_num: 5

@@ -1,6 +1,6 @@
 #pragma once
 #include "angles.h"
-#include "motion_model_point.hpp"
+#include "motion_model.hpp"
 #include "tasks/auto_aim/type.hpp"
 #include "tasks/base/web.hpp"
 #include "utils/common/type_common.hpp"
@@ -28,6 +28,7 @@ struct ArmorTrackerCfg {
     double q_whole_car_roll_pitch;
     double r_uv_at_1m;
     double r_uv_min;
+    bool enable_whole_car_roll_pitch;
     void load(const YAML::Node& config) {
         esekf_iter_num = config["esekf_iter_num"].as<int>();
         lost_time_thres = config["lost_time_thres"].as<double>();
@@ -47,6 +48,7 @@ struct ArmorTrackerCfg {
         q_whole_car_roll_pitch = config["q_whole_car_roll_pitch"].as<double>();
         r_uv_at_1m = config["r_uv_at_1m"].as<double>();
         r_uv_min = config["r_uv_min"].as<double>();
+        enable_whole_car_roll_pitch = config["enable_whole_car_roll_pitch"].as<bool>();
     }
 };
 static inline int GOBAL_ID = 0;

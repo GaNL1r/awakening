@@ -1,5 +1,5 @@
 #include "ascii_banner.hpp"
-#include "tasks/auto_aim/armor_track/motion_model_point.hpp"
+#include "tasks/auto_aim/armor_track/motion_model.hpp"
 #include "tasks/base/ballistic_trajectory.hpp"
 #include "tasks/base/wheel_odometry.hpp"
 #include "utils/drivers/mv_camera.hpp"
