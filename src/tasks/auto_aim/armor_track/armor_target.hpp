@@ -25,6 +25,7 @@ struct ArmorTrackerCfg {
     double q_l;
     double q_h;
     double q_outpost_dz;
+    double q_whole_car_roll_pitch;
     double r_uv_at_1m;
     double r_uv_min;
     void load(const YAML::Node& config) {
@@ -43,6 +44,7 @@ struct ArmorTrackerCfg {
         q_l = config["q_l"].as<double>();
         q_h = config["q_h"].as<double>();
         q_outpost_dz = config["q_outpost_dz"].as<double>();
+        q_whole_car_roll_pitch = config["q_whole_car_roll_pitch"].as<double>();
         r_uv_at_1m = config["r_uv_at_1m"].as<double>();
         r_uv_min = config["r_uv_min"].as<double>();
     }
@@ -99,14 +101,21 @@ public:
         const cv::Size& image_size
     ) const noexcept;
     [[nodiscard]] Eigen::
-        Matrix<double, armor_point_motion_model::Z_N, armor_point_motion_model::Z_N>
-        measurement_covariance(const Eigen::Matrix<double, armor_point_motion_model::Z_N, 1>& z
-        ) const noexcept;
-    [[nodiscard]] Eigen::
         Matrix<double, armor_point_motion_model::X_N, armor_point_motion_model::X_N>
         process_noise(double dt) const noexcept;
-    [[nodiscard]] Eigen::Matrix<double, armor_point_motion_model::Z_N, 1> get_measurement(Armor& a
-    ) const noexcept;
+    [[nodiscard]] Eigen::
+        Matrix<double, armor_point_motion_model::UVZ_N, armor_point_motion_model::UVZ_N>
+        uvmeasurement_covariance(const Eigen::Matrix<double, armor_point_motion_model::UVZ_N, 1>& z
+        ) const noexcept;
+    [[nodiscard]] Eigen::Matrix<double, armor_point_motion_model::UVZ_N, 1>
+    get_uvmeasurement(Armor& a) const noexcept;
+    [[nodiscard]] Eigen::
+        Matrix<double, armor_point_motion_model::YPDZ_N, armor_point_motion_model::YPDZ_N>
+        ypdmeasurement_covariance(
+            const Eigen::Matrix<double, armor_point_motion_model::YPDZ_N, 1>& z
+        ) const noexcept;
+    [[nodiscard]] Eigen::Matrix<double, armor_point_motion_model::YPDZ_N, 1>
+    get_ypdmeasurement(Armor& a) const noexcept;
     void predict_ekf(const TimePoint& timestamp);
     bool update(
         std::pair<int, Armor>& a,
@@ -123,7 +132,8 @@ public:
     std::vector<std::pair<int, Armor>>
     match(std::vector<Armor>& armors, const CameraInfo& camera_info, const ISO3& camera_cv_in_odom)
         const noexcept;
-    armor_point_motion_model::Measure::Ctx measure_ctx;
+    armor_point_motion_model::UVMeasure::Ctx uvmeasure_ctx;
+    armor_point_motion_model::YPDMeasure::Ctx ypdmeasure_ctx;
     std::optional<armor_point_motion_model::RobotStateESEKF> esekf;
     ArmorTrackerCfg cfg;
     const armor_point_motion_model::State& get_target_state() const {
@@ -137,6 +147,7 @@ public:
     bool is_inited = false;
     bool jumped = false;
     int last_match_id = -1;
+    mutable double last_rot_yaw = 0;
     std::optional<std::pair<bool, std::vector<bool>>> outpost_has_all_and_has_set_ids;
     TrackState track_state;
     TimePoint last_update;
@@ -165,7 +176,7 @@ public:
         return v;
     }
     [[nodiscard]] inline int armor_num() const noexcept {
-        return measure_ctx.armor_num;
+        return uvmeasure_ctx.armor_num;
     }
     inline void write_log() {
         web::write_log("armor_target", [&](auto& j) {
@@ -186,6 +197,8 @@ public:
             j_target_state["r"] = web::val(target_state.r());
             j_target_state["l"] = web::val(target_state.l());
             j_target_state["h"] = web::val(target_state.h());
+            j_target_state["w_r"] = web::val(target_state.whole_car_roll());
+            j_target_state["w_p"] = web::val(target_state.whole_car_pitch());
         });
     }
 

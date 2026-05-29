@@ -38,13 +38,11 @@ struct ArmorKeyPoint3D {
     static constexpr double H = ArmorTypeTraits<T>::HEIGHT;
     inline static std::vector<PointT> build() {
         return {
-
             PointT(0, W / 2, H / 2), // 左上
             PointT(0, W / 2, -H / 2), // 左下
             PointT(0, -W / 2, -H / 2), // 右下
             PointT(0, -W / 2, H / 2), // 右上
-            // PointT(0, W / 2, 0),
-            // PointT(0, -W / 2, 0),
+            // PointT(0, W / 2, 0),       PointT(0, -W / 2, 0),
         };
     }
 };
@@ -58,18 +56,11 @@ enum class ArmorKeyPointsIndex : int {
     N
 };
 inline std::string string_by_armor_key_points_index(int index) {
-    constexpr const char* details[] = { "left_top", "left_bottom", "right_bottom", "right_top" };
+    constexpr const char* details[] = { "left_top",  "left_bottom", "right_bottom",
+                                        "right_top", "left_mid",    "right_mid" };
     return std::string(details[index]);
 }
 
-namespace armor_keypoints {
-    using I = ArmorKeyPointsIndex;
-    constexpr std::array sys_pairs = {
-        std::pair { std::to_underlying(I::RIGHT_BOTTOM), std::to_underlying(I::LEFT_BOTTOM) },
-        // std::pair { std::to_underlying(I::RIGHT_MID), std::to_underlying(I::LEFT_MID) },
-        std::pair { std::to_underlying(I::RIGHT_TOP), std::to_underlying(I::LEFT_TOP) }
-    };
-} // namespace armor_keypoints
 struct ArmorKeyPoints2D {
     using PointT = cv::Point2f;
     using I = ArmorKeyPointsIndex;
@@ -286,12 +277,14 @@ struct Armor {
         cv::Point rt = get(I::RIGHT_TOP);
         cv::Point rb = get(I::RIGHT_BOTTOM);
         cv::Point lb = get(I::LEFT_BOTTOM);
-
+        // cv::Point lm = get(I::LEFT_MID);
+        // cv::Point rm = get(I::RIGHT_MID);
         cv::line(img, lt, rb, cv::Scalar(0, 255, 0), 2);
         cv::line(img, rb, rt, cv::Scalar(0, 255, 0), 2);
         cv::line(img, rt, lb, cv::Scalar(0, 255, 0), 2);
         cv::line(img, lb, lt, cv::Scalar(0, 255, 0), 2);
-
+        // cv::circle(img, lm, 5, cv::Scalar(0, 255, 0), -1);
+        // cv::circle(img, rm, 5, cv::Scalar(0, 255, 0), -1);
         cv::Point bottom_center = (lb + rb) * 0.5;
 
         bottom_center.y += 20;

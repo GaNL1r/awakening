@@ -14,26 +14,8 @@
 #include <vector>
 namespace awakening::armor_point_motion_model {
 
-constexpr int X_N = 11;
-constexpr int Z_N = 8;
-
-using VecX = Eigen::Matrix<double, X_N, 1>;
-using VecZ = Eigen::Matrix<double, Z_N, 1>;
-
 namespace idx {
-    enum {
-        CX,
-        VCX,
-        CY,
-        VCY,
-        CZ,
-        VCZ,
-        YAW,
-        VYAW,
-        R,
-        P1,
-        P2,
-    };
+    enum { CX, VCX, CY, VCY, CZ, VCZ, YAW, VYAW, R, P1, P2, W_R, W_P, X_N };
     constexpr int L = P1;
     constexpr int H = P2;
     constexpr int OUTPOST01DZ = P1;
@@ -43,13 +25,24 @@ namespace idx {
         LEFT_TOP_Y,
         LEFT_BOTTOM_X,
         LEFT_BOTTOM_Y,
+        // LEFT_MID_X,
+        // LEFT_MID_Y,
         RIGHT_BOTTOM_X,
         RIGHT_BOTTOM_Y,
         RIGHT_TOP_X,
-        RIGHT_TOP_Y
+        RIGHT_TOP_Y,
+        // RIGHT_MID_X,
+        // RIGHT_MID_Y,
+        _UVZ_N
     };
+    enum { YPD_Y, YPD_P, YPD_D, ROT_YAW, _YPD_Z_N };
 } // namespace idx
-
+constexpr int X_N = idx::X_N;
+constexpr int UVZ_N = idx::_UVZ_N;
+constexpr int YPDZ_N = idx::_YPD_Z_N;
+using VecX = Eigen::Matrix<double, X_N, 1>;
+using UVVecZ = Eigen::Matrix<double, UVZ_N, 1>;
+using YPDVecZ = Eigen::Matrix<double, YPDZ_N, 1>;
 template<typename T>
 inline T normalize_angle(T a) {
     const T two_pi = T(2.0 * M_PI);
@@ -114,7 +107,7 @@ struct Predict {
     }
 };
 
-struct Measure {
+struct UVMeasure {
     struct Ctx {
         int armor_num { 4 };
         int id { 0 };
@@ -124,7 +117,7 @@ struct Measure {
     } ctx;
 
     template<typename T>
-    inline void operator()(const T x[X_N], T z[Z_N]) const {
+    inline void operator()(const T x[X_N], T z[UVZ_N]) const {
         auto pose_in_odom = armor_pose(x);
 
         Eigen::Transform<T, 3, Eigen::Isometry> camera_cv_in_odom_jet;
@@ -151,6 +144,10 @@ struct Measure {
             img_pts_jet[std::to_underlying(auto_aim::ArmorKeyPointsIndex::LEFT_BOTTOM)].x();
         z[idx::LEFT_BOTTOM_Y] =
             img_pts_jet[std::to_underlying(auto_aim::ArmorKeyPointsIndex::LEFT_BOTTOM)].y();
+        // z[idx::LEFT_MID_X] =
+        //     img_pts_jet[std::to_underlying(auto_aim::ArmorKeyPointsIndex::LEFT_MID)].x();
+        // z[idx::LEFT_MID_Y] =
+        //     img_pts_jet[std::to_underlying(auto_aim::ArmorKeyPointsIndex::LEFT_MID)].y();
         z[idx::RIGHT_TOP_X] =
             img_pts_jet[std::to_underlying(auto_aim::ArmorKeyPointsIndex::RIGHT_TOP)].x();
         z[idx::RIGHT_TOP_Y] =
@@ -159,9 +156,13 @@ struct Measure {
             img_pts_jet[std::to_underlying(auto_aim::ArmorKeyPointsIndex::RIGHT_BOTTOM)].x();
         z[idx::RIGHT_BOTTOM_Y] =
             img_pts_jet[std::to_underlying(auto_aim::ArmorKeyPointsIndex::RIGHT_BOTTOM)].y();
+        // z[idx::RIGHT_MID_X] =
+        //     img_pts_jet[std::to_underlying(auto_aim::ArmorKeyPointsIndex::RIGHT_MID)].x();
+        // z[idx::RIGHT_MID_Y] =
+        //     img_pts_jet[std::to_underlying(auto_aim::ArmorKeyPointsIndex::RIGHT_MID)].y();
     }
 
-    inline void h(const VecX& x, VecZ& z) const {
+    inline void h(const VecX& x, UVVecZ& z) const {
         operator()(x.data(), z.data());
     }
 
@@ -207,21 +208,74 @@ struct Measure {
         Eigen::Transform<T, 3, Eigen::Isometry> car_in_odom =
             Eigen::Transform<T, 3, Eigen::Isometry>::Identity();
         car_in_odom.translation() << x[idx::CX], x[idx::CY], x[idx::CZ];
-        // Eigen::Quaternion<T> q_yaw_car_in_odom(
-        //     Eigen::AngleAxis<T>(T(0.0), Eigen::Vector3<T>::UnitZ())
-        // );
+        Eigen::Quaternion<T> q_yaw_car_in_odom(
+            Eigen::AngleAxis<T>(T(0.0), Eigen::Vector3<T>::UnitZ())
+        );
+        Eigen::Quaternion<T> q_pitch_car_in_odom(
+            Eigen::AngleAxis<T>(T(0.0), Eigen::Vector3<T>::UnitY())
+        );
+        Eigen::Quaternion<T> q_roll_car_in_odom(
+            Eigen::AngleAxis<T>(T(0.0), Eigen::Vector3<T>::UnitX())
+        );
         // Eigen::Quaternion<T> q_pitch_car_in_odom(
         //     Eigen::AngleAxis<T>(x[idx::W_P], Eigen::Vector3<T>::UnitY())
         // );
         // Eigen::Quaternion<T> q_roll_car_in_odom(
         //     Eigen::AngleAxis<T>(x[idx::W_R], Eigen::Vector3<T>::UnitX())
         // );
-        // car_in_odom.linear() =
-        //     (q_yaw_car_in_odom * q_pitch_car_in_odom * q_roll_car_in_odom).toRotationMatrix();
+        car_in_odom.linear() =
+            (q_roll_car_in_odom * q_pitch_car_in_odom * q_yaw_car_in_odom).toRotationMatrix();
         Eigen::Transform<T, 3, Eigen::Isometry> pose_in_odom = car_in_odom * pose_in_car;
         return pose_in_odom;
     }
 };
+struct YPDMeasure {
+    struct Ctx {
+        int armor_num { 4 };
+        int id { 0 };
+        auto_aim::ArmorClass armor_number = auto_aim::ArmorClass::UNKNOWN;
+    } ctx;
+
+    template<typename T>
+    inline void operator()(const T x[X_N], T z[YPDZ_N]) const {
+        auto yaw = normalize_angle(x[idx::YAW] + T(ctx.id) * T(2.0 * M_PI / ctx.armor_num));
+
+        const bool outpost = (ctx.armor_number == auto_aim::ArmorClass::OUTPOST);
+        const bool use_lh = (ctx.armor_num == 4) && (ctx.id & 1);
+
+        const T r = get_armor_r(x);
+
+        auto ax = x[idx::CX] - ceres::cos(yaw) * r;
+        auto ay = x[idx::CY] - ceres::sin(yaw) * r;
+        T az;
+        if (outpost) {
+            az = (ctx.id == 0)  ? x[idx::CZ]
+                : (ctx.id == 1) ? x[idx::CZ] + x[idx::OUTPOST01DZ]
+                : (ctx.id == 2) ? x[idx::CZ] + x[idx::OUTPOST02DZ]
+                                : x[idx::CZ];
+        } else {
+            az = use_lh ? x[idx::CZ] + x[idx::H] : x[idx::CZ];
+        }
+        T xy_dist = ceres::sqrt(ax * ax + ay * ay);
+        T dist = ceres::sqrt(xy_dist * xy_dist + az * az);
+        // Observation model
+        z[idx::YPD_Y] = ceres::atan2(ay, ax); // yaw
+        z[idx::YPD_P] = ceres::atan2(az, xy_dist); // pitch
+        z[idx::YPD_D] = dist; // distance
+        z[idx::ROT_YAW] = yaw; // orientation_yaw
+    }
+
+    inline void h(const VecX& x, YPDVecZ& z) const {
+        operator()(x.data(), z.data());
+    }
+
+    template<typename T>
+    inline T get_armor_r(const T x[X_N]) const {
+        const bool use_lh = (ctx.armor_num == 4) && (ctx.id & 1);
+        return use_lh ? x[idx::R] + x[idx::L] : x[idx::R];
+    }
+};
+
 struct State {
     VecX x;
     TimePoint timestamp;
@@ -232,11 +286,11 @@ struct State {
         int armor_num = armor_num_by_armor_class(armor_number);
         r.reserve(armor_num);
         for (int i = 0; i < armor_num; ++i) {
-            Measure::Ctx ctx;
+            UVMeasure::Ctx ctx;
             ctx.id = i;
             ctx.armor_num = armor_num;
             ctx.armor_number = armor_number;
-            Measure m {
+            UVMeasure m {
                 .ctx = ctx,
             };
             auto pose_in_odom = m.armor_pose(x.data());
@@ -259,11 +313,11 @@ struct State {
         int armor_num = armor_num_by_armor_class(armor_number);
         r.reserve(armor_num);
         for (int i = 0; i < armor_num; ++i) {
-            Measure::Ctx ctx;
+            UVMeasure::Ctx ctx;
             ctx.id = i;
             ctx.armor_num = armor_num;
             ctx.armor_number = armor_number;
-            Measure m {
+            UVMeasure m {
                 .ctx = ctx,
             };
             ISO3 pose = m.armor_pose(x.data());
@@ -285,11 +339,11 @@ struct State {
             std::chrono::duration_cast<TimePoint::duration>(std::chrono::duration<double>(dt));
     }
     inline double get_armor_r(int id, auto_aim::ArmorClass armor_number) const {
-        Measure::Ctx ctx {
+        UVMeasure::Ctx ctx {
             .armor_num = armor_num_by_armor_class(armor_number),
             .id = id,
         };
-        Measure m {
+        UVMeasure m {
             .ctx = ctx,
         };
         return m.get_armor_r(x.data());
@@ -332,6 +386,12 @@ struct State {
     }
     inline double outpost02DZ() const noexcept {
         return x[idx::OUTPOST02DZ];
+    }
+    inline double whole_car_roll() const noexcept {
+        return x[idx::W_R];
+    }
+    inline double whole_car_pitch() const noexcept {
+        return x[idx::W_P];
     }
 };
 

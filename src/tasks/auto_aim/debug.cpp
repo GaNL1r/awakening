@@ -117,23 +117,23 @@ void draw_auto_aim(cv::Mat& img, const AutoAimDebugCtx& ctx) {
             double r = camera_info.camera_matrix.at<double>(0, 0) * R
                 / cmd.aim_point.pose.translation().z();
             cv::circle(img, center, r, cv::Scalar(50, 50, 255), 2);
-            if (cmd.fire_advice) {
-                int size = 50;
-                cv::line(
-                    img,
-                    center + cv::Point2f(-size, -size),
-                    center + cv::Point2f(size, size),
-                    cv::Scalar(0, 0, 255),
-                    2
-                );
-                cv::line(
-                    img,
-                    center + cv::Point2f(-size, size),
-                    center + cv::Point2f(size, -size),
-                    cv::Scalar(0, 0, 255),
-                    2
-                );
-            }
+            // if (cmd.fire_advice) {
+            //     int size = 50;
+            //     cv::line(
+            //         img,
+            //         center + cv::Point2f(-size, -size),
+            //         center + cv::Point2f(size, size),
+            //         cv::Scalar(0, 0, 255),
+            //         2
+            //     );
+            //     cv::line(
+            //         img,
+            //         center + cv::Point2f(-size, size),
+            //         center + cv::Point2f(size, -size),
+            //         cv::Scalar(0, 0, 255),
+            //         2
+            //     );
+            // }
             const double scale = 10.0;
 
             const double v_yaw = cmd.v_yaw;
