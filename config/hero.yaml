@@ -77,16 +77,18 @@ armor_detector:
 armor_tracker:
   lost_time_thres: 1.5
   tracking_thres: 10
-  match_gate_at_1m: 1000.0
-  match_gate_not_all_init_at_1m: 10000.0
-  qxyz_common: [20.0, 20.0, 1.0]
-  qyaw_common: 10.0
+  match_gate_at_1m: 50.0
+  match_gate_not_all_init_at_1m: 100.0
+  qxyz_common: [30.0, 30.0, 1.0]
+  qyaw_common: 100.0
   qxyz_output: [1.0, 1.0, 0.5]
   qyaw_output: 0.01
   q_r: 0.0000001
   q_l: 0.0000001
   q_h: 0.0000001
   q_outpost_dz: 0.5
+  q_whole_car_roll_pitch: 0.0000001
+  enable_whole_car_roll_pitch: false
   r_uv_at_1m: 70.0
   r_uv_min: 30.0
   esekf_iter_num: 5

@@ -193,12 +193,6 @@ struct UVMeasure {
         Eigen::Quaternion<T> q_yaw_car_in_odom(
             Eigen::AngleAxis<T>(T(0.0), Eigen::Vector3<T>::UnitZ())
         );
-        // Eigen::Quaternion<T> q_pitch_car_in_odom(
-        //     Eigen::AngleAxis<T>(T(0.0), Eigen::Vector3<T>::UnitY())
-        // );
-        // Eigen::Quaternion<T> q_roll_car_in_odom(
-        //     Eigen::AngleAxis<T>(T(0.0), Eigen::Vector3<T>::UnitX())
-        // );
         Eigen::Quaternion<T> q_pitch_car_in_odom(Eigen::AngleAxis<T>(
             ctx.enable_whole_car_roll_pitch ? x[idx::W_P] : T(0.0),
             Eigen::Vector3<T>::UnitY()
