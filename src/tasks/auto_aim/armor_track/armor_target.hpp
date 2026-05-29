@@ -120,13 +120,22 @@ public:
     void predict_ekf(const TimePoint& timestamp);
     int update(
         std::vector<std::pair<int, Armor>>& a,
+        std::vector<std::tuple<int, bool, Light>>& l,
         const TimePoint& timestamp,
         const CameraInfo& camera_info,
         const ISO3& camera_cv_in_odom
     );
-    std::vector<std::pair<int, Armor>>
-    match(std::vector<Armor>& armors, const CameraInfo& camera_info, const ISO3& camera_cv_in_odom)
-        const noexcept;
+    std::vector<std::pair<int, Armor>> match_armor(
+        std::vector<Armor>& armors,
+        const CameraInfo& camera_info,
+        const ISO3& camera_cv_in_odom
+    ) const noexcept;
+    std::vector<std::tuple<int, bool, Light>> match_light(
+        std::vector<Light>& lights,
+        const std::vector<std::pair<int, Armor>>& matched_armors,
+        const CameraInfo& camera_info,
+        const ISO3& camera_cv_in_odom
+    ) const noexcept;
     armor_point_motion_model::UVMeasure::Ctx uvmeasure_ctx;
     armor_point_motion_model::YPDMeasure::Ctx ypdmeasure_ctx;
     std::optional<armor_point_motion_model::RobotStateESEKF> esekf;

@@ -458,7 +458,9 @@ int main(int argc, char** argv) {
             bool got = detector_sem->try_acquire();
             utils::SemaphoreGuard guard(*detector_sem, got);
             if (got) {
-                armors.armors = armor_detector.detect(frame);
+                auto [ls, as] = armor_detector.detect(frame);
+                armors.armors = as;
+                armors.lights = ls;
                 log_ctx.detect_count++;
             }
         }
@@ -516,6 +518,15 @@ int main(int argc, char** argv) {
                     continue;
                 }
                 armors.armors.push_back(a);
+            }
+            armors.lights.clear();
+            for (auto& l: armors_raw.lights) {
+                if ((enemy_color == EnemyColor::BLUE && l.color == auto_aim::ArmorColor::RED)
+                    || (enemy_color == EnemyColor::RED && l.color == auto_aim::ArmorColor::BLUE))
+                {
+                    continue;
+                }
+                armors.lights.push_back(l);
             }
             auto camera_cv_in_odom =
                 tf->pose_a_in_b(SimpleFrame(armors.frame_id), SimpleFrame::ODOM, armors.timestamp);

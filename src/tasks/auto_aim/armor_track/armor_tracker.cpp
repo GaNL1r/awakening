@@ -124,9 +124,17 @@ struct ArmorTracker::Impl {
 
         if (candidates.empty())
             return false;
-
-        auto matches = target.match(candidates, camera_info, camera_cv_in_odom);
-        int updated = target.update(matches, armors.timestamp, camera_info, camera_cv_in_odom);
+        std::vector<Light> lights;
+        auto matched_armors = target.match_armor(candidates, camera_info, camera_cv_in_odom);
+        auto matched_lights =
+            target.match_light(armors.lights, matched_armors, camera_info, camera_cv_in_odom);
+        int updated = target.update(
+            matched_armors,
+            matched_lights,
+            armors.timestamp,
+            camera_info,
+            camera_cv_in_odom
+        );
         return updated > 0;
     }
     void update_fsm(bool found, size_t i) noexcept {

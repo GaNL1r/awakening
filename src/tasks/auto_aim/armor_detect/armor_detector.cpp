@@ -1,11 +1,14 @@
 #include "armor_detector.hpp"
 #include "armor_infer.hpp"
 #include "tasks/auto_aim/type.hpp"
+#include "utils/common/image.hpp"
 #include "utils/logger.hpp"
 #include "utils/net_detector/net_detector_base.hpp"
 #include <opencv2/core.hpp>
 #include <opencv2/core/mat.hpp>
+#include <opencv2/imgproc.hpp>
 #include <opencv2/opencv.hpp>
+#include <tuple>
 #if USE_OPENVINO
     #include "utils/net_detector/openvino/net_detector_openvino.hpp"
 #endif
@@ -320,16 +323,69 @@ struct ArmorDetector::Impl {
 
         return true;
     }
+    bool is_light(const Light& light) const noexcept {
+        // width / length 比例
+        const float ratio = light.width / light.length;
 
-    std::vector<Armor> detect(const CommonFrame& frame) const {
+        if (ratio <= 0.001 || ratio >= 0.4)
+            return false;
+
+        if (light.tilt_angle >= 40)
+            return false;
+
+        return true;
+    }
+    std::vector<Light> detect_lights(const cv::Mat& src, PixelFormat format) const noexcept {
+        cv::Mat bin;
+        cv::cvtColor(src, bin, cv::COLOR_BGR2GRAY);
+        cv::threshold(bin, bin, 128, 255, cv::THRESH_BINARY);
+        std::vector<std::vector<cv::Point>> contours;
+        cv::findContours(bin, contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
+        std::vector<Light> lights;
+        lights.reserve(contours.size());
+
+        for (const auto& contour: contours) {
+            const int n = static_cast<int>(contour.size());
+            if (n < 6)
+                continue;
+            Light light(contour);
+            if (!is_light(light))
+                continue;
+            int sum_r = 0;
+            int sum_b = 0;
+            for (const auto& pt: contour) {
+                const cv::Vec3b& pix = src.at<cv::Vec3b>(pt);
+                if (format == PixelFormat::BGR) {
+                    sum_r += pix[2];
+                    sum_b += pix[0];
+                } else if (format == PixelFormat::RGB) {
+                    sum_r += pix[0];
+                    sum_b += pix[2];
+                }
+            }
+            const int avg_diff = std::abs(sum_r - sum_b) / n;
+            if (avg_diff <= params_.color_classifier_params->diff_threshold)
+                continue;
+            light.color = (sum_r > sum_b) ? ArmorColor::RED : ArmorColor::BLUE;
+            if (light.color != ArmorColor::NONE) {
+                lights.emplace_back(std::move(light));
+            }
+        }
+        return lights;
+    };
+    std::tuple<std::vector<Light>, std::vector<Armor>> detect(const CommonFrame& frame) const {
         std::vector<Armor> result;
         const auto& src_img = frame.img_frame.src_img;
         const auto roi = src_img(frame.expanded);
 
         auto net_output = net_detector_->detect(roi, frame.img_frame.format);
         result = armor_infer_->process(net_output.output);
+        auto lights = detect_lights(roi, frame.img_frame.format);
+        for (auto& light: lights) {
+            light.add_offset(frame.offset);
+        }
         if (net_output.resized_img.empty()) {
-            return result;
+            return std::make_tuple(lights, result);
         }
         if (params_.number_classifier_params) {
             std::vector<Armor*> batch_armors;
@@ -351,7 +407,7 @@ struct ArmorDetector::Impl {
             armor.add_offset(frame.offset);
         }
 
-        return result;
+        return std::make_tuple(lights, result);
     }
 
     utils::NetDetectorBase::Ptr net_detector_;
@@ -363,7 +419,7 @@ ArmorDetector::ArmorDetector(const YAML::Node& config) {
 ArmorDetector::~ArmorDetector() noexcept {
     _impl.reset();
 }
-std::vector<Armor> ArmorDetector::detect(const CommonFrame& frame) {
+std::tuple<std::vector<Light>, std::vector<Armor>> ArmorDetector::detect(const CommonFrame& frame) {
     return _impl->detect(frame);
 }
 } // namespace awakening::auto_aim

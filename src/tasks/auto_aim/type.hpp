@@ -258,7 +258,7 @@ struct Armor {
         }
         key_points.transform(transform_matrix);
     }
-    inline void draw(cv::Mat& img) {
+    inline void draw(cv::Mat& img) noexcept {
         if (!has_tidy)
             return;
 
@@ -310,15 +310,65 @@ struct Armor {
     }
     Armor() = default;
 };
+
+struct Light: public cv::RotatedRect {
+    Light() = default;
+
+    explicit Light(const std::vector<cv::Point>& contour):
+        cv::RotatedRect(cv::minAreaRect(contour)) {
+        this->center = std::accumulate(
+            contour.begin(),
+            contour.end(),
+            cv::Point2f(0, 0),
+            [n = static_cast<float>(contour.size())](const cv::Point2f& a, const cv::Point& b) {
+                return a + cv::Point2f(b.x, b.y) / n;
+            }
+        );
+
+        cv::Point2f p[4];
+        this->points(p);
+
+        std::sort(p, p + 4, [](const cv::Point2f& a, const cv::Point2f& b) { return a.y < b.y; });
+
+        top = (p[0] + p[1]) / 2;
+        bottom = (p[2] + p[3]) / 2;
+
+        length = cv::norm(top - bottom);
+        width = cv::norm(p[0] - p[1]);
+
+        axis = (top - bottom) / cv::norm(top - bottom);
+
+        tilt_angle =
+            std::atan2(std::abs(top.x - bottom.x), std::abs(top.y - bottom.y)) / CV_PI * 180.0f;
+    }
+    void add_offset(const cv::Point2f& offset) noexcept {
+        this->center += offset;
+        top += offset;
+        bottom += offset;
+    }
+    inline void draw(cv::Mat& img) const noexcept {
+        cv::line(img, top, bottom, cv::Scalar(100, 255, 100), 2);
+    }
+    cv::Point2f top, bottom;
+    ArmorColor color = ArmorColor::NONE;
+    cv::Point2f axis;
+    double length = 0;
+    double width = 0;
+    float tilt_angle = 0;
+};
 struct Armors {
     std::chrono::steady_clock::time_point timestamp;
     int id = -1;
     int frame_id = -1;
     std::vector<Armor> armors;
+    std::vector<Light> lights;
 
-    inline void draw(cv::Mat& img) {
+    inline void draw(cv::Mat& img) noexcept {
         for (auto& armor: armors) {
             armor.draw(img);
+        }
+        for (auto& light: lights) {
+            light.draw(img);
         }
     }
 };

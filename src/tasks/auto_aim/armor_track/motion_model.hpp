@@ -4,6 +4,7 @@
 #include "tasks/base/common.hpp"
 #include "utils/common/type_common.hpp"
 #include "utils/utils.hpp"
+#include <Eigen/src/Core/Matrix.h>
 #include <algorithm>
 #include <ceres/ceres.h>
 #include <ceres/jet.h>
@@ -143,6 +144,15 @@ struct UVMeasure {
                 img_pts_jet[std::to_underlying(auto_aim::ArmorKeyPointsIndex::RIGHT_BOTTOM)].y();
         }
     }
+    // Vec2 get_key_points3d(const VecX& x)const{
+    //     std::vector<Vec3> key_points3d;
+    //     auto pose_in_odom = armor_pose(x.data());
+    //     std::vector<Vec3> object_points = getArmorKeyPoints3D<Vec3>(ctx.armor_number);
+    //     for(const auto& point: object_points) {
+    //         key_points3d.push_back(pose_in_odom * point);
+    //     }
+    //     return key_points3d;
+    // }
 
     inline void h(const VecX& x, UVVecZ& z) const {
         operator()(x.data(), z.data());
