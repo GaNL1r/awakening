@@ -225,22 +225,22 @@ ArmorTarget::uvmeasurement_covariance(const Eigen::Matrix<double, UVZ_N, 1>& z) 
     r.diagonal().setConstant(u_r);
     return r;
 }
-[[nodiscard]] Eigen::Matrix<double, UVZ_N, 1> ArmorTarget::get_uvmeasurement(Armor& a
-) const noexcept {
+[[nodiscard]] Eigen::Matrix<double, UVZ_N, 1>
+ArmorTarget::get_uvmeasurement(Armor& a, bool left) const noexcept {
     Eigen::Matrix<double, UVZ_N, 1> z;
     auto key_points = a.key_points.landmarks();
-    z[idx::LEFT_TOP_X] = key_points[std::to_underlying(ArmorKeyPointsIndex::LEFT_TOP)].x;
-    z[idx::LEFT_TOP_Y] = key_points[std::to_underlying(ArmorKeyPointsIndex::LEFT_TOP)].y;
-    z[idx::LEFT_BOTTOM_X] = key_points[std::to_underlying(ArmorKeyPointsIndex::LEFT_BOTTOM)].x;
-    z[idx::LEFT_BOTTOM_Y] = key_points[std::to_underlying(ArmorKeyPointsIndex::LEFT_BOTTOM)].y;
-    // z[idx::LEFT_MID_X] = key_points[std::to_underlying(ArmorKeyPointsIndex::LEFT_MID)].x;
-    // z[idx::LEFT_MID_Y] = key_points[std::to_underlying(ArmorKeyPointsIndex::LEFT_MID)].y;
-    z[idx::RIGHT_BOTTOM_X] = key_points[std::to_underlying(ArmorKeyPointsIndex::RIGHT_BOTTOM)].x;
-    z[idx::RIGHT_BOTTOM_Y] = key_points[std::to_underlying(ArmorKeyPointsIndex::RIGHT_BOTTOM)].y;
-    z[idx::RIGHT_TOP_X] = key_points[std::to_underlying(ArmorKeyPointsIndex::RIGHT_TOP)].x;
-    z[idx::RIGHT_TOP_Y] = key_points[std::to_underlying(ArmorKeyPointsIndex::RIGHT_TOP)].y;
-    // z[idx::RIGHT_MID_X] = key_points[std::to_underlying(ArmorKeyPointsIndex::RIGHT_MID)].x;
-    // z[idx::RIGHT_MID_Y] = key_points[std::to_underlying(ArmorKeyPointsIndex::RIGHT_MID)].y;
+    if (left) {
+        z[idx::TOP_X] = key_points[std::to_underlying(ArmorKeyPointsIndex::LEFT_TOP)].x;
+        z[idx::TOP_Y] = key_points[std::to_underlying(ArmorKeyPointsIndex::LEFT_TOP)].y;
+        z[idx::BOTTOM_X] = key_points[std::to_underlying(ArmorKeyPointsIndex::LEFT_BOTTOM)].x;
+        z[idx::BOTTOM_Y] = key_points[std::to_underlying(ArmorKeyPointsIndex::LEFT_BOTTOM)].y;
+    } else {
+        z[idx::BOTTOM_X] = key_points[std::to_underlying(ArmorKeyPointsIndex::RIGHT_BOTTOM)].x;
+        z[idx::BOTTOM_Y] = key_points[std::to_underlying(ArmorKeyPointsIndex::RIGHT_BOTTOM)].y;
+        z[idx::TOP_X] = key_points[std::to_underlying(ArmorKeyPointsIndex::RIGHT_TOP)].x;
+        z[idx::TOP_Y] = key_points[std::to_underlying(ArmorKeyPointsIndex::RIGHT_TOP)].y;
+    }
+
     return z;
 }
 
@@ -251,13 +251,13 @@ ArmorTarget::uvmeasurement_covariance(const Eigen::Matrix<double, UVZ_N, 1>& z) 
     ) const noexcept {
     Eigen::Matrix<double, YPDZ_N, YPDZ_N> r;
     const double delta_angle = angles::normalize_angle(z[idx::ROT_YAW] - z[idx::YPD_Y]);
-    // clang-format off
-    r.setZero();  // 全零
+    r.setZero();
     r(idx::YPD_Y, idx::YPD_Y) = 4e-3;
     r(idx::YPD_P, idx::YPD_P) = 4e-3;
-    r(idx::YPD_D, idx::YPD_D) = log(std::abs(delta_angle) + 1) + z[idx::YPD_D]*z[idx::YPD_D]*0.1;
+    r(idx::YPD_D, idx::YPD_D) =
+        log(std::abs(delta_angle) + 1) + z[idx::YPD_D] * z[idx::YPD_D] * 0.1;
     r(idx::ROT_YAW, idx::ROT_YAW) = log(std::abs(z[idx::YPD_D]) + 1) / 200 + 9e-2;
-    // clang-format on
+
     return r;
 }
 [[nodiscard]] Eigen::Matrix<double, armor_point_motion_model::YPDZ_N, 1>
@@ -338,155 +338,84 @@ void ArmorTarget::predict_ekf(const TimePoint& timestamp) {
     target_state.timestamp = timestamp;
     this_id = GOBAL_ID++;
 }
-bool ArmorTarget::update(
-    std::pair<int, Armor>& a,
-    const TimePoint& timestamp,
-    const CameraInfo& camera_info,
-    const ISO3& camera_cv_in_odom
-) {
-    if (!esekf) {
-        throw std::runtime_error("ESEKF is not initialized");
-    }
-    auto armor = a.second;
-    const auto id = a.first;
-    if (id != 0) {
-        jumped = true;
-    }
-    if (outpost_has_all_and_has_set_ids) {
-        if (!outpost_has_all_and_has_set_ids.value().first) {
-            outpost_has_all_and_has_set_ids.value().second[id] = true;
-            int count = 0;
-            for (auto has_id: outpost_has_all_and_has_set_ids.value().second) {
-                if (has_id) {
-                    count++;
-                }
-            }
-            if (count >= outpost_has_all_and_has_set_ids->second.size()) {
-                outpost_has_all_and_has_set_ids->first = true;
-            }
-        }
-    }
-    last_match_id = id;
-    const auto u_r = [&](const Eigen::Matrix<double, UVZ_N, 1>& z) {
-        return uvmeasurement_covariance(z);
-    };
-    const auto cal_residual = [this](
-                                  const Eigen::Matrix<double, UVZ_N, 1>& z_pred,
-                                  const Eigen::Matrix<double, UVZ_N, 1>& z
-                              ) {
-        Eigen::Matrix<double, UVZ_N, 1> r = z - z_pred;
-        return r;
-    };
-    uvmeasure_ctx.id = id;
-    uvmeasure_ctx.camera_cv_in_odom = camera_cv_in_odom;
-    UVMeasure measure { .ctx = uvmeasure_ctx };
-    auto measurement = get_uvmeasurement(armor);
-    target_state.x = esekf.value().update<UVZ_N>(measurement, measure, u_r, cal_residual);
 
-    // const auto u_r = [&](const Eigen::Matrix<double, YPDZ_N, 1>& z) {
-    //     return ypdmeasurement_covariance(z);
-    // };
-    // const auto cal_residual = [this](
-    //                               const Eigen::Matrix<double, YPDZ_N, 1>& z_pred,
-    //                               const Eigen::Matrix<double, YPDZ_N, 1>& z
-    //                           ) {
-    //     Eigen::Matrix<double, YPDZ_N, 1> r = z - z_pred;
-    //     r[idx::YPD_Y] = angles::normalize_angle(z[idx::YPD_Y] - z_pred[idx::YPD_Y]); // yaw
-    //     r[idx::ROT_YAW] =
-    //         angles::normalize_angle(z[idx::ROT_YAW] - z_pred[idx::ROT_YAW]); // ori_yaw
-    //     return r;
-    // };
-    // ypdmeasure_ctx.id = id;
-    // YPDMeasure measure { .ctx = ypdmeasure_ctx };
-    // auto measurement = get_ypdmeasurement(armor);
-    // target_state.x = esekf.value().update<YPDZ_N>(measurement, measure, u_r, cal_residual);
-
-    target_state.timestamp = timestamp;
-    last_update = timestamp;
-    this_id = GOBAL_ID++;
-    update_count++;
-    return true;
-}
-bool ArmorTarget::update(
+int ArmorTarget::update(
     std::vector<std::pair<int, Armor>>& matched,
     const TimePoint& timestamp,
     const CameraInfo& camera_info,
     const ISO3& camera_cv_in_odom
 ) {
     if (matched.empty()) {
-        return false;
+        return 0;
     }
-    if (matched.size() == 1) {
-        return update(matched[0], timestamp, camera_info, camera_cv_in_odom);
-    }
+
     std::vector<std::shared_ptr<RobotStateESEKF::ObsBase>> obs;
+
     const auto u_r = [&](const Eigen::Matrix<double, UVZ_N, 1>& z) {
         return uvmeasurement_covariance(z);
     };
 
-    const auto cal_residual = [this](
-                                  const Eigen::Matrix<double, UVZ_N, 1>& z_pred,
-                                  const Eigen::Matrix<double, UVZ_N, 1>& z
-                              ) {
-        Eigen::Matrix<double, UVZ_N, 1> r = z - z_pred;
-        return r;
+    const auto cal_residual = [](const Eigen::Matrix<double, UVZ_N, 1>& z_pred,
+                                 const Eigen::Matrix<double, UVZ_N, 1>& z) { return z - z_pred; };
+
+    auto add_obs = [&](Armor& armor, int id, bool is_left) {
+        auto ctx = uvmeasure_ctx;
+        ctx.id = id;
+        ctx.is_left = is_left;
+        ctx.camera_cv_in_odom = camera_cv_in_odom;
+
+        UVMeasure measure { .ctx = ctx };
+
+        obs.push_back(
+            esekf.value().make_obs(get_uvmeasurement(armor, is_left), measure, u_r, cal_residual)
+        );
     };
 
-    // const auto u_r = [&](const Eigen::Matrix<double, YPDZ_N, 1>& z) {
-    //     return ypdmeasurement_covariance(z);
-    // };
-    // const auto cal_residual = [this](
-    //                               const Eigen::Matrix<double, YPDZ_N, 1>& z_pred,
-    //                               const Eigen::Matrix<double, YPDZ_N, 1>& z
-    //                           ) {
-    //     Eigen::Matrix<double, YPDZ_N, 1> r = z - z_pred;
-    //     r[idx::YPD_Y] = angles::normalize_angle(z[idx::YPD_Y] - z_pred[idx::YPD_Y]); // yaw
-    //     r[idx::ROT_YAW] =
-    //         angles::normalize_angle(z[idx::ROT_YAW] - z_pred[idx::ROT_YAW]); // ori_yaw
-    //     return r;
-    // };
-    for (const auto& a: matched) {
-        auto armor = a.second;
-        const auto id = a.first;
-        if (id != 0) {
-            jumped = true;
+    auto update_outpost_state = [&](int id) {
+        if (!outpost_has_all_and_has_set_ids || outpost_has_all_and_has_set_ids->first) {
+            return;
         }
-        if (outpost_has_all_and_has_set_ids) {
-            if (!outpost_has_all_and_has_set_ids.value().first) {
-                outpost_has_all_and_has_set_ids.value().second[id] = true;
-                int count = 0;
-                for (auto has_id: outpost_has_all_and_has_set_ids.value().second) {
-                    if (has_id) {
-                        count++;
-                    }
-                }
-                if (count >= outpost_has_all_and_has_set_ids->second.size()) {
-                    outpost_has_all_and_has_set_ids->first = true;
-                }
-            }
+        auto& has_ids = outpost_has_all_and_has_set_ids->second;
+        has_ids[id] = true;
+        if (std::all_of(has_ids.begin(), has_ids.end(), [](bool v) { return v; })) {
+            outpost_has_all_and_has_set_ids->first = true;
         }
+    };
+
+    int updated = 0;
+
+    for (auto& [id, armor]: matched) {
+        jumped |= (id != 0);
+
+        update_outpost_state(id);
+
         last_match_id = id;
 
-        uvmeasure_ctx.id = id;
-        uvmeasure_ctx.camera_cv_in_odom = camera_cv_in_odom;
-        UVMeasure measure { .ctx = uvmeasure_ctx };
-        auto measurement = get_uvmeasurement(armor);
-        obs.push_back(esekf.value().make_obs(measurement, measure, u_r, cal_residual));
+        if (armor.color_classifier) {
+            const auto& colors = armor.color_classifier->light_colors;
 
-        // ypdmeasure_ctx.id = id;
-        // YPDMeasure measure { .ctx = ypdmeasure_ctx };
-        // auto measurement = get_ypdmeasurement(armor);
-        // obs.push_back(esekf.value().make_obs(measurement, measure, u_r, cal_residual));
+            if (colors[Armor::ColorClassifierCtx::LEFT] != ArmorColor::NONE) {
+                add_obs(armor, id, true);
+            }
 
-        update_count++;
+            if (colors[Armor::ColorClassifierCtx::RIGHT] != ArmorColor::NONE) {
+                add_obs(armor, id, false);
+            }
+
+        } else {
+            add_obs(armor, id, true);
+            add_obs(armor, id, false);
+        }
+
+        ++updated;
+        ++update_count;
     }
 
     target_state.x = esekf.value().update_multi(obs);
     target_state.timestamp = timestamp;
     last_update = timestamp;
     this_id = GOBAL_ID++;
-
-    return true;
+    return updated;
 }
 std::vector<std::pair<int, Armor>> ArmorTarget::match(
     std::vector<Armor>& armors,
@@ -713,10 +642,10 @@ std::vector<std::pair<int, Armor>> ArmorTarget::match(
         UVMeasure measure { .ctx = tmp_ctx };
         UVVecZ z_pred;
         measure.h(target_state.x, z_pred);
-        pts.push_back(cv::Point2f(z_pred[idx::LEFT_TOP_X], z_pred[idx::LEFT_TOP_Y]));
-        pts.push_back(cv::Point2f(z_pred[idx::RIGHT_TOP_X], z_pred[idx::RIGHT_TOP_Y]));
-        pts.push_back(cv::Point2f(z_pred[idx::RIGHT_BOTTOM_X], z_pred[idx::RIGHT_BOTTOM_Y]));
-        pts.push_back(cv::Point2f(z_pred[idx::LEFT_BOTTOM_X], z_pred[idx::LEFT_BOTTOM_Y]));
+        // pts.push_back(cv::Point2f(z_pred[idx::LEFT_TOP_X], z_pred[idx::LEFT_TOP_Y]));
+        // pts.push_back(cv::Point2f(z_pred[idx::RIGHT_TOP_X], z_pred[idx::RIGHT_TOP_Y]));
+        // pts.push_back(cv::Point2f(z_pred[idx::RIGHT_BOTTOM_X], z_pred[idx::RIGHT_BOTTOM_Y]));
+        // pts.push_back(cv::Point2f(z_pred[idx::LEFT_BOTTOM_X], z_pred[idx::LEFT_BOTTOM_Y]));
     }
     cv::Rect rect = cv::boundingRect(pts);
     const cv::Rect img_rect(0, 0, image_size.width, image_size.height);

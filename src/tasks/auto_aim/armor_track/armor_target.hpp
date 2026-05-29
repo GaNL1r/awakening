@@ -110,7 +110,7 @@ public:
         uvmeasurement_covariance(const Eigen::Matrix<double, armor_point_motion_model::UVZ_N, 1>& z
         ) const noexcept;
     [[nodiscard]] Eigen::Matrix<double, armor_point_motion_model::UVZ_N, 1>
-    get_uvmeasurement(Armor& a) const noexcept;
+    get_uvmeasurement(Armor& a, bool left) const noexcept;
     [[nodiscard]] Eigen::
         Matrix<double, armor_point_motion_model::YPDZ_N, armor_point_motion_model::YPDZ_N>
         ypdmeasurement_covariance(
@@ -119,13 +119,7 @@ public:
     [[nodiscard]] Eigen::Matrix<double, armor_point_motion_model::YPDZ_N, 1>
     get_ypdmeasurement(Armor& a) const noexcept;
     void predict_ekf(const TimePoint& timestamp);
-    bool update(
-        std::pair<int, Armor>& a,
-        const TimePoint& timestamp,
-        const CameraInfo& camera_info,
-        const ISO3& camera_cv_in_odom
-    );
-    bool update(
+    int update(
         std::vector<std::pair<int, Armor>>& a,
         const TimePoint& timestamp,
         const CameraInfo& camera_info,

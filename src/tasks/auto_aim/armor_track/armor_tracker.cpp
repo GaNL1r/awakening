@@ -125,17 +125,8 @@ struct ArmorTracker::Impl {
         if (candidates.empty())
             return false;
 
-        int updated = 0;
         auto matches = target.match(candidates, camera_info, camera_cv_in_odom);
-
-        // for (auto& m: matches) {
-        //     if (target.update(m, armors.timestamp, camera_info, camera_cv_in_odom))
-        //         ++updated;
-        // }
-        if (target.update(matches, armors.timestamp, camera_info, camera_cv_in_odom)) {
-            updated += matches.size();
-        }
-
+        int updated = target.update(matches, armors.timestamp, camera_info, camera_cv_in_odom);
         return updated > 0;
     }
     void update_fsm(bool found, size_t i) noexcept {

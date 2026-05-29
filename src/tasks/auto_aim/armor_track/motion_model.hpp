@@ -20,21 +20,7 @@ namespace idx {
     constexpr int H = P2;
     constexpr int OUTPOST01DZ = P1;
     constexpr int OUTPOST02DZ = P2;
-    enum {
-        LEFT_TOP_X,
-        LEFT_TOP_Y,
-        LEFT_BOTTOM_X,
-        LEFT_BOTTOM_Y,
-        // LEFT_MID_X,
-        // LEFT_MID_Y,
-        RIGHT_BOTTOM_X,
-        RIGHT_BOTTOM_Y,
-        RIGHT_TOP_X,
-        RIGHT_TOP_Y,
-        // RIGHT_MID_X,
-        // RIGHT_MID_Y,
-        _UVZ_N
-    };
+    enum { TOP_X, TOP_Y, BOTTOM_X, BOTTOM_Y, _UVZ_N };
     enum { YPD_Y, YPD_P, YPD_D, ROT_YAW, _YPD_Z_N };
 } // namespace idx
 constexpr int X_N = idx::X_N;
@@ -115,6 +101,7 @@ struct UVMeasure {
         CameraInfo camera_info;
         auto_aim::ArmorClass armor_number = auto_aim::ArmorClass::UNKNOWN;
         bool enable_whole_car_roll_pitch = false;
+        bool is_left;
     } ctx;
 
     template<typename T>
@@ -136,31 +123,25 @@ struct UVMeasure {
             ctx.camera_info.distortion_coefficients,
             img_pts_jet
         );
-
-        z[idx::LEFT_TOP_X] =
-            img_pts_jet[std::to_underlying(auto_aim::ArmorKeyPointsIndex::LEFT_TOP)].x();
-        z[idx::LEFT_TOP_Y] =
-            img_pts_jet[std::to_underlying(auto_aim::ArmorKeyPointsIndex::LEFT_TOP)].y();
-        z[idx::LEFT_BOTTOM_X] =
-            img_pts_jet[std::to_underlying(auto_aim::ArmorKeyPointsIndex::LEFT_BOTTOM)].x();
-        z[idx::LEFT_BOTTOM_Y] =
-            img_pts_jet[std::to_underlying(auto_aim::ArmorKeyPointsIndex::LEFT_BOTTOM)].y();
-        // z[idx::LEFT_MID_X] =
-        //     img_pts_jet[std::to_underlying(auto_aim::ArmorKeyPointsIndex::LEFT_MID)].x();
-        // z[idx::LEFT_MID_Y] =
-        //     img_pts_jet[std::to_underlying(auto_aim::ArmorKeyPointsIndex::LEFT_MID)].y();
-        z[idx::RIGHT_TOP_X] =
-            img_pts_jet[std::to_underlying(auto_aim::ArmorKeyPointsIndex::RIGHT_TOP)].x();
-        z[idx::RIGHT_TOP_Y] =
-            img_pts_jet[std::to_underlying(auto_aim::ArmorKeyPointsIndex::RIGHT_TOP)].y();
-        z[idx::RIGHT_BOTTOM_X] =
-            img_pts_jet[std::to_underlying(auto_aim::ArmorKeyPointsIndex::RIGHT_BOTTOM)].x();
-        z[idx::RIGHT_BOTTOM_Y] =
-            img_pts_jet[std::to_underlying(auto_aim::ArmorKeyPointsIndex::RIGHT_BOTTOM)].y();
-        // z[idx::RIGHT_MID_X] =
-        //     img_pts_jet[std::to_underlying(auto_aim::ArmorKeyPointsIndex::RIGHT_MID)].x();
-        // z[idx::RIGHT_MID_Y] =
-        //     img_pts_jet[std::to_underlying(auto_aim::ArmorKeyPointsIndex::RIGHT_MID)].y();
+        if (ctx.is_left) {
+            z[idx::TOP_X] =
+                img_pts_jet[std::to_underlying(auto_aim::ArmorKeyPointsIndex::LEFT_TOP)].x();
+            z[idx::TOP_Y] =
+                img_pts_jet[std::to_underlying(auto_aim::ArmorKeyPointsIndex::LEFT_TOP)].y();
+            z[idx::BOTTOM_X] =
+                img_pts_jet[std::to_underlying(auto_aim::ArmorKeyPointsIndex::LEFT_BOTTOM)].x();
+            z[idx::BOTTOM_Y] =
+                img_pts_jet[std::to_underlying(auto_aim::ArmorKeyPointsIndex::LEFT_BOTTOM)].y();
+        } else {
+            z[idx::TOP_X] =
+                img_pts_jet[std::to_underlying(auto_aim::ArmorKeyPointsIndex::RIGHT_TOP)].x();
+            z[idx::TOP_Y] =
+                img_pts_jet[std::to_underlying(auto_aim::ArmorKeyPointsIndex::RIGHT_TOP)].y();
+            z[idx::BOTTOM_X] =
+                img_pts_jet[std::to_underlying(auto_aim::ArmorKeyPointsIndex::RIGHT_BOTTOM)].x();
+            z[idx::BOTTOM_Y] =
+                img_pts_jet[std::to_underlying(auto_aim::ArmorKeyPointsIndex::RIGHT_BOTTOM)].y();
+        }
     }
 
     inline void h(const VecX& x, UVVecZ& z) const {
