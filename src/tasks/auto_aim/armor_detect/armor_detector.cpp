@@ -373,16 +373,19 @@ struct ArmorDetector::Impl {
         }
         return lights;
     };
-    std::tuple<std::vector<Light>, std::vector<Armor>> detect(const CommonFrame& frame) const {
+    std::tuple<std::vector<Light>, std::vector<Armor>> detect(const CommonFrame& frame,bool need_light_detect) const {
         std::vector<Armor> result;
         const auto& src_img = frame.img_frame.src_img;
         const auto roi = src_img(frame.expanded);
 
         auto net_output = net_detector_->detect(roi, frame.img_frame.format);
         result = armor_infer_->process(net_output.output);
-        auto lights = detect_lights(roi, frame.img_frame.format);
-        for (auto& light: lights) {
-            light.add_offset(frame.offset);
+        std::vector<Light> lights;
+        if (need_light_detect) {
+            lights = detect_lights(roi, frame.img_frame.format);
+            for (auto& light: lights) {
+                light.add_offset(frame.offset);
+            }
         }
         if (net_output.resized_img.empty()) {
             return std::make_tuple(lights, result);
@@ -419,7 +422,7 @@ ArmorDetector::ArmorDetector(const YAML::Node& config) {
 ArmorDetector::~ArmorDetector() noexcept {
     _impl.reset();
 }
-std::tuple<std::vector<Light>, std::vector<Armor>> ArmorDetector::detect(const CommonFrame& frame) {
-    return _impl->detect(frame);
+std::tuple<std::vector<Light>, std::vector<Armor>> ArmorDetector::detect(const CommonFrame& frame,bool need_light_detect) {
+    return _impl->detect(frame,need_light_detect);
 }
 } // namespace awakening::auto_aim

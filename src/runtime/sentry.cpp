@@ -486,7 +486,8 @@ int main(int argc, char** argv) {
             bool got = detector_sem->try_acquire();
             utils::SemaphoreGuard guard(*detector_sem, got);
             if (got) {
-                auto [ls, as] = armor_detector.detect(frame);
+                auto target = armor_target.read();
+                auto [ls, as] = armor_detector.detect(frame,target.check());
                 armors.armors = as;
                 armors.lights = ls;
                 log_ctx.detect_count++;
@@ -682,7 +683,7 @@ int main(int argc, char** argv) {
                     bool got = detector_sem->try_acquire();
                     utils::SemaphoreGuard guard(*detector_sem, got);
                     if (got) {
-                        auto [tmp_lights, tmp_armors] = armor_omni.detector_->detect(f);
+                        auto [tmp_lights, tmp_armors] = armor_omni.detector_->detect(f,false);
                         armors.lights = tmp_lights;
                         armors.armors = tmp_armors;
                         for (auto& a: tmp_armors) {
