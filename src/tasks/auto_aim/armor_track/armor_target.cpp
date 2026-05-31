@@ -129,13 +129,10 @@ void ArmorTarget::armor_pnp(
             cv::SOLVEPNP_IPPE
         ))
     {}
-    // auto rvec = rvecs[0];
-    // auto tvec = tvecs[0];
     cv::Mat R_cv_armor_in_camera_cv;
     cv::Rodrigues(rvec, R_cv_armor_in_camera_cv);
     Mat3 R_eigen_armor_in_camera_cv;
     cv::cv2eigen(R_cv_armor_in_camera_cv, R_eigen_armor_in_camera_cv);
-
     Vec3 t_eigen_armor_in_camera_cv;
     cv::cv2eigen(tvec, t_eigen_armor_in_camera_cv);
     a.pose.translation() = t_eigen_armor_in_camera_cv;
@@ -170,7 +167,6 @@ void ArmorTarget::armor_pnp(
         //     error += cv::norm(img_points[i] - key_points[i]);
         // }
         auto center = [](const cv::Point2f& a, const cv::Point2f& b) { return (a + b) * 0.5f; };
-
         auto quad_center = [](const cv::Point2f& lt,
                               const cv::Point2f& lb,
                               const cv::Point2f& rt,
@@ -185,7 +181,6 @@ void ArmorTarget::armor_pnp(
                 key_points[std::to_underlying(ArmorKeyPointsIndex::RIGHT_TOP)]
             )
         );
-
         error += cv::norm(
             center(
                 img_points[std::to_underlying(ArmorKeyPointsIndex::LEFT_BOTTOM)],

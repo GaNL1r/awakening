@@ -281,27 +281,7 @@ int main(int argc, char** argv) {
             .expanded = cv::Rect(0, 0, frame.img_frame.src_img.cols, frame.img_frame.src_img.rows),
             .offset = cv::Point2f(0, 0),
         };
-        auto target = armor_target.read();
-        if (target.check()) {
-            auto camera_cv_in_old = tf->pose_a_in_b(
-                SimpleFrame(frame.frame_id),
-                SimpleFrame(target.get_target_state().frame_id),
-                frame.img_frame.timestamp
-            );
-            target.set_target_state([&](armor_point_motion_model::State& state) {
-                state.predict(frame.img_frame.timestamp, target.target_number);
-            });
-            auto bbox = target.expanded_one_one(
-                frame.img_frame.timestamp,
-                camera_cv_in_old,
-                camera_info,
-                frame.img_frame.src_img.size()
-            );
-            if (bbox.area() > 200) {
-                frame.expanded = bbox;
-                frame.offset = cv::Point2f(bbox.x, bbox.y);
-            }
-        }
+
         return std::make_tuple(std::optional<CommonFrameIo::second_type>(std::move(frame)));
     });
     if (serial || player) {
@@ -451,6 +431,47 @@ int main(int argc, char** argv) {
         if (!blind_sem) {
             blind_sem = std::make_unique<std::counting_semaphore<>>(1);
         }
+        std::optional<cv::Rect> detect_light = std::nullopt;
+        auto target = armor_target.read();
+        if (target.check()) {
+            auto camera_cv_in_old = tf->pose_a_in_b(
+                SimpleFrame(frame.frame_id),
+                SimpleFrame(target.get_target_state().frame_id),
+                frame.img_frame.timestamp
+            );
+            target.set_target_state([&](armor_point_motion_model::State& state) {
+                state.predict(frame.img_frame.timestamp, target.target_number);
+            });
+            auto bbox = target.expanded_one_one(
+                frame.img_frame.timestamp,
+                camera_cv_in_old,
+                camera_info,
+                frame.img_frame.src_img.size()
+            );
+            if (bbox.area() > 200) {
+                frame.expanded = bbox;
+                frame.offset = cv::Point2f(bbox.x, bbox.y);
+            }
+
+            if (target.need_detect_lights()) {
+                detect_light = target.expanded(
+                    frame.img_frame.timestamp,
+                    camera_cv_in_old,
+                    camera_info,
+                    frame.img_frame.src_img.size()
+                );
+                detect_light->x -= detect_light->width * 0.3;
+                detect_light->y -= detect_light->height * 0.3;
+                detect_light->width *= 1.6;
+                detect_light->height *= 1.6;
+                const cv::Rect
+                    img_rect(0, 0, frame.img_frame.src_img.cols, frame.img_frame.src_img.rows);
+                detect_light.value() &= img_rect;
+                if (detect_light->area() > frame.expanded.area()) {
+                    detect_light = frame.expanded;
+                }
+            }
+        }
         auto_aim::Armors armors { .timestamp = frame.img_frame.timestamp,
                                   .id = frame.id,
                                   .frame_id = frame.frame_id };
@@ -458,8 +479,7 @@ int main(int argc, char** argv) {
             bool got = detector_sem->try_acquire();
             utils::SemaphoreGuard guard(*detector_sem, got);
             if (got) {
-                auto target = armor_target.read();
-                auto [ls, as] = armor_detector.detect(frame, target.need_detect_lights());
+                auto [ls, as] = armor_detector.detect(frame, detect_light);
                 armors.armors = as;
                 armors.lights = ls;
                 log_ctx.detect_count++;

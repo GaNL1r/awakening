@@ -144,15 +144,7 @@ struct UVMeasure {
                 img_pts_jet[std::to_underlying(auto_aim::ArmorKeyPointsIndex::RIGHT_BOTTOM)].y();
         }
     }
-    // Vec2 get_key_points3d(const VecX& x)const{
-    //     std::vector<Vec3> key_points3d;
-    //     auto pose_in_odom = armor_pose(x.data());
-    //     std::vector<Vec3> object_points = getArmorKeyPoints3D<Vec3>(ctx.armor_number);
-    //     for(const auto& point: object_points) {
-    //         key_points3d.push_back(pose_in_odom * point);
-    //     }
-    //     return key_points3d;
-    // }
+
 
     inline void h(const VecX& x, UVVecZ& z) const {
         operator()(x.data(), z.data());
@@ -212,7 +204,7 @@ struct UVMeasure {
             Eigen::Vector3<T>::UnitX()
         ));
         car_in_odom.linear() =
-            (q_roll_car_in_odom * q_pitch_car_in_odom * q_yaw_car_in_odom).toRotationMatrix();
+            (q_yaw_car_in_odom * q_pitch_car_in_odom * q_roll_car_in_odom).toRotationMatrix();
         Eigen::Transform<T, 3, Eigen::Isometry> pose_in_odom = car_in_odom * pose_in_car;
         return pose_in_odom;
     }

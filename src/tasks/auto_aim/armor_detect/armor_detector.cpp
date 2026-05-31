@@ -4,8 +4,10 @@
 #include "utils/common/image.hpp"
 #include "utils/logger.hpp"
 #include "utils/net_detector/net_detector_base.hpp"
+#include <future>
 #include <opencv2/core.hpp>
 #include <opencv2/core/mat.hpp>
+#include <opencv2/core/types.hpp>
 #include <opencv2/imgproc.hpp>
 #include <opencv2/opencv.hpp>
 #include <tuple>
@@ -42,7 +44,7 @@ struct ArmorDetector::Impl {
             }
         };
         std::optional<ColorClassifierParams> color_classifier_params;
-        struct LightParams{
+        struct LightParams {
             double bin_threshold;
             double min_wh_ratio;
             double max_wh_ratio;
@@ -54,7 +56,7 @@ struct ArmorDetector::Impl {
                 max_angle = config["max_angle"].as<double>();
             }
         } light_params;
-        
+
         void load(const YAML::Node& config) {
             light_params.load(config["light"]);
             if (config["number_classifier"]["enable"].as<bool>()) {
@@ -65,9 +67,7 @@ struct ArmorDetector::Impl {
                 color_classifier_params = ColorClassifierParams();
                 color_classifier_params->load(config["color_classifier"]);
             }
-         
         }
-        
 
     } params_;
     Impl(const YAML::Node& config) {
@@ -344,7 +344,8 @@ struct ArmorDetector::Impl {
         // width / length 比例
         const float ratio = light.width / light.length;
 
-        if (ratio <= params_.light_params.min_wh_ratio || ratio >= params_.light_params.max_wh_ratio)
+        if (ratio <= params_.light_params.min_wh_ratio
+            || ratio >= params_.light_params.max_wh_ratio)
             return false;
 
         if (light.tilt_angle >= params_.light_params.max_angle)
@@ -352,83 +353,91 @@ struct ArmorDetector::Impl {
 
         return true;
     }
-    std::vector<Light> detect_lights(const cv::Mat& src, PixelFormat format) const noexcept {
-        cv::Mat bin;
-        cv::cvtColor(src, bin, cv::COLOR_BGR2GRAY);
-        cv::threshold(bin, bin, params_.light_params.bin_threshold, 255, cv::THRESH_BINARY);
+    std::vector<Light>
+    detect_lights(const cv::Mat& src, PixelFormat format, cv::Rect bbox) const noexcept {
+        const auto roi = src(bbox);
+        cv::Mat gray, bin;
+        cv::cvtColor(roi, gray, cv::COLOR_BGR2GRAY);
+        cv::threshold(gray, bin, params_.light_params.bin_threshold, 255, cv::THRESH_BINARY);
         std::vector<std::vector<cv::Point>> contours;
         cv::findContours(bin, contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
         std::vector<Light> lights;
         lights.reserve(contours.size());
-
+        const bool use_bgr = (format == PixelFormat::BGR);
+        const int r_idx = use_bgr ? 2 : 0;
+        const int b_idx = use_bgr ? 0 : 2;
         for (const auto& contour: contours) {
             const int n = static_cast<int>(contour.size());
             if (n < 6)
                 continue;
+
             Light light(contour);
             if (!is_light(light))
                 continue;
-            int sum_r = 0;
-            int sum_b = 0;
+
+            int sum_r = 0, sum_b = 0;
             for (const auto& pt: contour) {
-                const cv::Vec3b& pix = src.at<cv::Vec3b>(pt);
-                if (format == PixelFormat::BGR) {
-                    sum_r += pix[2];
-                    sum_b += pix[0];
-                } else if (format == PixelFormat::RGB) {
-                    sum_r += pix[0];
-                    sum_b += pix[2];
-                }
+                const uchar* pix = roi.ptr<uchar>(pt.y) + pt.x * 3;
+                sum_r += pix[r_idx];
+                sum_b += pix[b_idx];
             }
+
             const int avg_diff = std::abs(sum_r - sum_b) / n;
             if (avg_diff <= params_.color_classifier_params->diff_threshold)
                 continue;
+
             light.color = (sum_r > sum_b) ? ArmorColor::RED : ArmorColor::BLUE;
             if (light.color != ArmorColor::NONE) {
                 lights.emplace_back(std::move(light));
             }
         }
         return lights;
-    };
+    }
     std::tuple<std::vector<Light>, std::vector<Armor>>
-    detect(const CommonFrame& frame, bool need_light_detect) const {
-        std::vector<Armor> result;
+    detect(const CommonFrame& frame, const std::optional<cv::Rect>& detect_light) const {
         const auto& src_img = frame.img_frame.src_img;
         const auto roi = src_img(frame.expanded);
-
-        auto net_output = net_detector_->detect(roi, frame.img_frame.format);
-        result = armor_infer_->process(net_output.output);
+        utils::NetDetectorBase::OutPut net_output;
         std::vector<Light> lights;
-        if (need_light_detect) {
-            lights = detect_lights(roi, frame.img_frame.format);
-            for (auto& light: lights) {
-                light.add_offset(frame.offset);
-            }
-        }
-        if (net_output.resized_img.empty()) {
-            return std::make_tuple(lights, result);
-        }
-        if (params_.number_classifier_params) {
-            std::vector<Armor*> batch_armors;
-            for (auto& armor: result) {
-                bool ok = extract_number(net_output.resized_img, armor);
-                if (ok) {
-                    batch_armors.push_back(&armor);
+        std::vector<Armor> result;
+
+        net_output = net_detector_->detect(roi, frame.img_frame.format);
+        result = armor_infer_->process(net_output.output);
+
+        if (!net_output.resized_img.empty()) {
+            if (params_.number_classifier_params) {
+                std::vector<Armor*> batch_armors;
+                batch_armors.reserve(result.size());
+                for (auto& armor: result) {
+                    if (extract_number(net_output.resized_img, armor)) {
+                        batch_armors.push_back(&armor);
+                    }
                 }
+                classify_number_batch(batch_armors);
             }
-            classify_number_batch(batch_armors);
+
+            for (auto& armor: result) {
+                if (params_.color_classifier_params) {
+                    classify_color(net_output.resized_img, armor, frame.img_frame.format);
+                }
+                armor.tidy();
+                armor.transform(net_output.transform_matrix);
+                armor.add_offset(frame.offset);
+            }
         }
 
-        for (auto& armor: result) {
-            if (params_.color_classifier_params) {
-                classify_color(net_output.resized_img, armor, frame.img_frame.format);
+        if (detect_light) {
+            lights = detect_lights(
+                frame.img_frame.src_img,
+                frame.img_frame.format,
+                detect_light.value()
+            );
+            for (auto& light: lights) {
+                light.add_offset(detect_light->tl());
             }
-            armor.tidy();
-            armor.transform(net_output.transform_matrix);
-            armor.add_offset(frame.offset);
         }
 
-        return std::make_tuple(lights, result);
+        return { std::move(lights), std::move(result) };
     }
 
     utils::NetDetectorBase::Ptr net_detector_;
@@ -441,7 +450,7 @@ ArmorDetector::~ArmorDetector() noexcept {
     _impl.reset();
 }
 std::tuple<std::vector<Light>, std::vector<Armor>>
-ArmorDetector::detect(const CommonFrame& frame, bool need_light_detect) {
-    return _impl->detect(frame, need_light_detect);
+ArmorDetector::detect(const CommonFrame& frame, const std::optional<cv::Rect>& detect_light) {
+    return _impl->detect(frame, detect_light);
 }
 } // namespace awakening::auto_aim

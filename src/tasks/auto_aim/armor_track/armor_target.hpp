@@ -30,7 +30,7 @@ struct ArmorTrackerCfg {
     double r_uv_min;
     bool enable_whole_car_roll_pitch;
     bool enable_lights_measure = false;
-    double light_match_length_gate ;
+    double light_match_length_gate;
     double light_match_angle_gate;
     double light_match_pos_gate_by_length_ratio;
     void load(const YAML::Node& config) {
@@ -56,7 +56,8 @@ struct ArmorTrackerCfg {
         enable_lights_measure = config["enable_lights_measure"].as<bool>();
         light_match_length_gate = config["light_match_length_gate"].as<double>();
         light_match_angle_gate = config["light_match_angle_gate"].as<double>();
-        light_match_pos_gate_by_length_ratio = config["light_match_pos_gate_by_length_ratio"].as<double>();
+        light_match_pos_gate_by_length_ratio =
+            config["light_match_pos_gate_by_length_ratio"].as<double>();
     }
 };
 static inline int GOBAL_ID = 0;
