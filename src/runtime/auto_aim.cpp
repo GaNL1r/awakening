@@ -523,7 +523,7 @@ int main(int argc, char** argv) {
             utils::SemaphoreGuard guard(*detector_sem, got);
             if (got) {
                 auto target = armor_target.read();
-                auto [ls, as] = armor_detector.detect(frame,target.check());
+                auto [ls, as] = armor_detector.detect(frame, target.need_detect_lights());
                 armors.armors = as;
                 armors.lights = ls;
                 log_ctx.detect_count++;

@@ -8,6 +8,7 @@
 #include "utils/utils.hpp"
 #include <Eigen/src/Core/Matrix.h>
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdlib>
 #include <opencv2/core.hpp>
@@ -385,13 +386,15 @@ int ArmorTarget::update(
         if (armor.color_classifier) {
             const auto& colors = armor.color_classifier->light_colors;
 
-            if (colors[Armor::ColorClassifierCtx::LEFT] != ArmorColor::NONE) {
-                add_obs(armor, id, true);
-            }
+            // if (colors[Armor::ColorClassifierCtx::LEFT] != ArmorColor::NONE) {
+            //     add_obs(armor, id, true);
+            // }
 
-            if (colors[Armor::ColorClassifierCtx::RIGHT] != ArmorColor::NONE) {
-                add_obs(armor, id, false);
-            }
+            // if (colors[Armor::ColorClassifierCtx::RIGHT] != ArmorColor::NONE) {
+            //     add_obs(armor, id, false);
+            // }
+            add_obs(armor, id, true);
+            add_obs(armor, id, false);
 
         } else {
             add_obs(armor, id, true);
@@ -446,6 +449,12 @@ std::vector<std::pair<int, Armor>> ArmorTarget::match_armor(
     }
 
     for (int j = 0; j < n_obs; ++j) {
+        if (armors[j].number == ArmorClass::OUTPOST) {
+            auto rpy = utils::matrix2euler(armors[j].pose.linear(), utils::EulerOrder::XYZ);
+            if (rpy[1] > 0) {
+                continue;
+            }
+        }
         bool in_gate = false;
         double min_d2 = std::numeric_limits<double>::max();
         for (int id = 0; id < armors_num; ++id) {
@@ -510,110 +519,124 @@ std::vector<std::pair<int, Armor>> ArmorTarget::match_armor(
 }
 std::vector<std::tuple<int, bool, Light>> ArmorTarget::match_light(
     std::vector<Light>& lights,
-    const std::vector<std::pair<int, Armor>>& matched_armors,
+    std::vector<std::pair<int, Armor>>& matched_armors,
     const CameraInfo& camera_info,
     const ISO3& camera_cv_in_odom
 ) const noexcept {
     std::vector<std::tuple<int, bool, Light>> result;
-    if (target_number == ArmorClass::OUTPOST || target_number == ArmorClass::BASE) {
+
+    if (target_number == ArmorClass::OUTPOST || target_number == ArmorClass::BASE
+        || matched_armors.size() != 1)
+    {
         return result;
     }
-    std::vector<std::tuple<cv::Point2f, cv::Point2f, int, bool>> visible_lights;
-    const int armors_num = armor_num();
-    std::vector<bool> looked_armor_idx(armors_num, false);
-    for (auto& m_a: matched_armors) {
-        looked_armor_idx[m_a.first] = true;
-    }
-    std::vector<double> pre_lights_dis;
-    std::vector<std::tuple<cv::Point2f, cv::Point2f, int, bool>> pre_lights;
-    pre_lights_dis.resize(armors_num * 2);
-    pre_lights.resize(armors_num * 2);
-    for (int id = 0; id < armors_num; ++id) {
-        UVMeasure::Ctx uv_ctx {
-            .armor_num = armors_num,
-            .id = id,
-            .camera_cv_in_odom = camera_cv_in_odom,
-            .camera_info = camera_info,
-            .armor_number = target_number,
-        };
-        UVMeasure uv_measure { .ctx = uv_ctx };
-        auto armor_pose_in_odom = uv_measure.armor_pose(target_state.x.data());
-        std::vector<Vec3> object_points = getArmorKeyPoints3D<Vec3>(target_number);
-        std::vector<Vec3> points_in_camera_cv(object_points.size());
-        for (int i = 0; i < object_points.size(); ++i) {
-            auto p = object_points[i];
-            p = armor_pose_in_odom * p;
-            points_in_camera_cv[i] = camera_cv_in_odom.inverse() * p;
-        }
-        UVVecZ z_pred;
-        pre_lights_dis[2 * id] =
-            ((points_in_camera_cv[std::to_underlying(ArmorKeyPointsIndex::LEFT_TOP)]
-              + points_in_camera_cv[std::to_underlying(ArmorKeyPointsIndex::LEFT_BOTTOM)])
-             / 2)
-                .norm();
-        uv_measure.ctx.is_left = true;
-        uv_measure.h(target_state.x, z_pred);
-        pre_lights[2 * id] = std::make_tuple(
-            cv::Point2f(z_pred[idx::TOP_X], z_pred[idx::TOP_Y]),
-            cv::Point2f(z_pred[idx::BOTTOM_X], z_pred[idx::BOTTOM_Y]),
-            id,
-            true
-        );
-        pre_lights_dis[2 * id + 1] =
-            ((points_in_camera_cv[std::to_underlying(ArmorKeyPointsIndex::RIGHT_TOP)]
-              + points_in_camera_cv[std::to_underlying(ArmorKeyPointsIndex::RIGHT_BOTTOM)])
-             / 2)
-                .norm();
-        uv_measure.ctx.is_left = false;
-        uv_measure.h(target_state.x, z_pred);
-        pre_lights[2 * id + 1] = std::make_tuple(
-            cv::Point2f(z_pred[idx::TOP_X], z_pred[idx::TOP_Y]),
-            cv::Point2f(z_pred[idx::BOTTOM_X], z_pred[idx::BOTTOM_Y]),
-            id,
-            false
-        );
-    }
-    std::vector<int> indices(pre_lights_dis.size());
-    std::iota(indices.begin(), indices.end(), 0);
 
-    std::partial_sort(
-        indices.begin(),
-        indices.begin() + std::min<size_t>(4, indices.size()),
-        indices.end(),
-        [&](int a, int b) { return pre_lights_dis[a] < pre_lights_dis[b]; }
+    const int armors_num = armor_num();
+    const int armor_id = matched_armors.front().first;
+    constexpr double max_cost = 1e9;
+
+    auto predict_light = [&](int id, bool is_left) -> std::pair<cv::Point2f, cv::Point2f> {
+        UVMeasure::Ctx ctx { .armor_num = armors_num,
+                             .id = id,
+                             .camera_cv_in_odom = camera_cv_in_odom,
+                             .camera_info = camera_info,
+                             .armor_number = target_number,
+                             .is_left = is_left };
+        UVMeasure measure { .ctx = ctx };
+        UVVecZ z;
+        measure.h(target_state.x, z);
+
+        return {
+            cv::Point2f(z[std::to_underlying(idx::TOP_X)], z[std::to_underlying(idx::TOP_Y)]),
+            cv::Point2f(z[std::to_underlying(idx::BOTTOM_X)], z[std::to_underlying(idx::BOTTOM_Y)])
+        };
+    };
+
+    std::array<std::pair<cv::Point2f, cv::Point2f>, 2> visible_lights {
+        predict_light((armor_id + 3) % 4, false), // 左可见
+        predict_light((armor_id + 1) % 4, true), // 右可见
+    };
+
+    const int n_obs = static_cast<int>(lights.size());
+    std::vector<std::array<double, visible_lights.size()>> cost(
+        n_obs,
+        { max_cost + 1, max_cost + 1 }
     );
 
-    for (size_t i = 0; i < std::min<size_t>(4, indices.size()); ++i) {
-        visible_lights.emplace_back(pre_lights[indices[i]]);
+    auto calc_cost = [&](const Light& light,
+                         const std::pair<cv::Point2f, cv::Point2f>& pred) -> double {
+        if (matched_armors[0].second.key_points.bounding_box().contains(light.top)
+            || matched_armors[0].second.key_points.bounding_box().contains(light.bottom)
+            || matched_armors[0].second.key_points.bounding_box().contains(light.center))
+        {
+            return max_cost + 1;
+        }
+        double pred_len = cv::norm(pred.first - pred.second);
+        double len_err = std::abs(light.length - pred_len);
+        if (len_err > pred_len * cfg.light_match_length_gate) {
+            // AWAKENING_WARN("match out of gate: light length err: {}", len_err);
+            return max_cost + 1;
+        }
+
+        double pred_angle = std::atan2(pred.first.x - pred.second.x, pred.first.y - pred.second.y);
+        double light_angle = std::atan2(light.top.x - light.bottom.x, light.top.y - light.bottom.y);
+        double angle_err = std::abs(angles::normalize_angle(light_angle - pred_angle));
+        if (angle_err > cfg.light_match_angle_gate) {
+            // AWAKENING_WARN("match out of gate: light angle err: {}", angle_err);
+            return max_cost + 1;
+        }
+
+        double pos_err = cv::norm(light.top - pred.first) + cv::norm(light.bottom - pred.second);
+        if (pos_err > pred_len * cfg.light_match_pos_gate_by_length_ratio) {
+            // AWAKENING_WARN("match out of gate: light position err: {}", pos_err);
+            return max_cost + 1;
+        }
+
+        return pos_err;
+    };
+
+    for (int j = 0; j < n_obs; ++j) {
+        for (int i = 0; i < visible_lights.size(); ++i) {
+            cost[j][i] = calc_cost(lights[j], visible_lights[i]);
+        }
     }
-    for (const auto& light: lights) {
-        int best_id = -1;
-        bool best_left;
-        double min_error = 1e9;
-        for (auto& [t, b, id, left]: visible_lights) {
-            double error = 0;
-            error += cv::norm(light.top - t);
-            error += cv::norm(light.bottom - b);
-            double vl_angle = std::atan2(std::abs(t.x - b.x), std::abs(t.y - b.y)) / CV_PI * 180.0f;
-            double angle_error =std::abs(vl_angle - light.tilt_angle);
-            if (angle_error > 60) {
+
+    std::vector<bool> used_obs(n_obs, false);
+    const std::array<std::pair<int, bool>, visible_lights.size()> mapping {
+        std::pair { (armor_id + 3) % 4, false }, // 左可见
+        std::pair { (armor_id + 1) % 4, true }, // 右可见
+    };
+
+    std::array<bool, mapping.size()> used_id { false, false }; // 只匹配左可见/右可见
+
+    while (true) {
+        double best = max_cost;
+        int best_j = -1, best_id = -1;
+
+        for (int j = 0; j < n_obs; ++j) {
+            if (used_obs[j])
                 continue;
-            }
-            double vl_length = cv::norm(t - b);
-            double length_error = std::abs(vl_length - light.length);
-            if (length_error > light.length * 0.5) {
-                continue;
-            }
-            if (error < min_error) {
-                min_error = error;
-                best_id = id;
-                best_left = left;
+            for (int id = 0; id < 2; ++id) {
+                if (used_id[id])
+                    continue;
+                if (cost[j][id] < best) {
+                    best = cost[j][id];
+                    best_j = j;
+                    best_id = id;
+                }
             }
         }
-        if (best_id != -1) {
-            result.push_back(std::make_tuple(best_id, best_left, light));
-        }
+
+        if (best_j < 0 || best_id < 0)
+            break;
+
+        used_obs[best_j] = true;
+        used_id[best_id] = true;
+
+        auto [matched_id, is_left] = mapping[best_id];
+        result.emplace_back(matched_id, is_left, lights[best_j]);
     }
+
     return result;
 }
 [[nodiscard]] cv::Rect ArmorTarget::expanded_one_one(

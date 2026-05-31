@@ -29,6 +29,10 @@ struct ArmorTrackerCfg {
     double r_uv_at_1m;
     double r_uv_min;
     bool enable_whole_car_roll_pitch;
+    bool enable_lights_measure = false;
+    double light_match_length_gate ;
+    double light_match_angle_gate;
+    double light_match_pos_gate_by_length_ratio;
     void load(const YAML::Node& config) {
         esekf_iter_num = config["esekf_iter_num"].as<int>();
         lost_time_thres = config["lost_time_thres"].as<double>();
@@ -49,6 +53,10 @@ struct ArmorTrackerCfg {
         r_uv_at_1m = config["r_uv_at_1m"].as<double>();
         r_uv_min = config["r_uv_min"].as<double>();
         enable_whole_car_roll_pitch = config["enable_whole_car_roll_pitch"].as<bool>();
+        enable_lights_measure = config["enable_lights_measure"].as<bool>();
+        light_match_length_gate = config["light_match_length_gate"].as<double>();
+        light_match_angle_gate = config["light_match_angle_gate"].as<double>();
+        light_match_pos_gate_by_length_ratio = config["light_match_pos_gate_by_length_ratio"].as<double>();
     }
 };
 static inline int GOBAL_ID = 0;
@@ -132,7 +140,7 @@ public:
     ) const noexcept;
     std::vector<std::tuple<int, bool, Light>> match_light(
         std::vector<Light>& lights,
-        const std::vector<std::pair<int, Armor>>& matched_armors,
+        std::vector<std::pair<int, Armor>>& matched_armors,
         const CameraInfo& camera_info,
         const ISO3& camera_cv_in_odom
     ) const noexcept;
@@ -178,6 +186,9 @@ public:
             && std::chrono::duration<double>(Clock::now() - last_update).count()
                 < cfg.lost_time_thres;
         return v;
+    }
+    [[nodiscard]] inline bool need_detect_lights() const noexcept {
+        return check() && cfg.enable_lights_measure;
     }
     [[nodiscard]] inline int armor_num() const noexcept {
         return uvmeasure_ctx.armor_num;

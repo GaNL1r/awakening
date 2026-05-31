@@ -42,7 +42,21 @@ struct ArmorDetector::Impl {
             }
         };
         std::optional<ColorClassifierParams> color_classifier_params;
+        struct LightParams{
+            double bin_threshold;
+            double min_wh_ratio;
+            double max_wh_ratio;
+            double max_angle;
+            void load(const YAML::Node& config) {
+                bin_threshold = config["bin_threshold"].as<double>();
+                min_wh_ratio = config["min_wh_ratio"].as<double>();
+                max_wh_ratio = config["max_wh_ratio"].as<double>();
+                max_angle = config["max_angle"].as<double>();
+            }
+        } light_params;
+        
         void load(const YAML::Node& config) {
+            light_params.load(config["light"]);
             if (config["number_classifier"]["enable"].as<bool>()) {
                 number_classifier_params = NumberClassifierParams();
                 number_classifier_params->load(config["number_classifier"]);
@@ -51,7 +65,10 @@ struct ArmorDetector::Impl {
                 color_classifier_params = ColorClassifierParams();
                 color_classifier_params->load(config["color_classifier"]);
             }
+         
         }
+        
+
     } params_;
     Impl(const YAML::Node& config) {
         params_.load(config);
@@ -327,10 +344,10 @@ struct ArmorDetector::Impl {
         // width / length 比例
         const float ratio = light.width / light.length;
 
-        if (ratio <= 0.001 || ratio >= 0.4)
+        if (ratio <= params_.light_params.min_wh_ratio || ratio >= params_.light_params.max_wh_ratio)
             return false;
 
-        if (light.tilt_angle >= 40)
+        if (light.tilt_angle >= params_.light_params.max_angle)
             return false;
 
         return true;
@@ -338,7 +355,7 @@ struct ArmorDetector::Impl {
     std::vector<Light> detect_lights(const cv::Mat& src, PixelFormat format) const noexcept {
         cv::Mat bin;
         cv::cvtColor(src, bin, cv::COLOR_BGR2GRAY);
-        cv::threshold(bin, bin, 128, 255, cv::THRESH_BINARY);
+        cv::threshold(bin, bin, params_.light_params.bin_threshold, 255, cv::THRESH_BINARY);
         std::vector<std::vector<cv::Point>> contours;
         cv::findContours(bin, contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
         std::vector<Light> lights;
@@ -373,7 +390,8 @@ struct ArmorDetector::Impl {
         }
         return lights;
     };
-    std::tuple<std::vector<Light>, std::vector<Armor>> detect(const CommonFrame& frame,bool need_light_detect) const {
+    std::tuple<std::vector<Light>, std::vector<Armor>>
+    detect(const CommonFrame& frame, bool need_light_detect) const {
         std::vector<Armor> result;
         const auto& src_img = frame.img_frame.src_img;
         const auto roi = src_img(frame.expanded);
@@ -422,7 +440,8 @@ ArmorDetector::ArmorDetector(const YAML::Node& config) {
 ArmorDetector::~ArmorDetector() noexcept {
     _impl.reset();
 }
-std::tuple<std::vector<Light>, std::vector<Armor>> ArmorDetector::detect(const CommonFrame& frame,bool need_light_detect) {
-    return _impl->detect(frame,need_light_detect);
+std::tuple<std::vector<Light>, std::vector<Armor>>
+ArmorDetector::detect(const CommonFrame& frame, bool need_light_detect) {
+    return _impl->detect(frame, need_light_detect);
 }
 } // namespace awakening::auto_aim
