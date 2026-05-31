@@ -186,7 +186,53 @@ inline std::string string_by_armor_class(ArmorClass armor_class) {
                                         "no5",    "outpost", "base", "unknown" };
     return std::string(details[std::to_underlying(armor_class)]);
 }
+struct Light: public cv::RotatedRect {
+    Light() = default;
 
+    explicit Light(const std::vector<cv::Point>& contour, size_t id):
+        cv::RotatedRect(cv::minAreaRect(contour)),
+        id(id) {
+        this->center = std::accumulate(
+            contour.begin(),
+            contour.end(),
+            cv::Point2f(0, 0),
+            [n = static_cast<float>(contour.size())](const cv::Point2f& a, const cv::Point& b) {
+                return a + cv::Point2f(b.x, b.y) / n;
+            }
+        );
+
+        cv::Point2f p[4];
+        this->points(p);
+
+        std::sort(p, p + 4, [](const cv::Point2f& a, const cv::Point2f& b) { return a.y < b.y; });
+
+        top = (p[0] + p[1]) / 2;
+        bottom = (p[2] + p[3]) / 2;
+
+        length = cv::norm(top - bottom);
+        width = cv::norm(p[0] - p[1]);
+
+        axis = (top - bottom) / cv::norm(top - bottom);
+
+        tilt_angle =
+            std::atan2(std::abs(top.x - bottom.x), std::abs(top.y - bottom.y)) / CV_PI * 180.0f;
+    }
+    void add_offset(const cv::Point2f& offset) noexcept {
+        this->center += offset;
+        top += offset;
+        bottom += offset;
+    }
+    inline void draw(cv::Mat& img) const noexcept {
+        cv::line(img, top, bottom, cv::Scalar(100, 255, 100), 2);
+    }
+    cv::Point2f top, bottom;
+    ArmorColor color = ArmorColor::NONE;
+    cv::Point2f axis;
+    double length = 0;
+    double width = 0;
+    float tilt_angle = 0;
+    size_t id;
+};
 struct Armor {
     ArmorColor color = ArmorColor::NONE;
     ArmorClass number = ArmorClass::UNKNOWN;
@@ -194,6 +240,31 @@ struct Armor {
 
     ISO3 pose;
     bool has_tidy = false;
+    struct CvCtx {
+        Light left;
+        Light right;
+        cv::Point2f center;
+        double ratio; // 两灯条的中点连线与长灯条的长度之比
+
+        ArmorKeyPoints2D key_points;
+        bool duplicated = false;
+
+        CvCtx(const Light& left_light, const Light& right_light):
+            left(left_light),
+            right(right_light) {
+            center = (left.center + right.center) / 2;
+            auto left2right = right.center - left.center;
+            auto width = cv::norm(left2right);
+            auto max_lightbar_length = std::max(left.length, right.length);
+            auto min_lightbar_length = std::min(left.length, right.length);
+            ratio = width / max_lightbar_length;
+            key_points.points[std::to_underlying(ArmorKeyPointsIndex::LEFT_TOP)] = left.top;
+            key_points.points[std::to_underlying(ArmorKeyPointsIndex::RIGHT_TOP)] = right.top;
+            key_points.points[std::to_underlying(ArmorKeyPointsIndex::LEFT_BOTTOM)] = left.bottom;
+            key_points.points[std::to_underlying(ArmorKeyPointsIndex::RIGHT_BOTTOM)] = right.bottom;
+        }
+    };
+    std::optional<CvCtx> cv;
     struct NetCtx {
         double confidence = 0;
         ArmorColor color = ArmorColor::NONE;
@@ -203,7 +274,7 @@ struct Armor {
             std::array<std::optional<cv::Point2f>, std::to_underlying(ArmorKeyPointsIndex::N)>>
             tmp_points;
     };
-    NetCtx net;
+    std::optional<NetCtx> net;
     struct NumberClassifierCtx {
         ArmorClass number = ArmorClass::UNKNOWN;
         cv::Mat number_img;
@@ -218,32 +289,39 @@ struct Armor {
     };
     std::optional<ColorClassifierCtx> color_classifier;
     void tidy() {
-        color = net.color;
-        number = net.number;
-        key_points = net.key_points;
+        if (net) {
+            color = net->color;
+            number = net->number;
+            key_points = net->key_points;
 
-        if (number_classifier) {
-            if (number_classifier->number != ArmorClass::UNKNOWN) {
-                number = number_classifier->number;
+            if (number_classifier) {
+                if (number_classifier->number != ArmorClass::UNKNOWN) {
+                    number = number_classifier->number;
+                }
             }
-        }
-        if (color_classifier) {
-            auto l = color_classifier->light_colors[ColorClassifierCtx::LEFT];
-            auto r = color_classifier->light_colors[ColorClassifierCtx::RIGHT];
-            if (l == r) {
-                if (l == ArmorColor::NONE) {
-                    if (color != ArmorColor::NONE || color != ArmorColor::PURPLE) {
-                        color = ArmorColor::NONE;
+            if (color_classifier) {
+                auto l = color_classifier->light_colors[ColorClassifierCtx::LEFT];
+                auto r = color_classifier->light_colors[ColorClassifierCtx::RIGHT];
+                if (l == r) {
+                    if (l == ArmorColor::NONE) {
+                        if (color != ArmorColor::NONE || color != ArmorColor::PURPLE) {
+                            color = ArmorColor::NONE;
+                        }
+                    } else {
+                        color = l;
                     }
-                } else {
+                } else if (l == ArmorColor::NONE && r != ArmorColor::NONE) {
+                    color = r;
+                } else if (r == ArmorColor::NONE && l != ArmorColor::NONE) {
                     color = l;
                 }
-            } else if (l == ArmorColor::NONE && r != ArmorColor::NONE) {
-                color = r;
-            } else if (r == ArmorColor::NONE && l != ArmorColor::NONE) {
-                color = l;
             }
+        } else if (cv) {
+            color = cv->left.color;
+            number = number_classifier->number;
+            key_points = cv->key_points;
         }
+
         has_tidy = true;
     }
     void add_offset(const cv::Point2f& offset) {
@@ -311,51 +389,6 @@ struct Armor {
     Armor() = default;
 };
 
-struct Light: public cv::RotatedRect {
-    Light() = default;
-
-    explicit Light(const std::vector<cv::Point>& contour):
-        cv::RotatedRect(cv::minAreaRect(contour)) {
-        this->center = std::accumulate(
-            contour.begin(),
-            contour.end(),
-            cv::Point2f(0, 0),
-            [n = static_cast<float>(contour.size())](const cv::Point2f& a, const cv::Point& b) {
-                return a + cv::Point2f(b.x, b.y) / n;
-            }
-        );
-
-        cv::Point2f p[4];
-        this->points(p);
-
-        std::sort(p, p + 4, [](const cv::Point2f& a, const cv::Point2f& b) { return a.y < b.y; });
-
-        top = (p[0] + p[1]) / 2;
-        bottom = (p[2] + p[3]) / 2;
-
-        length = cv::norm(top - bottom);
-        width = cv::norm(p[0] - p[1]);
-
-        axis = (top - bottom) / cv::norm(top - bottom);
-
-        tilt_angle =
-            std::atan2(std::abs(top.x - bottom.x), std::abs(top.y - bottom.y)) / CV_PI * 180.0f;
-    }
-    void add_offset(const cv::Point2f& offset) noexcept {
-        this->center += offset;
-        top += offset;
-        bottom += offset;
-    }
-    inline void draw(cv::Mat& img) const noexcept {
-        cv::line(img, top, bottom, cv::Scalar(100, 255, 100), 2);
-    }
-    cv::Point2f top, bottom;
-    ArmorColor color = ArmorColor::NONE;
-    cv::Point2f axis;
-    double length = 0;
-    double width = 0;
-    float tilt_angle = 0;
-};
 struct Armors {
     std::chrono::steady_clock::time_point timestamp;
     int id = -1;

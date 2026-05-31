@@ -129,14 +129,14 @@ inline void nms_merge_sorted_bboxes(
         for (int idx: out_indices) {
             Armor& b = objs[idx];
             const float iou =
-                rect_ioU(a.net.key_points.bounding_box(), b.net.key_points.bounding_box());
+                rect_ioU(a.net->key_points.bounding_box(), b.net->key_points.bounding_box());
             if (std::isnan(iou) || iou > nms_threshold) {
                 keep = false;
                 if (a.number == b.number && a.color == b.color && iou > MERGE_MIN_IOU
-                    && std::abs(a.net.confidence - b.net.confidence) < MERGE_CONF_ERROR)
+                    && std::abs(a.net->confidence - b.net->confidence) < MERGE_CONF_ERROR)
                 {
                     // accumulate points for later averaging
-                    b.net.tmp_points.push_back(a.net.key_points.points);
+                    b.net->tmp_points.push_back(a.net->key_points.points);
                 }
                 break;
             }
@@ -148,7 +148,7 @@ inline void nms_merge_sorted_bboxes(
 
 inline std::vector<Armor> topk_and_nms(std::vector<Armor>& objs) {
     std::sort(objs.begin(), objs.end(), [](const Armor& a, const Armor& b) {
-        return a.net.confidence > b.net.confidence;
+        return a.net->confidence > b.net->confidence;
     });
 
     if (static_cast<int>(objs.size()) > TOP_K)
@@ -163,18 +163,18 @@ inline std::vector<Armor> topk_and_nms(std::vector<Armor>& objs) {
     for (size_t i = 0; i < indices.size(); ++i) {
         result.push_back(std::move(objs[indices[i]]));
         auto& ro = result.back();
-        if (ro.net.tmp_points.size() >= 1) {
+        if (ro.net->tmp_points.size() >= 1) {
             constexpr size_t N = std::to_underlying(ArmorKeyPointsIndex::N);
             std::array<cv::Point2f, N> accum {};
             std::array<int, N> count {};
-            const auto& base_pts_opt = ro.net.key_points.points;
+            const auto& base_pts_opt = ro.net->key_points.points;
             for (size_t k = 0; k < N; ++k) {
                 if (base_pts_opt[k]) {
                     accum[k] += *base_pts_opt[k];
                     count[k]++;
                 }
             }
-            for (const auto& pts_opt: ro.net.tmp_points) {
+            for (const auto& pts_opt: ro.net->tmp_points) {
                 for (size_t k = 0; k < N; ++k) {
                     if (pts_opt[k]) {
                         accum[k] += *pts_opt[k];
@@ -191,8 +191,8 @@ inline std::vector<Armor> topk_and_nms(std::vector<Armor>& objs) {
                     }
                 }
             }
-            ro.net.key_points.points = final_pts;
-            ro.net.tmp_points.clear();
+            ro.net->key_points.points = final_pts;
+            ro.net->tmp_points.clear();
         }
     }
 
@@ -321,14 +321,14 @@ struct ArmorInfer::Impl {
             Armor obj;
             auto& net = obj.net;
             net = Armor::NetCtx();
-            net.color = ModelTraits<Mode::TUP>::COLORS[color_id.x];
-            net.number = ModelTraits<Mode::TUP>::CLASSES[class_id.x];
-            auto& key_points = net.key_points;
+            net->color = ModelTraits<Mode::TUP>::COLORS[color_id.x];
+            net->number = ModelTraits<Mode::TUP>::CLASSES[class_id.x];
+            auto& key_points = net->key_points;
             key_points.points[std::to_underlying(I::LEFT_TOP)] = cv::Point2f(x1, y1);
             key_points.points[std::to_underlying(I::LEFT_BOTTOM)] = cv::Point2f(x2, y2);
             key_points.points[std::to_underlying(I::RIGHT_BOTTOM)] = cv::Point2f(x3, y3);
             key_points.points[std::to_underlying(I::RIGHT_TOP)] = cv::Point2f(x4, y4);
-            net.confidence = confidence;
+            net->confidence = confidence;
             out_objs.push_back(std::move(obj));
         }
         return topk_and_nms(out_objs);
@@ -357,16 +357,16 @@ struct ArmorInfer::Impl {
             auto& net = obj.net;
             net = Armor::NetCtx();
 
-            net.confidence = conf;
+            net->confidence = conf;
             auto color_num = ModelTraits<Mode::AT>::CLASSES[cls];
-            net.color = color_num.first;
-            net.number = color_num.second;
+            net->color = color_num.first;
+            net->number = color_num.second;
             auto getKeyPoints = [&](int k) {
                 float kx = row[6 + 2 * k];
                 float ky = row[6 + 2 * k + 1];
                 return cv::Point2f(kx, ky);
             };
-            auto& key_points = net.key_points;
+            auto& key_points = net->key_points;
             key_points.points[std::to_underlying(I::LEFT_TOP)] = getKeyPoints(0);
             key_points.points[std::to_underlying(I::LEFT_BOTTOM)] = getKeyPoints(1);
             key_points.points[std::to_underlying(I::RIGHT_BOTTOM)] = getKeyPoints(2);

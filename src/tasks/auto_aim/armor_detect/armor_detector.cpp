@@ -4,7 +4,11 @@
 #include "utils/common/image.hpp"
 #include "utils/logger.hpp"
 #include "utils/net_detector/net_detector_base.hpp"
+#include <algorithm>
+#include <cstddef>
+#include <cstdlib>
 #include <future>
+#include <list>
 #include <opencv2/core.hpp>
 #include <opencv2/core/mat.hpp>
 #include <opencv2/core/types.hpp>
@@ -44,21 +48,35 @@ struct ArmorDetector::Impl {
             }
         };
         std::optional<ColorClassifierParams> color_classifier_params;
-        struct LightParams {
-            double bin_threshold;
-            double min_wh_ratio;
-            double max_wh_ratio;
-            double max_angle;
+        struct CvParams {
+            struct LightParams {
+                double bin_threshold;
+                double min_wh_ratio;
+                double max_wh_ratio;
+                double max_angle;
+                void load(const YAML::Node& config) {
+                    bin_threshold = config["bin_threshold"].as<double>();
+                    min_wh_ratio = config["min_wh_ratio"].as<double>();
+                    max_wh_ratio = config["max_wh_ratio"].as<double>();
+                    max_angle = config["max_angle"].as<double>();
+                }
+            } light_params;
+            struct ArmorParams {
+                double min_ratio;
+                double max_ratio;
+                void load(const YAML::Node& config) {
+                    min_ratio = config["min_ratio"].as<double>();
+                    max_ratio = config["max_ratio"].as<double>();
+                }
+            } armor_params;
             void load(const YAML::Node& config) {
-                bin_threshold = config["bin_threshold"].as<double>();
-                min_wh_ratio = config["min_wh_ratio"].as<double>();
-                max_wh_ratio = config["max_wh_ratio"].as<double>();
-                max_angle = config["max_angle"].as<double>();
+                light_params.load(config["light"]);
+                armor_params.load(config["armor"]);
             }
-        } light_params;
+        } cv_params;
 
         void load(const YAML::Node& config) {
-            light_params.load(config["light"]);
+            cv_params.load(config["cv"]);
             if (config["number_classifier"]["enable"].as<bool>()) {
                 number_classifier_params = NumberClassifierParams();
                 number_classifier_params->load(config["number_classifier"]);
@@ -104,6 +122,10 @@ struct ArmorDetector::Impl {
             );
         }
 #endif
+        if (backend == "opencv") {
+            backend_valid = true;
+            net_detector_ = nullptr;
+        }
         if (!backend_valid) {
             throw std::runtime_error("Invalid backend");
         }
@@ -124,7 +146,10 @@ struct ArmorDetector::Impl {
             return false;
         }
 
-        auto key_points = armor.net.key_points.points;
+        auto key_points = (armor.net.has_value()) ? armor.net->key_points.points
+            : (armor.cv.has_value())
+            ? armor.cv->key_points.points
+            : std::array<std::optional<cv::Point2f>, std::to_underlying(ArmorKeyPointsIndex::N)>();
 
         const cv::Point2f& rb =
             key_points[std::to_underlying(ArmorKeyPointsIndex::RIGHT_BOTTOM)].value();
@@ -178,7 +203,7 @@ struct ArmorDetector::Impl {
             AWAKENING_ERROR("[classifyColor] input src is empty or too small!");
             return;
         }
-        auto& key_points = armor.net.key_points.points;
+        auto& key_points = armor.net->key_points.points;
         auto getPt = [&](ArmorKeyPointsIndex idx) -> const cv::Point2f* {
             auto& opt = key_points[std::to_underlying(idx)];
             return opt ? &(*opt) : nullptr;
@@ -341,24 +366,151 @@ struct ArmorDetector::Impl {
         return true;
     }
     bool is_light(const Light& light) const noexcept {
-        // width / length 比例
         const float ratio = light.width / light.length;
 
-        if (ratio <= params_.light_params.min_wh_ratio
-            || ratio >= params_.light_params.max_wh_ratio)
+        if (ratio <= params_.cv_params.light_params.min_wh_ratio
+            || ratio >= params_.cv_params.light_params.max_wh_ratio)
             return false;
 
-        if (light.tilt_angle >= params_.light_params.max_angle)
+        if (light.tilt_angle >= params_.cv_params.light_params.max_angle)
             return false;
 
         return true;
     }
+    void correct_corners(Light& light, const cv::Mat& gray) const noexcept {
+        // 参数保护
+        if (gray.empty() || light.length < 2.f || light.width < 1.f)
+            return;
+
+        constexpr float MAX_BRIGHTNESS = 25.f; // 归一化最大亮度值
+        constexpr float ROI_SCALE = 0.07f; // ROI扩展比例
+        constexpr float SEARCH_START = 0.4f; // 搜索起始位置比例
+        constexpr float SEARCH_END = 0.6f; // 搜索结束位置比例
+
+        // 扩展ROI
+        cv::Rect roi_box = light.boundingRect();
+        roi_box.x -= static_cast<int>(roi_box.width * ROI_SCALE);
+        roi_box.y -= static_cast<int>(roi_box.height * ROI_SCALE);
+        roi_box.width += static_cast<int>(2 * roi_box.width * ROI_SCALE);
+        roi_box.height += static_cast<int>(2 * roi_box.height * ROI_SCALE);
+
+        // 边界约束
+        roi_box &= cv::Rect(0, 0, gray.cols, gray.rows);
+        if (roi_box.width <= 0 || roi_box.height <= 0)
+            return;
+
+        // 提取ROI并归一化
+        cv::Mat roi = gray(roi_box);
+        const float mean_val = static_cast<float>(cv::mean(roi)[0]);
+        roi.convertTo(roi, CV_32F);
+        cv::normalize(roi, roi, 0.f, MAX_BRIGHTNESS, cv::NORM_MINMAX);
+
+        // 计算质心
+        const cv::Moments moments = cv::moments(roi);
+        if (std::abs(moments.m00) < 1e-6f)
+            return; // 避免除零
+
+        const cv::Point2f centroid(
+            moments.m10 / moments.m00 + roi_box.x,
+            moments.m01 / moments.m00 + roi_box.y
+        );
+
+        // 生成稀疏点云（优化性能）
+        std::vector<cv::Point2f> points;
+        for (int i = 0; i < roi.rows; ++i) {
+            for (int j = 0; j < roi.cols; ++j) {
+                const float weight = roi.at<float>(i, j);
+                if (weight > 1e-3f) {
+                    points.emplace_back(static_cast<float>(j), static_cast<float>(i));
+                }
+            }
+        }
+        if (points.size() < 2)
+            return; // PCA需要至少两个点
+
+        // PCA计算对称轴方向
+        cv::PCA pca(cv::Mat(points).reshape(1), cv::Mat(), cv::PCA::DATA_AS_ROW);
+        cv::Point2f axis(pca.eigenvectors.at<float>(0, 0), pca.eigenvectors.at<float>(0, 1));
+        float axis_norm = cv::norm(axis);
+        if (axis_norm < 1e-6f)
+            return; // 避免零向量
+        axis /= axis_norm;
+        if (axis.y > 0)
+            axis = -axis; // 统一方向
+
+        // 搜索角点
+        const auto find_corner = [&](int direction, cv::Point2f raw) -> cv::Point2f {
+            const float dx = axis.x * direction;
+            const float dy = axis.y * direction;
+            const float search_length = light.length * (SEARCH_END - SEARCH_START);
+
+            std::vector<cv::Point2f> candidates;
+            const int half_width = std::max(0, static_cast<int>((light.width - 2.f) * 0.5f));
+
+            for (int i_offset = -half_width; i_offset <= half_width; ++i_offset) {
+                cv::Point2f start_point(
+                    centroid.x + light.length * SEARCH_START * dx + i_offset,
+                    centroid.y + light.length * SEARCH_START * dy
+                );
+
+                cv::Point2f corner = start_point;
+                float max_diff = 0.f;
+                bool found = false;
+
+                for (float step = 0.f; step < search_length; step += 1.f) {
+                    cv::Point2f cur_point(start_point.x + dx * step, start_point.y + dy * step);
+                    cv::Point2i cur_pt(
+                        static_cast<int>(cur_point.x),
+                        static_cast<int>(cur_point.y)
+                    );
+                    cv::Point2i prev_pt(
+                        static_cast<int>(cur_point.x - dx),
+                        static_cast<int>(cur_point.y - dy)
+                    );
+                    if (cur_pt.x < 0 || cur_pt.x >= gray.cols || cur_pt.y < 0
+                        || cur_pt.y >= gray.rows)
+                        break;
+                    if (prev_pt.x < 0 || prev_pt.x >= gray.cols || prev_pt.y < 0
+                        || prev_pt.y >= gray.rows)
+                        continue;
+                    const float prev_val = static_cast<float>(gray.at<uchar>(prev_pt));
+                    const float cur_val = static_cast<float>(gray.at<uchar>(cur_pt));
+                    const float diff = prev_val - cur_val;
+                    if (diff > max_diff && prev_val > mean_val) {
+                        max_diff = diff;
+                        corner = cv::Point2f(prev_pt.x, prev_pt.y); // 跳变点
+                        found = true;
+                    }
+                }
+                if (found) {
+                    candidates.push_back(corner);
+                }
+            }
+
+            if (candidates.empty())
+                return raw;
+
+            cv::Point2f sum_pt(0.f, 0.f);
+            for (const auto& pt: candidates)
+                sum_pt += pt;
+            return sum_pt / static_cast<float>(candidates.size());
+        };
+
+        light.top = find_corner(1, light.center);
+        light.bottom = find_corner(-1, light.center);
+    }
     std::vector<Light>
     detect_lights(const cv::Mat& src, PixelFormat format, cv::Rect bbox) const noexcept {
-        const auto roi = src(bbox);
+        const auto detect_roi = src(bbox);
         cv::Mat gray, bin;
-        cv::cvtColor(roi, gray, cv::COLOR_BGR2GRAY);
-        cv::threshold(gray, bin, params_.light_params.bin_threshold, 255, cv::THRESH_BINARY);
+        cv::cvtColor(detect_roi, gray, cv::COLOR_BGR2GRAY);
+        cv::threshold(
+            gray,
+            bin,
+            params_.cv_params.light_params.bin_threshold,
+            255,
+            cv::THRESH_BINARY
+        );
         std::vector<std::vector<cv::Point>> contours;
         cv::findContours(bin, contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
         std::vector<Light> lights;
@@ -366,18 +518,19 @@ struct ArmorDetector::Impl {
         const bool use_bgr = (format == PixelFormat::BGR);
         const int r_idx = use_bgr ? 2 : 0;
         const int b_idx = use_bgr ? 0 : 2;
+        size_t l_id = 0;
         for (const auto& contour: contours) {
             const int n = static_cast<int>(contour.size());
             if (n < 6)
                 continue;
 
-            Light light(contour);
+            Light light(contour, l_id++);
             if (!is_light(light))
                 continue;
 
             int sum_r = 0, sum_b = 0;
             for (const auto& pt: contour) {
-                const uchar* pix = roi.ptr<uchar>(pt.y) + pt.x * 3;
+                const uchar* pix = detect_roi.ptr<uchar>(pt.y) + pt.x * 3;
                 sum_r += pix[r_idx];
                 sum_b += pix[b_idx];
             }
@@ -388,13 +541,14 @@ struct ArmorDetector::Impl {
 
             light.color = (sum_r > sum_b) ? ArmorColor::RED : ArmorColor::BLUE;
             if (light.color != ArmorColor::NONE) {
+                correct_corners(light, gray);
                 lights.emplace_back(std::move(light));
             }
         }
         return lights;
     }
     std::tuple<std::vector<Light>, std::vector<Armor>>
-    detect(const CommonFrame& frame, const std::optional<cv::Rect>& detect_light) const {
+    detect_net(const CommonFrame& frame, const std::optional<cv::Rect>& detect_light) const {
         const auto& src_img = frame.img_frame.src_img;
         const auto roi = src_img(frame.expanded);
         utils::NetDetectorBase::OutPut net_output;
@@ -435,9 +589,152 @@ struct ArmorDetector::Impl {
             for (auto& light: lights) {
                 light.add_offset(detect_light->tl());
             }
+            for (auto& armor: result) {
+                auto l_len = cv::norm(
+                    armor.key_points.points[std::to_underlying(ArmorKeyPointsIndex::LEFT_TOP)]
+                        .value()
+                    - armor.key_points.points[std::to_underlying(ArmorKeyPointsIndex::RIGHT_TOP)]
+                          .value()
+                );
+                auto l_center =
+                    (armor.key_points.points[std::to_underlying(ArmorKeyPointsIndex::LEFT_TOP)]
+                         .value()
+                     + armor.key_points.points[std::to_underlying(ArmorKeyPointsIndex::RIGHT_TOP)]
+                           .value())
+                    / 2;
+                auto r_len = cv::norm(
+                    armor.key_points.points[std::to_underlying(ArmorKeyPointsIndex::LEFT_BOTTOM)]
+                        .value()
+                    - armor.key_points.points[std::to_underlying(ArmorKeyPointsIndex::RIGHT_BOTTOM)]
+                          .value()
+                );
+                auto r_center =
+                    (armor.key_points.points[std::to_underlying(ArmorKeyPointsIndex::LEFT_BOTTOM)]
+                         .value()
+                     + armor.key_points
+                           .points[std::to_underlying(ArmorKeyPointsIndex::RIGHT_BOTTOM)]
+                           .value())
+                    / 2;
+                for (auto& light: lights) {
+                    auto bbox = light.boundingRect();
+                    if (bbox.contains(l_center) && std::abs(l_len - light.width) < l_len * 0.2) {
+                        armor.key_points.points[std::to_underlying(ArmorKeyPointsIndex::LEFT_TOP)]
+                            .value() = light.top;
+                        armor.key_points
+                            .points[std::to_underlying(ArmorKeyPointsIndex::LEFT_BOTTOM)]
+                            .value() = light.bottom;
+                        break;
+                    } else if (bbox.contains(r_center) && std::abs(r_len - light.width) < r_len * 0.2)
+                    {
+                        armor.key_points.points[std::to_underlying(ArmorKeyPointsIndex::RIGHT_TOP)]
+                            .value() = light.top;
+                        armor.key_points
+                            .points[std::to_underlying(ArmorKeyPointsIndex::RIGHT_BOTTOM)]
+                            .value() = light.bottom;
+                        break;
+                    }
+                }
+            }
         }
 
         return { std::move(lights), std::move(result) };
+    }
+    bool is_armor(const Armor& armor) const {
+        auto ratio_ok = armor.cv->ratio > params_.cv_params.armor_params.min_ratio
+            && armor.cv->ratio < params_.cv_params.armor_params.max_ratio;
+        return ratio_ok;
+    }
+
+    std::tuple<std::vector<Light>, std::vector<Armor>>
+    detect_cv(const CommonFrame& frame, const std::optional<cv::Rect>& detect_light) const {
+        const auto& src_img = frame.img_frame.src_img;
+        auto bbox = detect_light ? detect_light.value() : frame.expanded;
+
+        std::vector<Light> lights;
+        std::vector<Armor> result;
+
+        lights = detect_lights(frame.img_frame.src_img, frame.img_frame.format, bbox);
+        for (auto& light: lights) {
+            light.add_offset(bbox.tl());
+        }
+        std::sort(lights.begin(), lights.end(), [](const Light& a, const Light& b) {
+            return a.center.x < b.center.x;
+        });
+        std::list<Armor> tmp_armors;
+        for (auto left = lights.begin(); left != lights.end(); left++) {
+            for (auto right = std::next(left); right != lights.end(); right++) {
+                if (left->color != right->color) {
+                    continue;
+                }
+                Armor armor;
+                armor.cv.emplace(*left, *right);
+                if (!is_armor(armor)) {
+                    continue;
+                }
+                if (!extract_number(src_img, armor)) {
+                    continue;
+                }
+                tmp_armors.push_back(armor);
+            }
+        }
+        std::vector<Armor*> batch_armors;
+        batch_armors.reserve(tmp_armors.size());
+        for (auto& armor: tmp_armors) {
+            batch_armors.push_back(&armor);
+        }
+        classify_number_batch(batch_armors);
+        tmp_armors.remove_if([](const Armor& a) {
+            bool invalid = false;
+            if (a.number_classifier->number == ArmorClass::UNKNOWN) {
+                invalid = true;
+            }
+            return invalid;
+        });
+        for (auto armor1 = tmp_armors.begin(); armor1 != tmp_armors.end(); ++armor1) {
+            for (auto armor2 = std::next(armor1); armor2 != tmp_armors.end(); ++armor2) {
+                if (armor1->cv->left.id != armor2->cv->left.id
+                    && armor1->cv->left.id != armor2->cv->right.id
+                    && armor1->cv->right.id != armor2->cv->left.id
+                    && armor1->cv->right.id != armor2->cv->right.id)
+                {
+                    continue;
+                }
+                if (armor1->cv->left.id == armor2->cv->left.id
+                    || armor1->cv->right.id == armor2->cv->right.id) {
+                    auto area1 = armor1->number_classifier->number_img.cols
+                        * armor1->number_classifier->number_img.rows;
+                    auto area2 = armor2->number_classifier->number_img.cols
+                        * armor2->number_classifier->number_img.rows;
+                    if (area1 < area2)
+                        armor2->cv->duplicated = true;
+                    else
+                        armor1->cv->duplicated = true;
+                }
+                if (armor1->cv->left.id == armor2->cv->right.id
+                    || armor1->cv->right.id == armor2->cv->left.id) {
+                    if (armor1->number_classifier->confidence
+                        < armor2->number_classifier->confidence)
+                        armor1->cv->duplicated = true;
+                    else
+                        armor2->cv->duplicated = true;
+                }
+            }
+        }
+        for (auto& armor: tmp_armors) {
+            if (!armor.cv->duplicated) {
+                armor.tidy();
+                result.push_back(armor);
+            }
+        }
+        return { std::move(lights), std::move(result) };
+    }
+    std::tuple<std::vector<Light>, std::vector<Armor>>
+    detect(const CommonFrame& frame, const std::optional<cv::Rect>& detect_light) const {
+        if (net_detector_) {
+            return detect_net(frame, detect_light);
+        } else {
+            return detect_cv(frame, detect_light);
+        }
     }
 
     utils::NetDetectorBase::Ptr net_detector_;

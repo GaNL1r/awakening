@@ -49,7 +49,7 @@ armor_detector:
     model_type: tup
     conf_threshold: 0.2
   net_detector:
-    backend: openvino
+    backend: opencv
     openvino:
       model_path: ${ROOT_DIR}/model/opt-1208-001.onnx
       device_name: "GPU"
@@ -70,11 +70,15 @@ armor_detector:
   color_classifier:
     enable: true
     diff_threshold: 10.0
-  light:
-    bin_threshold: 120.0
-    min_wh_ratio: 0.001
-    max_wh_ratio: 0.4
-    max_angle: 40.0
+  cv:
+    light:
+      bin_threshold: 120.0
+      min_wh_ratio: 0.001
+      max_wh_ratio: 0.4
+      max_angle: 40.0
+    armor:
+      min_ratio: 0.8
+      max_ratio: 5.0
 
 armor_tracker:
   lost_time_thres: 1.5

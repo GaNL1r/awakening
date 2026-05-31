@@ -70,7 +70,17 @@ armor_detector:
   color_classifier:
     enable: true
     diff_threshold: 10.0
+  cv:
+    light:
+      bin_threshold: 120.0
+      min_wh_ratio: 0.001
+      max_wh_ratio: 0.4
+      max_angle: 40.0
+    armor:
+      min_ratio: 0.8
+      max_ratio: 5.0
 
+      
 armor_tracker:
   lost_time_thres: 1.5
   tracking_thres: 10
@@ -86,9 +96,15 @@ armor_tracker:
   q_outpost_dz: 0.5
   q_whole_car_roll_pitch: 0.0000001
   enable_whole_car_roll_pitch: false
+  enable_lights_measure: true
+  light_match_length_gate: 0.2
+  light_match_angle_gate: 0.2
+  light_match_pos_gate_by_length_ratio: 10.0
   r_uv_at_1m: 70.0
   r_uv_min: 30.0
   esekf_iter_num: 5
+
+
 auto_aim_fsm:
   single_whole_up: 1.5 
   single_whole_down: 1.0

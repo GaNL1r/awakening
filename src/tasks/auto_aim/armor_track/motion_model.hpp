@@ -145,7 +145,6 @@ struct UVMeasure {
         }
     }
 
-
     inline void h(const VecX& x, UVVecZ& z) const {
         operator()(x.data(), z.data());
     }
