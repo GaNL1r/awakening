@@ -97,7 +97,7 @@ armor_tracker:
   q_whole_car_roll_pitch: 0.0000001
   enable_whole_car_roll_pitch: false
   enable_lights_measure: true
-  light_match_length_gate: 0.2
+  light_match_length_ratio_gate: 0.2
   light_match_angle_gate: 0.2
   light_match_pos_gate_by_length_ratio: 10.0
   r_uv_at_1m: 70.0

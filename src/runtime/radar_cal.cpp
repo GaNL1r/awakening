@@ -56,7 +56,7 @@ int main(int argc, char** argv) {
     if (cal_type == 1) {
         radar_detect::RMUC2026Map map(config["map"], radar_detect::SelfColor::RED);
         map.edit();
-        map.dump_yaml("guess.yaml");
+        map.dump_yaml("output/guess.yaml");
     } else {
         Scheduler s;
         std::unique_ptr<VideoPlayer> video;
@@ -85,7 +85,7 @@ int main(int argc, char** argv) {
                 cv::imshow("Image", img);
                 auto key = cv::waitKey(1);
                 if (key == 's') {
-                    cv::imwrite("out.png", img);
+                    cv::imwrite("output/out.png", img);
                 }
                 return;
             });
@@ -187,10 +187,10 @@ int main(int argc, char** argv) {
                         node["bboxes"].push_back(item);
                     }
 
-                    std::ofstream fout("bbox.yaml");
+                    std::ofstream fout("output/bbox.yaml");
                     fout << node;
 
-                    AWAKENING_INFO("Saved bbox_image.png and bbox.yaml");
+                    AWAKENING_INFO("Saved output/bbox_image.png and bbox.yaml");
                 }
 
                 // 清空

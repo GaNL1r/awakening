@@ -415,7 +415,7 @@ int main(int argc, char** argv) {
                 );
                 enemy_color = EnemyColor(robo.detect_color);
                 bullet_speed = robo.bullet_speed;
-                robo.update_log();
+                robo.update_log(delay);
                 static uint32_t last_bullet_count = 0;
                 if (robo.bullet_count > last_bullet_count) {
                     auto shoot_in_odom =
@@ -502,7 +502,7 @@ int main(int argc, char** argv) {
                 SimpleFrame(target.get_target_state().frame_id),
                 frame.img_frame.timestamp
             );
-            target.set_target_state([&](armor_point_motion_model::State& state) {
+            target.set_target_state([&](auto_aim::armor_point_motion_model::State& state) {
                 state.predict(frame.img_frame.timestamp, target.target_number);
             });
             auto bbox = target.expanded_one_one(
@@ -623,12 +623,15 @@ int main(int argc, char** argv) {
         gimbal_odom_state_in_odom.predict(Clock::now());
         target.set_target_state([&](auto& s) {
             s.frame_id = std::to_underlying(SimpleFrame::GIMBAL_ODOM);
-            s.x[armor_point_motion_model::idx::CX] -= gimbal_odom_state_in_odom.pos().x();
-            s.x[armor_point_motion_model::idx::CY] -= gimbal_odom_state_in_odom.pos().y();
-            s.x[armor_point_motion_model::idx::CZ] -= gimbal_odom_state_in_odom.pos().z();
-            s.x[armor_point_motion_model::idx::VCX] -= gimbal_odom_state_in_odom.vel().x();
-            s.x[armor_point_motion_model::idx::VCY] -= gimbal_odom_state_in_odom.vel().y();
-            s.x[armor_point_motion_model::idx::VCZ] -= gimbal_odom_state_in_odom.vel().z();
+            s.x[auto_aim::armor_point_motion_model::idx::CX] -= gimbal_odom_state_in_odom.pos().x();
+            s.x[auto_aim::armor_point_motion_model::idx::CY] -= gimbal_odom_state_in_odom.pos().y();
+            s.x[auto_aim::armor_point_motion_model::idx::CZ] -= gimbal_odom_state_in_odom.pos().z();
+            s.x[auto_aim::armor_point_motion_model::idx::VCX] -=
+                gimbal_odom_state_in_odom.vel().x();
+            s.x[auto_aim::armor_point_motion_model::idx::VCY] -=
+                gimbal_odom_state_in_odom.vel().y();
+            s.x[auto_aim::armor_point_motion_model::idx::VCZ] -=
+                gimbal_odom_state_in_odom.vel().z();
         });
         target.this_id = old_this_id;
         GimbalCmd cmd {

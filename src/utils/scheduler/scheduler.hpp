@@ -19,7 +19,6 @@
 
 namespace awakening {
 
-// 简单的固定大小线程池，用于替换 TBB
 class ThreadPool {
 public:
     explicit ThreadPool(size_t num_threads): stop_(false), active_tasks_(0) {
@@ -70,14 +69,13 @@ public:
         condition_.notify_one();
     }
 
-    // 清空尚未开始的任务
+
     void cancel_pending() {
         std::lock_guard lock(mutex_);
         std::queue<std::function<void()>> empty;
         std::swap(tasks_, empty);
     }
 
-    // 等待所有已提交任务完成
     void wait() {
         std::unique_lock lock(mutex_);
         finished_condition_.wait(lock, [this] { return tasks_.empty() && active_tasks_ == 0; });
@@ -314,7 +312,7 @@ private:
     std::vector<RateWorker> rate_workers_;
     std::vector<std::jthread> rate_threads_;
 
-    ThreadPool pool_; // 替代 tbb::task_arena 和 tbb::task_group
+    ThreadPool pool_; 
 
     std::atomic<bool> running_ { false };
     bool built_ { false };

@@ -13,10 +13,10 @@
 #include <optional>
 #include <utility>
 #include <vector>
-namespace awakening::armor_point_motion_model {
+namespace awakening::auto_aim::armor_point_motion_model {
 
 namespace idx {
-    enum { CX, VCX, CY, VCY, CZ, VCZ, YAW, VYAW, R, P1, P2, W_R, W_P, X_N };
+    enum { CX, VCX, CY, VCY, CZ, VCZ, YAW, VYAW, R, P1, P2, X_N };
     constexpr int L = P1;
     constexpr int H = P2;
     constexpr int OUTPOST01DZ = P1;
@@ -35,7 +35,30 @@ inline T normalize_angle(T a) {
     const T two_pi = T(2.0 * M_PI);
     return a - two_pi * floor((a + T(M_PI)) / two_pi);
 }
+// template<typename T>
+// inline Eigen::Vector<T, 3> armor_vel(const T x[X_N], int id, int armor_num) {
+//     auto yaw = normalize_angle(x[idx::YAW] + T(id) * T(2.0 * M_PI / armor_num));
+//     const bool use_lh = (armor_num == 4) && (id & 1);
+//     const T r = use_lh ? x[idx::R] + x[idx::L] : x[idx::R];
+//     Eigen::Vector<T, 3> p(-ceres::cos(yaw) * r, -ceres::sin(yaw) * r, T(0));
+//     Eigen::Vector<T, 3> omega(0.0, 0.0, x[idx::VYAW]);
 
+//     Eigen::Vector<T, 3> vel_armor_in_car = omega.cross(p);
+//     Eigen::Vector<T, 3> vel_car_in_odom(x[idx::VCX], x[idx::VCY], x[idx::VCZ]);
+//     Eigen::Transform<T, 3, Eigen::Isometry> car_in_odom =
+//         Eigen::Transform<T, 3, Eigen::Isometry>::Identity();
+//     car_in_odom.translation() << x[idx::CX], x[idx::CY], x[idx::CZ];
+//     Eigen::Quaternion<T> q_yaw_car_in_odom(Eigen::AngleAxis<T>(T(0.0), Eigen::Vector3<T>::UnitZ()));
+//     Eigen::Quaternion<T> q_pitch_car_in_odom(Eigen::AngleAxis<T>(T(0.0), Eigen::Vector3<T>::UnitY())
+//     );
+//     Eigen::Quaternion<T> q_roll_car_in_odom(Eigen::AngleAxis<T>(T(0.0), Eigen::Vector3<T>::UnitX())
+//     );
+//     car_in_odom.linear() =
+//         (q_yaw_car_in_odom * q_pitch_car_in_odom * q_roll_car_in_odom).toRotationMatrix();
+//     Eigen::Vector<T, 3> vel_armor_in_odom =
+//         vel_car_in_odom + (car_in_odom.linear() * vel_armor_in_car);
+//     return vel_armor_in_odom;
+// }
 struct Predict {
     double dt { 0.0 };
 
@@ -101,7 +124,6 @@ struct UVMeasure {
         ISO3 camera_cv_in_odom = ISO3::Identity();
         CameraInfo camera_info;
         auto_aim::ArmorClass armor_number = auto_aim::ArmorClass::UNKNOWN;
-        bool enable_whole_car_roll_pitch = false;
         bool is_left;
     } ctx;
 
@@ -194,14 +216,12 @@ struct UVMeasure {
         Eigen::Quaternion<T> q_yaw_car_in_odom(
             Eigen::AngleAxis<T>(T(0.0), Eigen::Vector3<T>::UnitZ())
         );
-        Eigen::Quaternion<T> q_pitch_car_in_odom(Eigen::AngleAxis<T>(
-            ctx.enable_whole_car_roll_pitch ? x[idx::W_P] : T(0.0),
-            Eigen::Vector3<T>::UnitY()
-        ));
-        Eigen::Quaternion<T> q_roll_car_in_odom(Eigen::AngleAxis<T>(
-            ctx.enable_whole_car_roll_pitch ? x[idx::W_R] : T(0.0),
-            Eigen::Vector3<T>::UnitX()
-        ));
+        Eigen::Quaternion<T> q_pitch_car_in_odom(
+            Eigen::AngleAxis<T>(T(0.0), Eigen::Vector3<T>::UnitY())
+        );
+        Eigen::Quaternion<T> q_roll_car_in_odom(
+            Eigen::AngleAxis<T>(T(0.0), Eigen::Vector3<T>::UnitX())
+        );
         car_in_odom.linear() =
             (q_yaw_car_in_odom * q_pitch_car_in_odom * q_roll_car_in_odom).toRotationMatrix();
         Eigen::Transform<T, 3, Eigen::Isometry> pose_in_odom = car_in_odom * pose_in_car;
@@ -366,16 +386,10 @@ struct State {
     inline double outpost02DZ() const noexcept {
         return x[idx::OUTPOST02DZ];
     }
-    inline double whole_car_roll() const noexcept {
-        return x[idx::W_R];
-    }
-    inline double whole_car_pitch() const noexcept {
-        return x[idx::W_P];
-    }
 };
 
 // using RobotStateEKF = kalman_hybird_lib::ExtendedKalmanFilter<X_N, Z_N, Predict, Measure>;
 
 using RobotStateESEKF = kalman_hybird_lib::ErrorStateEKF<X_N, Predict>;
 
-} // namespace awakening::armor_point_motion_model
+} // namespace awakening::auto_aim::armor_point_motion_model

@@ -43,7 +43,7 @@ int main(int argc, char** argv) {
         auto robo_opt = ReceiveRobotData::create(data);
         if (robo_opt.has_value()) {
             auto robo = robo_opt.value();
-            robo.update_log();
+            robo.update_log(0);
         }
         auto joint_opt = SentryJointState::create(data);
         if (joint_opt.has_value()) {

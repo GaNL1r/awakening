@@ -19,5 +19,5 @@ int main(int argc, char** argv) {
     }
     map.load_ros_map_yaml(get_arg(1).value());
     map.visualize();
-    map.dump_yaml(second_arg.value_or("rmuc_2026_map_point.yaml"));
+    map.dump_yaml(second_arg.value_or("output/rmuc_2026_map_point.yaml"));
 }

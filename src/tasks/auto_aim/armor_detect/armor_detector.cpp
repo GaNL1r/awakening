@@ -581,59 +581,45 @@ struct ArmorDetector::Impl {
         }
 
         if (detect_light) {
-            lights = detect_lights(
-                frame.img_frame.src_img,
-                frame.img_frame.format,
-                detect_light.value()
-            );
+            lights = detect_lights(frame.img_frame.src_img, frame.img_frame.format, *detect_light);
+
             for (auto& light: lights) {
                 light.add_offset(detect_light->tl());
             }
+
             for (auto& armor: result) {
-                auto l_len = cv::norm(
-                    armor.key_points.points[std::to_underlying(ArmorKeyPointsIndex::LEFT_TOP)]
-                        .value()
-                    - armor.key_points.points[std::to_underlying(ArmorKeyPointsIndex::RIGHT_TOP)]
-                          .value()
-                );
-                auto l_center =
-                    (armor.key_points.points[std::to_underlying(ArmorKeyPointsIndex::LEFT_TOP)]
-                         .value()
-                     + armor.key_points.points[std::to_underlying(ArmorKeyPointsIndex::RIGHT_TOP)]
-                           .value())
-                    / 2;
-                auto r_len = cv::norm(
-                    armor.key_points.points[std::to_underlying(ArmorKeyPointsIndex::LEFT_BOTTOM)]
-                        .value()
-                    - armor.key_points.points[std::to_underlying(ArmorKeyPointsIndex::RIGHT_BOTTOM)]
-                          .value()
-                );
-                auto r_center =
-                    (armor.key_points.points[std::to_underlying(ArmorKeyPointsIndex::LEFT_BOTTOM)]
-                         .value()
-                     + armor.key_points
-                           .points[std::to_underlying(ArmorKeyPointsIndex::RIGHT_BOTTOM)]
-                           .value())
-                    / 2;
-                for (auto& light: lights) {
-                    auto bbox = light.boundingRect();
-                    if (bbox.contains(l_center) && std::abs(l_len - light.width) < l_len * 0.2) {
-                        armor.key_points.points[std::to_underlying(ArmorKeyPointsIndex::LEFT_TOP)]
-                            .value() = light.top;
-                        armor.key_points
-                            .points[std::to_underlying(ArmorKeyPointsIndex::LEFT_BOTTOM)]
-                            .value() = light.bottom;
-                        break;
-                    } else if (bbox.contains(r_center) && std::abs(r_len - light.width) < r_len * 0.2)
-                    {
-                        armor.key_points.points[std::to_underlying(ArmorKeyPointsIndex::RIGHT_TOP)]
-                            .value() = light.top;
-                        armor.key_points
-                            .points[std::to_underlying(ArmorKeyPointsIndex::RIGHT_BOTTOM)]
-                            .value() = light.bottom;
-                        break;
+                auto& pts = armor.key_points.points;
+
+                auto try_update_light = [&](ArmorKeyPointsIndex top_idx,
+                                            ArmorKeyPointsIndex bottom_idx) -> bool {
+                    auto& top = pts[std::to_underlying(top_idx)].value();
+                    auto& bottom = pts[std::to_underlying(bottom_idx)].value();
+
+                    const float len = cv::norm(top - bottom);
+                    const cv::Point2f center = (top + bottom) * 0.5f;
+
+                    for (const auto& light: lights) {
+                        const auto bbox = light.boundingRect();
+
+                        if (!bbox.contains(center)) {
+                            continue;
+                        }
+
+                        if (std::abs(len - light.length) > len * 0.2f) {
+                            continue;
+                        }
+
+                        top = light.top;
+                        bottom = light.bottom;
+                        return true;
                     }
-                }
+
+                    return false;
+                };
+
+                try_update_light(ArmorKeyPointsIndex::LEFT_TOP, ArmorKeyPointsIndex::LEFT_BOTTOM);
+
+                try_update_light(ArmorKeyPointsIndex::RIGHT_TOP, ArmorKeyPointsIndex::RIGHT_BOTTOM);
             }
         }
 

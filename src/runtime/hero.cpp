@@ -288,20 +288,33 @@ int main(int argc, char** argv) {
         s.register_task<SerialIO>("receive_serial", [&](SerialIO::second_type&& data) {
             static std::mutex mutex;
             std::lock_guard<std::mutex> lock(mutex);
+            auto now = std::chrono::steady_clock::now();
             if (recorder) {
                 utils::dt_once(
                     [&]() { recorder->record<SerialTag>(data); },
                     std::chrono::milliseconds(10)
                 );
             }
+
             auto robo_opt = ReceiveRobotData::create(data);
             log_ctx.serial_count++;
             if (robo_opt.has_value()) {
                 auto robo = robo_opt.value();
-
+                static uint32_t last_pc = -1;
+                static uint32_t delay = 0;
+                if (robo.time_stamp_pc != last_pc) {
+                    last_pc = robo.time_stamp_pc;
+                    delay = (std::chrono::duration_cast<std::chrono::microseconds>(now - start_tp)
+                                 .count()
+                             - robo.time_stamp_pc
+                             - (robo.time_stamp_send_micro - robo.time_stamp_receive_micro))
+                        / 2.0;
+                }
+                // std::chrono::time_point<std::chrono::steady_clock> packet_time =
+                //     std::chrono::steady_clock::now()
+                //     + std::chrono::microseconds(serial_send_to_image_microseconds);
                 std::chrono::time_point<std::chrono::steady_clock> packet_time =
-                    std::chrono::steady_clock::now()
-                    + std::chrono::microseconds(serial_send_to_image_microseconds);
+                    now - std::chrono::microseconds(delay);
                 double yaw = angles::from_degrees(robo.yaw);
                 double pitch = angles::from_degrees(robo.pitch);
                 double roll = angles::from_degrees(robo.roll);
@@ -335,7 +348,7 @@ int main(int argc, char** argv) {
                 if (bullet_speed > 12.2) {
                     bullet_speed = 12.0;
                 }
-                robo.update_log();
+                robo.update_log(delay);
                 static uint32_t last_bullet_count = 0;
                 if (robo.bullet_count > last_bullet_count) {
                     auto shoot_in_odom =
@@ -439,7 +452,7 @@ int main(int argc, char** argv) {
                 SimpleFrame(target.get_target_state().frame_id),
                 frame.img_frame.timestamp
             );
-            target.set_target_state([&](armor_point_motion_model::State& state) {
+            target.set_target_state([&](auto_aim::armor_point_motion_model::State& state) {
                 state.predict(frame.img_frame.timestamp, target.target_number);
             });
             auto bbox = target.expanded_one_one(
@@ -591,12 +604,15 @@ int main(int argc, char** argv) {
         gimbal_odom_state_in_odom.predict(Clock::now());
         target.set_target_state([&](auto& s) {
             s.frame_id = std::to_underlying(SimpleFrame::GIMBAL_ODOM);
-            s.x[armor_point_motion_model::idx::CX] -= gimbal_odom_state_in_odom.pos().x();
-            s.x[armor_point_motion_model::idx::CY] -= gimbal_odom_state_in_odom.pos().y();
-            s.x[armor_point_motion_model::idx::CZ] -= gimbal_odom_state_in_odom.pos().z();
-            s.x[armor_point_motion_model::idx::VCX] -= gimbal_odom_state_in_odom.vel().x();
-            s.x[armor_point_motion_model::idx::VCY] -= gimbal_odom_state_in_odom.vel().y();
-            s.x[armor_point_motion_model::idx::VCZ] -= gimbal_odom_state_in_odom.vel().z();
+            s.x[auto_aim::armor_point_motion_model::idx::CX] -= gimbal_odom_state_in_odom.pos().x();
+            s.x[auto_aim::armor_point_motion_model::idx::CY] -= gimbal_odom_state_in_odom.pos().y();
+            s.x[auto_aim::armor_point_motion_model::idx::CZ] -= gimbal_odom_state_in_odom.pos().z();
+            s.x[auto_aim::armor_point_motion_model::idx::VCX] -=
+                gimbal_odom_state_in_odom.vel().x();
+            s.x[auto_aim::armor_point_motion_model::idx::VCY] -=
+                gimbal_odom_state_in_odom.vel().y();
+            s.x[auto_aim::armor_point_motion_model::idx::VCZ] -=
+                gimbal_odom_state_in_odom.vel().z();
         });
         target.this_id = old_this_id;
         GimbalCmd cmd {

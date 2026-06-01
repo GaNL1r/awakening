@@ -43,9 +43,10 @@ struct ReceiveRobotData {
         return out;
     }
 
-    void update_log() {
+    void update_log(uint32_t delay) {
         using namespace web;
         write_log("robo", [&](auto& j) {
+            j["delay"] = val(delay);
             j["timestamp_pc"] = val(time_stamp_pc);
             j["timestamp_receive_micro"] = val(time_stamp_receive_micro);
             j["timestamp_send_micro"] = val(time_stamp_send_micro);

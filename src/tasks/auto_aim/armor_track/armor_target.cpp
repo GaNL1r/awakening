@@ -30,12 +30,13 @@ void ArmorTarget::reset(
     const ISO3& camera_cv_in_odom
 ) {
     cfg = c;
-    uvmeasure_ctx = { .armor_num = armor_num_by_armor_class(a.number),
-                      .id = 0,
-                      .camera_cv_in_odom = camera_cv_in_odom,
-                      .camera_info = camera_info.clone(),
-                      .armor_number = a.number,
-                      .enable_whole_car_roll_pitch = cfg.enable_whole_car_roll_pitch };
+    uvmeasure_ctx = {
+        .armor_num = armor_num_by_armor_class(a.number),
+        .id = 0,
+        .camera_cv_in_odom = camera_cv_in_odom,
+        .camera_info = camera_info.clone(),
+        .armor_number = a.number,
+    };
 
     ypdmeasure_ctx = { .armor_num = armor_num_by_armor_class(a.number),
                        .id = 0,
@@ -200,6 +201,7 @@ void ArmorTarget::armor_pnp(
     }
     a.pose.linear() = best_rot;
 }
+
 Eigen::Matrix<double, UVZ_N, UVZ_N>
 ArmorTarget::uvmeasurement_covariance(const Eigen::Matrix<double, UVZ_N, 1>& z) const noexcept {
     Eigen::Matrix<double, UVZ_N, UVZ_N> r;
@@ -568,7 +570,7 @@ std::vector<std::tuple<int, bool, Light>> ArmorTarget::match_light(
         }
         double pred_len = cv::norm(pred.first - pred.second);
         double len_err = std::abs(light.length - pred_len);
-        if (len_err > pred_len * cfg.light_match_length_gate) {
+        if (len_err > pred_len * cfg.light_match_length_ratio_gate) {
             // AWAKENING_WARN("match out of gate: light length err: {}", len_err);
             return max_cost + 1;
         }

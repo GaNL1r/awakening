@@ -28,9 +28,8 @@ struct ArmorTrackerCfg {
     double q_whole_car_roll_pitch;
     double r_uv_at_1m;
     double r_uv_min;
-    bool enable_whole_car_roll_pitch;
     bool enable_lights_measure = false;
-    double light_match_length_gate;
+    double light_match_length_ratio_gate;
     double light_match_angle_gate;
     double light_match_pos_gate_by_length_ratio;
     void load(const YAML::Node& config) {
@@ -52,9 +51,8 @@ struct ArmorTrackerCfg {
         q_whole_car_roll_pitch = config["q_whole_car_roll_pitch"].as<double>();
         r_uv_at_1m = config["r_uv_at_1m"].as<double>();
         r_uv_min = config["r_uv_min"].as<double>();
-        enable_whole_car_roll_pitch = config["enable_whole_car_roll_pitch"].as<bool>();
         enable_lights_measure = config["enable_lights_measure"].as<bool>();
-        light_match_length_gate = config["light_match_length_gate"].as<double>();
+        light_match_length_ratio_gate = config["light_match_length_ratio_gate"].as<double>();
         light_match_angle_gate = config["light_match_angle_gate"].as<double>();
         light_match_pos_gate_by_length_ratio =
             config["light_match_pos_gate_by_length_ratio"].as<double>();
@@ -126,6 +124,7 @@ public:
         ) const noexcept;
     [[nodiscard]] Eigen::Matrix<double, armor_point_motion_model::YPDZ_N, 1>
     get_ypdmeasurement(Armor& a) const noexcept;
+
     void predict_ekf(const TimePoint& timestamp);
     int update(
         std::vector<std::pair<int, Armor>>& a,
@@ -213,8 +212,6 @@ public:
             j_target_state["r"] = web::val(target_state.r());
             j_target_state["l"] = web::val(target_state.l());
             j_target_state["h"] = web::val(target_state.h());
-            j_target_state["w_r"] = web::val(target_state.whole_car_roll());
-            j_target_state["w_p"] = web::val(target_state.whole_car_pitch());
         });
     }
 

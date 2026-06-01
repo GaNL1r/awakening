@@ -28,7 +28,6 @@ find_package(yaml-cpp REQUIRED)
 find_package(Ceres REQUIRED)
 find_package(HikSDK REQUIRED)
 find_package(MvSDK REQUIRED)
-find_package(TBB REQUIRED)
 find_package(spdlog REQUIRED)
 
 
@@ -85,7 +84,6 @@ target_link_libraries(${PROJECT_NAME}_utils
     fmt::fmt
     Eigen3::Eigen
     Ceres::ceres
-    TBB::tbb
     spdlog::spdlog
     ${OpenCV_LIBS}
     ${BUILD_LIBS}
