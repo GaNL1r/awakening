@@ -377,7 +377,8 @@ struct ArmorDetector::Impl {
 
         return true;
     }
-    void correct_corners(Light& light, const cv::Mat& gray) const noexcept { //copy form sp_vision_25
+    void
+    correct_corners(Light& light, const cv::Mat& gray) const noexcept { //copy form sp_vision_25
         // 参数保护
         if (gray.empty() || light.length < 2.f || light.width < 1.f)
             return;
@@ -493,11 +494,12 @@ struct ArmorDetector::Impl {
             cv::Point2f sum_pt(0.f, 0.f);
             for (const auto& pt: candidates)
                 sum_pt += pt;
+
             return sum_pt / static_cast<float>(candidates.size());
         };
-
-        light.top = find_corner(1, light.center);
-        light.bottom = find_corner(-1, light.center);
+        light.corrected.emplace();
+        light.corrected->first = find_corner(1, light.top);
+        light.corrected->second = find_corner(-1, light.bottom);
     }
     std::vector<Light>
     detect_lights(const cv::Mat& src, PixelFormat format, cv::Rect bbox) const noexcept {
@@ -599,6 +601,9 @@ struct ArmorDetector::Impl {
                     const cv::Point2f center = (top + bottom) * 0.5f;
 
                     for (const auto& light: lights) {
+                        if (!light.corrected) {
+                            continue;
+                        }
                         const auto bbox = light.boundingRect();
 
                         if (!bbox.contains(center)) {
@@ -609,30 +614,36 @@ struct ArmorDetector::Impl {
                             continue;
                         }
 
-                        top = light.top;
-                        bottom = light.bottom;
+                        top = light.corrected->first;
+                        bottom = light.corrected->second;
                         return true;
                     }
 
                     return false;
                 };
 
-                try_update_light(ArmorKeyPointsIndex::LEFT_TOP, ArmorKeyPointsIndex::LEFT_BOTTOM); //简易匹配，相同灯条传统覆盖网络
+                // try_update_light(
+                //     ArmorKeyPointsIndex::LEFT_TOP,
+                //     ArmorKeyPointsIndex::LEFT_BOTTOM
+                // ); //简易匹配，相同灯条传统覆盖网络
 
-                try_update_light(ArmorKeyPointsIndex::RIGHT_TOP, ArmorKeyPointsIndex::RIGHT_BOTTOM);
+                // try_update_light(ArmorKeyPointsIndex::RIGHT_TOP, ArmorKeyPointsIndex::RIGHT_BOTTOM);
             }
         }
 
         return { std::move(lights), std::move(result) };
     }
-    bool is_armor(const Armor& armor) const { //非常简单少量的参数，直接完全信下游的数字分类，反正batch一下才1ms
+    bool is_armor(const Armor& armor
+    ) const { //非常简单少量的参数，直接完全信下游的数字分类，反正batch一下才1ms
         auto ratio_ok = armor.cv->ratio > params_.cv_params.armor_params.min_ratio
             && armor.cv->ratio < params_.cv_params.armor_params.max_ratio;
         return ratio_ok;
     }
 
-    std::tuple<std::vector<Light>, std::vector<Armor>>
-    detect_cv(const CommonFrame& frame, const std::optional<cv::Rect>& detect_light) const {//copy form sp_vision_25
+    std::tuple<std::vector<Light>, std::vector<Armor>> detect_cv(
+        const CommonFrame& frame,
+        const std::optional<cv::Rect>& detect_light
+    ) const { //copy form sp_vision_25
         const auto& src_img = frame.img_frame.src_img;
         auto bbox = detect_light ? detect_light.value() : frame.expanded;
 
@@ -653,14 +664,15 @@ struct ArmorDetector::Impl {
                     continue;
                 }
                 Armor armor;
+
                 armor.cv.emplace(*left, *right);
-                if (!is_armor(armor)) { 
+                if (!is_armor(armor)) {
                     continue;
                 }
                 if (!extract_number(src_img, armor)) {
                     continue;
                 }
-                tmp_armors.push_back(armor);
+                tmp_armors.emplace_back(std::move(armor));
             }
         }
         std::vector<Armor*> batch_armors;
@@ -685,25 +697,25 @@ struct ArmorDetector::Impl {
                 {
                     continue;
                 }
-                if (armor1->cv->left.id == armor2->cv->left.id
-                    || armor1->cv->right.id == armor2->cv->right.id) {
-                    auto area1 = armor1->number_classifier->number_img.cols
-                        * armor1->number_classifier->number_img.rows;
-                    auto area2 = armor2->number_classifier->number_img.cols
-                        * armor2->number_classifier->number_img.rows;
-                    if (area1 < area2)
-                        armor2->cv->duplicated = true;
-                    else
-                        armor1->cv->duplicated = true;
-                }
-                if (armor1->cv->left.id == armor2->cv->right.id
-                    || armor1->cv->right.id == armor2->cv->left.id) {
-                    if (armor1->number_classifier->confidence
-                        < armor2->number_classifier->confidence)
-                        armor1->cv->duplicated = true;
-                    else
-                        armor2->cv->duplicated = true;
-                }
+                // if (armor1->cv->left.id == armor2->cv->left.id
+                //     || armor1->cv->right.id == armor2->cv->right.id) {
+                //     auto area1 = armor1->number_classifier->number_img.cols
+                //         * armor1->number_classifier->number_img.rows;
+                //     auto area2 = armor2->number_classifier->number_img.cols
+                //         * armor2->number_classifier->number_img.rows;
+                //     if (area1 < area2)
+                //         armor2->cv->duplicated = true;
+                //     else
+                //         armor1->cv->duplicated = true;
+                // }
+                // if (armor1->cv->left.id == armor2->cv->right.id
+                //     || armor1->cv->right.id == armor2->cv->left.id) {
+                //     if (armor1->number_classifier->confidence
+                //         < armor2->number_classifier->confidence)
+                //         armor1->cv->duplicated = true;
+                //     else
+                //         armor2->cv->duplicated = true;
+                // }
             }
         }
         for (auto& armor: tmp_armors) {

@@ -56,7 +56,7 @@ struct ArmorTrackerCfg {
             config["light_match_pos_gate_by_length_ratio"].as<double>();
     }
 };
-static inline int GOBAL_ID = 0;//全局状态标记，下游控制对同一id的不重复构建轨迹
+static inline int GOBAL_ID = 0; //全局状态标记，下游控制对同一id的不重复构建轨迹
 class ArmorTarget {
 public:
     struct TrackState {
@@ -151,7 +151,7 @@ public:
     }
     template<typename F>
     void set_target_state(F&& f) {
-        this_id = GOBAL_ID++;//全局状态标记，下游控制对同一id的不重复构建轨迹
+        this_id = GOBAL_ID++; //全局状态标记，下游控制对同一id的不重复构建轨迹
         f(target_state);
     }
     bool is_inited = false;

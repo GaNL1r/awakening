@@ -516,7 +516,7 @@ int main(int argc, char** argv) {
                 frame.offset = cv::Point2f(bbox.x, bbox.y);
             }
 
-            if (target.need_detect_lights()) { 
+            if (target.need_detect_lights()) {
                 detect_light = target.expanded( // 送给传统越小越好
                     frame.img_frame.timestamp,
                     camera_cv_in_old,
@@ -549,7 +549,7 @@ int main(int argc, char** argv) {
                 log_ctx.detect_count++;
             }
         }
-        armors_queue.enqueue(armors); 
+        armors_queue.enqueue(armors);
         auto batch_armors = armors_queue.dequeue_batch(); // 根据id有序输出
         if (auto_aim_dbg && is_web_running()) {
             auto_aim_dbg->expanded.set(frame.expanded);
@@ -582,8 +582,11 @@ int main(int argc, char** argv) {
                 }
                 armors.lights.push_back(l);
             }
-            auto camera_cv_in_odom =
-                tf->pose_a_in_b(SimpleFrame(armors.frame_id), SimpleFrame::ODOM, armors.timestamp); //转到odom
+            auto camera_cv_in_odom = tf->pose_a_in_b(
+                SimpleFrame(armors.frame_id),
+                SimpleFrame::ODOM,
+                armors.timestamp
+            ); //转到odom
             armors.frame_id = std::to_underlying(SimpleFrame::ODOM);
             auto __armor_target =
                 armor_tracker.track(armors, camera_info, camera_cv_in_odom, armors.frame_id);
@@ -626,7 +629,8 @@ int main(int argc, char** argv) {
             s.x[auto_aim::armor_point_motion_model::idx::CX] -= gimbal_odom_state_in_odom.pos().x();
             s.x[auto_aim::armor_point_motion_model::idx::CY] -= gimbal_odom_state_in_odom.pos().y();
             s.x[auto_aim::armor_point_motion_model::idx::CZ] -= gimbal_odom_state_in_odom.pos().z();
-            s.x[auto_aim::armor_point_motion_model::idx::VCX] -= //弹丸在大地的速度受自身速度影响
+            s.x[auto_aim::armor_point_motion_model::idx::
+                    VCX] -= //弹丸在大地的速度受自身速度影响，所以直接用相对速度
                 gimbal_odom_state_in_odom.vel().x();
             s.x[auto_aim::armor_point_motion_model::idx::VCY] -=
                 gimbal_odom_state_in_odom.vel().y();

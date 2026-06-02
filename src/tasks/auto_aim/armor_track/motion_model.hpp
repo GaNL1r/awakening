@@ -222,8 +222,8 @@ struct UVMeasure {
         Eigen::Quaternion<T> q_roll_car_in_odom(
             Eigen::AngleAxis<T>(T(0.0), Eigen::Vector3<T>::UnitX())
         );
-        car_in_odom.linear() =
-            (q_yaw_car_in_odom * q_pitch_car_in_odom * q_roll_car_in_odom).toRotationMatrix(); // 本来想考虑整车在空间旋转，不过有点毛病
+        car_in_odom.linear() = (q_yaw_car_in_odom * q_pitch_car_in_odom * q_roll_car_in_odom)
+                                   .toRotationMatrix(); // 本来想考虑整车在空间旋转，不过有点毛病
         Eigen::Transform<T, 3, Eigen::Isometry> pose_in_odom = car_in_odom * pose_in_car;
         return pose_in_odom;
     }

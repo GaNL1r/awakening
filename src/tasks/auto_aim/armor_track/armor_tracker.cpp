@@ -48,10 +48,11 @@ struct ArmorTracker::Impl {
             process(pre_target_idx_);
 
             if (pre.track_state.tracker_state == ArmorTarget::TrackState::TRACKING) {
-                if (cur.target_number != ArmorClass::OUTPOST) { //给4mm英雄用（，太远我都看不清装甲板
-                    std::swap(cur, pre);
-                    pre.track_state.tracker_state = ArmorTarget::TrackState::LOST;
-                }
+                // if (cur.target_number != ArmorClass::OUTPOST)
+                // { //给4mm英雄用（，太远我都看不清装甲板
+                std::swap(cur, pre);
+                pre.track_state.tracker_state = ArmorTarget::TrackState::LOST;
+                // }
             }
         } else if (cur.track_state.tracker_state == ArmorTarget::TrackState::TRACKING) {
             pre.track_state.tracker_state = ArmorTarget::TrackState::LOST; //cur恢复就重置

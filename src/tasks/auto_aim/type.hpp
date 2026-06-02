@@ -221,10 +221,15 @@ struct Light: public cv::RotatedRect {
         this->center += offset;
         top += offset;
         bottom += offset;
+        if (corrected) {
+            corrected->first += offset;
+            corrected->second += offset;
+        }
     }
     inline void draw(cv::Mat& img) const noexcept {
         cv::line(img, top, bottom, cv::Scalar(100, 255, 100), 2);
     }
+    std::optional<std::pair<cv::Point2f, cv::Point2f>> corrected;
     cv::Point2f top, bottom;
     ArmorColor color = ArmorColor::NONE;
     cv::Point2f axis;
@@ -252,6 +257,14 @@ struct Armor {
         CvCtx(const Light& left_light, const Light& right_light):
             left(left_light),
             right(right_light) {
+            if (left.corrected) {
+                left.top = left.corrected->first;
+                left.bottom = left.corrected->second;
+            }
+            if (right.corrected) {
+                right.top = right.corrected->first;
+                right.bottom = right.corrected->second;
+            }
             center = (left.center + right.center) / 2;
             auto left2right = right.center - left.center;
             auto width = cv::norm(left2right);

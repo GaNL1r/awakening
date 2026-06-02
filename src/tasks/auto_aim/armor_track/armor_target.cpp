@@ -89,9 +89,7 @@ void ArmorTarget::reset(
     const double zc = za;
     double l = 0.0;
     double h = 0.0;
-    double w_r = 0.0;
-    double w_p = 0.0;
-    target_state.x << xc, 0, yc, 0, zc, 0, yaw, 0, r, l, h, w_r, w_p;
+    target_state.x << xc, 0, yc, 0, zc, 0, yaw, 0, r, l, h;
     target_state.timestamp = timestamp;
     target_state.frame_id = frame_id;
     esekf.value().set_state(target_state.x);
@@ -108,7 +106,7 @@ void ArmorTarget::reset(
         outpost_has_all_and_has_set_ids = std::nullopt;
     }
     track_state.reset();
-    this_id = GOBAL_ID++;//全局状态标记，下游控制对同一id的不重复构建轨迹
+    this_id = GOBAL_ID++; //全局状态标记，下游控制对同一id的不重复构建轨迹
     update_count++;
 }
 
@@ -202,11 +200,13 @@ Eigen::Matrix<double, UVZ_N, UVZ_N>
 ArmorTarget::uvmeasurement_covariance(const Eigen::Matrix<double, UVZ_N, 1>& z) const noexcept {
     Eigen::Matrix<double, UVZ_N, UVZ_N> r;
 
-    double u_r =
-        std::max(cfg.r_uv_at_1m * log((1.0 / target_state.pos().norm()) + 1), cfg.r_uv_min);  //比较简陋的逻辑或许应该和预测灯条长度存在比例
+    double u_r = std::max(
+        cfg.r_uv_at_1m * log((1.0 / target_state.pos().norm()) + 1),
+        cfg.r_uv_min
+    ); //比较简陋的逻辑或许应该和预测灯条长度存在比例
 
     r.setZero();
-    r.diagonal().setConstant(u_r); 
+    r.diagonal().setConstant(u_r);
     return r;
 }
 [[nodiscard]] Eigen::Matrix<double, UVZ_N, 1>
@@ -317,7 +317,7 @@ void ArmorTarget::predict_ekf(const TimePoint& timestamp) {
     esekf.value().set_update_Q([&]() { return process_noise(dt); });
     target_state.x = esekf.value().predict();
     target_state.timestamp = timestamp;
-    this_id = GOBAL_ID++;//全局状态标记，下游控制对同一id的不重复构建轨迹
+    this_id = GOBAL_ID++; //全局状态标记，下游控制对同一id的不重复构建轨迹
 }
 
 int ArmorTarget::update(
@@ -376,7 +376,7 @@ int ArmorTarget::update(
         if (armor.color_classifier) {
             const auto& colors = armor.color_classifier->light_colors;
             //网络可能看到单个灯条，不过对另一个预测挺准的这里看感觉选下面两个逻辑
-            // if (colors[Armor::ColorClassifierCtx::LEFT] != ArmorColor::NONE) { 
+            // if (colors[Armor::ColorClassifierCtx::LEFT] != ArmorColor::NONE) {
             //     add_obs(armor, id, true);
             // }
 
@@ -394,7 +394,7 @@ int ArmorTarget::update(
         ++update_count;
     }
     for (const auto& [id, is_left, light]: matched_lights) {
-        if (used_id[id]) { 
+        if (used_id[id]) {
             continue;
         }
         auto ctx = uvmeasure_ctx;
@@ -413,7 +413,7 @@ int ArmorTarget::update(
     target_state.x = esekf.value().update_multi(obs);
     target_state.timestamp = timestamp;
     last_update = timestamp;
-    this_id = GOBAL_ID++;//全局状态标记，下游控制对同一id的不重复构建轨迹
+    this_id = GOBAL_ID++; //全局状态标记，下游控制对同一id的不重复构建轨迹
     return updated;
 }
 std::vector<std::pair<int, Armor>> ArmorTarget::match_armor(
@@ -432,7 +432,8 @@ std::vector<std::pair<int, Armor>> ArmorTarget::match_armor(
     const double max_cost = 1e9;
     std::vector<std::vector<double>> cost(n_obs, std::vector<double>(armors_num, max_cost + 1));
 
-    std::vector<YPDVecZ> meas_list(n_obs); //纯图像点匹配只能纯位置误差，要不就是和match_light基于逻辑，不如随便pnp一下ypda匹配
+    std::vector<YPDVecZ> meas_list(n_obs
+    ); //纯图像点匹配只能纯位置误差，要不就是和match_light基于逻辑，不如随便pnp一下ypda匹配
     for (int j = 0; j < n_obs; ++j) {
         armor_pnp(armors[j], camera_info, camera_cv_in_odom);
         meas_list[j] = get_ypdmeasurement(armors[j]);
@@ -512,7 +513,7 @@ std::vector<std::tuple<int, bool, Light>> ArmorTarget::match_light(
     std::vector<std::pair<int, Armor>>& matched_armors,
     const CameraInfo& camera_info,
     const ISO3& camera_cv_in_odom
-) const noexcept { 
+) const noexcept {
     //可见灯条逻辑判断不优雅，不过这比较个稳定可观
     std::vector<std::tuple<int, bool, Light>> result;
 

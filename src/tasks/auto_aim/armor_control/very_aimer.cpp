@@ -349,7 +349,7 @@ struct VeryAimer::Impl {
             auto& cp_vec = get_cp_vec();
             auto prefix = get_prefix();
             unwrap_states(cp_vec);
-            auto [yaw_states, pitch_states] = compute_node_states(cp_vec, prefix);//粗解va
+            auto [yaw_states, pitch_states] = compute_node_states(cp_vec, prefix); //粗解va
             int best_idx = -1;
             double best_dist = std::numeric_limits<double>::max();
             const int N = static_cast<int>(cp_vec.size());
@@ -499,8 +499,10 @@ struct VeryAimer::Impl {
         if (armor_num > 0) {
             int best_idx = -1;
 
-            if (auto_aim_fsm == AutoAimFsm::AIM_WHOLE_CAR_PAIR //4选2,本质提升控制轨迹与目标轨迹重合窗口
-                && target.target_number != ArmorClass::OUTPOST) {
+            if (auto_aim_fsm
+                    == AutoAimFsm::AIM_WHOLE_CAR_PAIR //4选2,本质提升控制轨迹与目标轨迹重合窗口
+                && target.target_number != ArmorClass::OUTPOST)
+            {
                 std::vector<int> all;
                 if (target_state.h() < 0) { //上边的装甲板没准能碰巧到下面的？
                     all.push_back(1);
@@ -620,7 +622,7 @@ struct VeryAimer::Impl {
         }
         const double predict_time = prev_fly_time + params_.prediction_delay
             + (fsm == AutoAimFsm::AIM_WHOLE_CAR_CENTER ? params_.aim_center_more_prediction_time : 0
-            );//瞄准中间只能预测一段发弹延迟
+            ); //瞄准中间只能预测一段发弹延迟
         hit_time_target.set_target_state([&](auto& state) {
             state.predict(predict_time, hit_time_target.target_number);
         });
@@ -661,7 +663,7 @@ struct VeryAimer::Impl {
         const int horizon = make_even(params_.sample_horizon);
         const double dt = params_.sample_total_time / horizon;
         if (!is_same) {
-            auto hit_ctx_opt = get_hit(target, bullet_speed, fsm);//直接算到击中目标时间
+            auto hit_ctx_opt = get_hit(target, bullet_speed, fsm); //直接算到击中目标时间
             if (!hit_ctx_opt) {
                 cmd.appear = false;
                 return cmd;
@@ -684,7 +686,7 @@ struct VeryAimer::Impl {
                 auto tmp_target = base_target;
                 tmp_target.set_target_state([&](armor_point_motion_model::State& state) {
                     state.predict(t, tmp_target.target_number);
-                });//保证轨迹完全为不同时间对同一状态的瞄准控制点
+                }); //保证轨迹完全为不同时间对同一状态的瞄准控制点
 
                 auto hit_opt = get_hit(tmp_target, bullet_speed, fsm_mode);
                 if (!hit_opt)
@@ -761,7 +763,7 @@ struct VeryAimer::Impl {
 
             limit_traj_.build_limit(params_.max_yaw_acc, params_.max_pitch_acc, time_in_traj);
 
-            if (fsm == AutoAimFsm::AIM_WHOLE_CAR_CENTER) {//瞄准中间的目标和控制不一样
+            if (fsm == AutoAimFsm::AIM_WHOLE_CAR_CENTER) { //瞄准中间的目标和控制不一样
                 aim_center_target_traj_.clear();
 
                 aim_center_target_traj_.reserve(horizon + 1);
@@ -796,7 +798,7 @@ struct VeryAimer::Impl {
         }
 
         ControlPoint target_traj_cp0 =
-            fsm != AutoAimFsm::AIM_WHOLE_CAR_CENTER ? limit_traj_cp0_ : aim_center_target_traj_cp0_; 
+            fsm != AutoAimFsm::AIM_WHOLE_CAR_CENTER ? limit_traj_cp0_ : aim_center_target_traj_cp0_;
         Trajectory<GimbalState, double> target_traj =
             fsm != AutoAimFsm::AIM_WHOLE_CAR_CENTER ? limit_traj_ : aim_center_target_traj_;
         auto target_gimbal_state = target_traj.Trajectory::state_at(time_in_traj);
@@ -847,10 +849,11 @@ struct VeryAimer::Impl {
             shooting_range_yaw = std::min(
                 std::abs(angles::normalize_angle(yaw1 - aim_yaw)),
                 std::abs(angles::normalize_angle(yaw2 - aim_yaw))
-            );//直接算两个边缘yaw
+            ); //直接算两个边缘yaw
             double shooting_range_pitch =
                 std::abs(std::atan2(params_.shooting_range_h / 2, distance));
-            const double pitch_factor = std::cos(FIFTTEN_DEGREE_RAD); //跟yaw一样逻辑还得多两次解弹道，没必要
+            const double pitch_factor =
+                std::cos(FIFTTEN_DEGREE_RAD); //跟yaw一样逻辑还得多两次解弹道，没必要
             shooting_range_pitch *= pitch_factor;
             shooting_range_yaw =
                 std::max(shooting_range_yaw, angles::from_degrees(params_.min_enable_yaw_deg));
@@ -892,7 +895,7 @@ struct VeryAimer::Impl {
                     < delay_enable.second;
             };
             {
-                double t_check = 0 + params_.fire_delay_min;//发射延迟内不让打弹
+                double t_check = 0 + params_.fire_delay_min; //发射延迟内不让打弹
                 while (t_check < (0 + params_.fire_delay_max) && t_check <= horizon / 2.0) {
                     if (!delay_fire(+t_check)) {
                         cmd.no_shoot();
