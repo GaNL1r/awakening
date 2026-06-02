@@ -25,7 +25,6 @@ struct ArmorTrackerCfg {
     double q_l;
     double q_h;
     double q_outpost_dz;
-    double q_whole_car_roll_pitch;
     double r_uv_at_1m;
     double r_uv_min;
     bool enable_lights_measure = false;
@@ -48,7 +47,6 @@ struct ArmorTrackerCfg {
         q_l = config["q_l"].as<double>();
         q_h = config["q_h"].as<double>();
         q_outpost_dz = config["q_outpost_dz"].as<double>();
-        q_whole_car_roll_pitch = config["q_whole_car_roll_pitch"].as<double>();
         r_uv_at_1m = config["r_uv_at_1m"].as<double>();
         r_uv_min = config["r_uv_min"].as<double>();
         enable_lights_measure = config["enable_lights_measure"].as<bool>();
@@ -58,7 +56,7 @@ struct ArmorTrackerCfg {
             config["light_match_pos_gate_by_length_ratio"].as<double>();
     }
 };
-static inline int GOBAL_ID = 0;
+static inline int GOBAL_ID = 0;//全局状态标记，下游控制对同一id的不重复构建轨迹
 class ArmorTarget {
 public:
     struct TrackState {
@@ -153,7 +151,7 @@ public:
     }
     template<typename F>
     void set_target_state(F&& f) {
-        this_id = GOBAL_ID++;
+        this_id = GOBAL_ID++;//全局状态标记，下游控制对同一id的不重复构建轨迹
         f(target_state);
     }
     bool is_inited = false;

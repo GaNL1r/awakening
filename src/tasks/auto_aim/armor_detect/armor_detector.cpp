@@ -377,7 +377,7 @@ struct ArmorDetector::Impl {
 
         return true;
     }
-    void correct_corners(Light& light, const cv::Mat& gray) const noexcept {
+    void correct_corners(Light& light, const cv::Mat& gray) const noexcept { //copy form sp_vision_25
         // 参数保护
         if (gray.empty() || light.length < 2.f || light.width < 1.f)
             return;
@@ -617,7 +617,7 @@ struct ArmorDetector::Impl {
                     return false;
                 };
 
-                try_update_light(ArmorKeyPointsIndex::LEFT_TOP, ArmorKeyPointsIndex::LEFT_BOTTOM);
+                try_update_light(ArmorKeyPointsIndex::LEFT_TOP, ArmorKeyPointsIndex::LEFT_BOTTOM); //简易匹配，相同灯条传统覆盖网络
 
                 try_update_light(ArmorKeyPointsIndex::RIGHT_TOP, ArmorKeyPointsIndex::RIGHT_BOTTOM);
             }
@@ -625,14 +625,14 @@ struct ArmorDetector::Impl {
 
         return { std::move(lights), std::move(result) };
     }
-    bool is_armor(const Armor& armor) const {
+    bool is_armor(const Armor& armor) const { //非常简单少量的参数，直接完全信下游的数字分类，反正batch一下才1ms
         auto ratio_ok = armor.cv->ratio > params_.cv_params.armor_params.min_ratio
             && armor.cv->ratio < params_.cv_params.armor_params.max_ratio;
         return ratio_ok;
     }
 
     std::tuple<std::vector<Light>, std::vector<Armor>>
-    detect_cv(const CommonFrame& frame, const std::optional<cv::Rect>& detect_light) const {
+    detect_cv(const CommonFrame& frame, const std::optional<cv::Rect>& detect_light) const {//copy form sp_vision_25
         const auto& src_img = frame.img_frame.src_img;
         auto bbox = detect_light ? detect_light.value() : frame.expanded;
 
@@ -654,7 +654,7 @@ struct ArmorDetector::Impl {
                 }
                 Armor armor;
                 armor.cv.emplace(*left, *right);
-                if (!is_armor(armor)) {
+                if (!is_armor(armor)) { 
                     continue;
                 }
                 if (!extract_number(src_img, armor)) {

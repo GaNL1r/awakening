@@ -457,7 +457,7 @@ int main(int argc, char** argv) {
                 auto_exposure_cfg.emplace();
                 auto_exposure_cfg.value().load(config["auto_exposure"]);
             }
-            if (auto_exposure_cfg) {
+            if (auto_exposure_cfg) { // 平均亮度pid
                 auto& cfg = auto_exposure_cfg.value();
                 utils::dt_once(
                     [&]() {
@@ -505,7 +505,7 @@ int main(int argc, char** argv) {
             target.set_target_state([&](auto_aim::armor_point_motion_model::State& state) {
                 state.predict(frame.img_frame.timestamp, target.target_number);
             });
-            auto bbox = target.expanded_one_one(
+            auto bbox = target.expanded_one_one( //送给网络，1：1
                 frame.img_frame.timestamp,
                 camera_cv_in_old,
                 camera_info,
@@ -516,8 +516,8 @@ int main(int argc, char** argv) {
                 frame.offset = cv::Point2f(bbox.x, bbox.y);
             }
 
-            if (target.need_detect_lights()) {
-                detect_light = target.expanded(
+            if (target.need_detect_lights()) { 
+                detect_light = target.expanded( // 送给传统越小越好
                     frame.img_frame.timestamp,
                     camera_cv_in_old,
                     camera_info,
@@ -541,7 +541,7 @@ int main(int argc, char** argv) {
                                   .frame_id = frame.frame_id };
         {
             bool got = detector_sem->try_acquire();
-            utils::SemaphoreGuard guard(*detector_sem, got);
+            utils::SemaphoreGuard guard(*detector_sem, got); //并发控制
             if (got) {
                 auto [ls, as] = armor_detector.detect(frame, detect_light);
                 armors.armors = as;
@@ -549,8 +549,8 @@ int main(int argc, char** argv) {
                 log_ctx.detect_count++;
             }
         }
-        armors_queue.enqueue(armors);
-        auto batch_armors = armors_queue.dequeue_batch();
+        armors_queue.enqueue(armors); 
+        auto batch_armors = armors_queue.dequeue_batch(); // 根据id有序输出
         if (auto_aim_dbg && is_web_running()) {
             auto_aim_dbg->expanded.set(frame.expanded);
             auto_aim_dbg->img_frame.set(std::move(frame.img_frame));
@@ -583,7 +583,7 @@ int main(int argc, char** argv) {
                 armors.lights.push_back(l);
             }
             auto camera_cv_in_odom =
-                tf->pose_a_in_b(SimpleFrame(armors.frame_id), SimpleFrame::ODOM, armors.timestamp);
+                tf->pose_a_in_b(SimpleFrame(armors.frame_id), SimpleFrame::ODOM, armors.timestamp); //转到odom
             armors.frame_id = std::to_underlying(SimpleFrame::ODOM);
             auto __armor_target =
                 armor_tracker.track(armors, camera_info, camera_cv_in_odom, armors.frame_id);
@@ -626,7 +626,7 @@ int main(int argc, char** argv) {
             s.x[auto_aim::armor_point_motion_model::idx::CX] -= gimbal_odom_state_in_odom.pos().x();
             s.x[auto_aim::armor_point_motion_model::idx::CY] -= gimbal_odom_state_in_odom.pos().y();
             s.x[auto_aim::armor_point_motion_model::idx::CZ] -= gimbal_odom_state_in_odom.pos().z();
-            s.x[auto_aim::armor_point_motion_model::idx::VCX] -=
+            s.x[auto_aim::armor_point_motion_model::idx::VCX] -= //弹丸在大地的速度受自身速度影响
                 gimbal_odom_state_in_odom.vel().x();
             s.x[auto_aim::armor_point_motion_model::idx::VCY] -=
                 gimbal_odom_state_in_odom.vel().y();

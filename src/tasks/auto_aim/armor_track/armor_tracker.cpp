@@ -39,7 +39,7 @@ struct ArmorTracker::Impl {
             }
             return found;
         };
-
+        //双缓冲，方便异常丢失恢复，方便操作手换目标
         process(cur_target_idx_);
         auto& cur = target_buf_[cur_target_idx_];
         auto& pre = target_buf_[pre_target_idx_];
@@ -48,16 +48,16 @@ struct ArmorTracker::Impl {
             process(pre_target_idx_);
 
             if (pre.track_state.tracker_state == ArmorTarget::TrackState::TRACKING) {
-                if (cur.target_number != ArmorClass::OUTPOST) {
+                if (cur.target_number != ArmorClass::OUTPOST) { //给4mm英雄用（，太远我都看不清装甲板
                     std::swap(cur, pre);
                     pre.track_state.tracker_state = ArmorTarget::TrackState::LOST;
                 }
             }
         } else if (cur.track_state.tracker_state == ArmorTarget::TrackState::TRACKING) {
-            pre.track_state.tracker_state = ArmorTarget::TrackState::LOST;
+            pre.track_state.tracker_state = ArmorTarget::TrackState::LOST; //cur恢复就重置
         }
 
-        return target_buf_[cur_target_idx_].fast_copy_without_ekf();
+        return target_buf_[cur_target_idx_].fast_copy_without_ekf(); //下游不让用ekf
     }
     bool init_target(
         ArmorTarget& target,
@@ -86,12 +86,12 @@ struct ArmorTracker::Impl {
         if (!found) {
             return false;
         }
-        if (iam_sentry) {
-            ArmorTarget::armor_pnp(init_target, camera_info, camera_cv_in_odom);
-            if (init_target.pose.translation().norm() > 5) {
-                return false;
-            }
-        }
+        // if (iam_sentry) {
+        //     ArmorTarget::armor_pnp(init_target, camera_info, camera_cv_in_odom);//逆天散布不让超远击打！
+        //     if (init_target.pose.translation().norm() > 5) {
+        //         return false;
+        //     }
+        // }
 
         AWAKENING_INFO("init target: {}", string_by_armor_class(init_target.number));
         target.reset(init_target, cfg_, armors.timestamp, frame_id, camera_info, camera_cv_in_odom);
@@ -110,9 +110,6 @@ struct ArmorTracker::Impl {
         target.predict_ekf(armors.timestamp);
         std::vector<Armor> candidates;
         candidates.reserve(armors.armors.size());
-        auto target_state = target.get_target_state();
-        double center_yaw =
-            angles::normalize_angle(std::atan2(target_state.pos().y(), target_state.pos().x()));
         for (const auto& a: armors.armors) {
             if (a.number == target.target_number) {
                 if (a.color == ArmorColor::NONE || a.color == ArmorColor::PURPLE) {

@@ -108,7 +108,7 @@ void ArmorTarget::reset(
         outpost_has_all_and_has_set_ids = std::nullopt;
     }
     track_state.reset();
-    this_id = GOBAL_ID++;
+    this_id = GOBAL_ID++;//全局状态标记，下游控制对同一id的不重复构建轨迹
     update_count++;
 }
 
@@ -142,7 +142,7 @@ void ArmorTarget::armor_pnp(
     a.pose = armor_in_odom;
     auto rpy = utils::matrix2euler(a.pose.linear(), utils::EulerOrder::XYZ);
     double yaw_raw = rpy[2];
-    constexpr double SEARCH_RANGE = 140; // degree
+    constexpr double SEARCH_RANGE = 140; // 随便穷举（
     auto yaw0 = angles::normalize_angle(yaw_raw - SEARCH_RANGE / 2 * CV_PI / 180.0);
     auto min_error = 1e10;
     auto best_rot = a.pose.linear();
@@ -168,10 +168,6 @@ void ArmorTarget::armor_pnp(
         //     error += cv::norm(img_points[i] - key_points[i]);
         // }
         auto center = [](const cv::Point2f& a, const cv::Point2f& b) { return (a + b) * 0.5f; };
-        auto quad_center = [](const cv::Point2f& lt,
-                              const cv::Point2f& lb,
-                              const cv::Point2f& rt,
-                              const cv::Point2f& rb) { return (lt + lb + rt + rb) * 0.25f; };
         error += cv::norm(
             center(
                 img_points[std::to_underlying(ArmorKeyPointsIndex::LEFT_TOP)],
@@ -191,7 +187,7 @@ void ArmorTarget::armor_pnp(
                 key_points[std::to_underlying(ArmorKeyPointsIndex::LEFT_BOTTOM)],
                 key_points[std::to_underlying(ArmorKeyPointsIndex::RIGHT_BOTTOM)]
             )
-        );
+        ); //中点为约束实验上比原来4点约束更准（
 
         if (error < min_error) {
             min_error = error;
@@ -207,10 +203,10 @@ ArmorTarget::uvmeasurement_covariance(const Eigen::Matrix<double, UVZ_N, 1>& z) 
     Eigen::Matrix<double, UVZ_N, UVZ_N> r;
 
     double u_r =
-        std::max(cfg.r_uv_at_1m * log((1.0 / target_state.pos().norm()) + 1), cfg.r_uv_min);
+        std::max(cfg.r_uv_at_1m * log((1.0 / target_state.pos().norm()) + 1), cfg.r_uv_min);  //比较简陋的逻辑或许应该和预测灯条长度存在比例
 
     r.setZero();
-    r.diagonal().setConstant(u_r);
+    r.diagonal().setConstant(u_r); 
     return r;
 }
 [[nodiscard]] Eigen::Matrix<double, UVZ_N, 1>
@@ -239,7 +235,7 @@ ArmorTarget::get_uvmeasurement(Armor& a, bool left) const noexcept {
     ) const noexcept {
     Eigen::Matrix<double, YPDZ_N, YPDZ_N> r;
     const double delta_angle = angles::normalize_angle(z[idx::ROT_YAW] - z[idx::YPD_Y]);
-    r.setZero();
+    r.setZero(); //copy下sp_vision_25 这个参数不用在观测，差不多就行
     r(idx::YPD_Y, idx::YPD_Y) = 4e-3;
     r(idx::YPD_P, idx::YPD_P) = 4e-3;
     r(idx::YPD_D, idx::YPD_D) =
@@ -294,22 +290,19 @@ Eigen::Matrix<double, X_N, X_N> ArmorTarget::process_noise(double dt) const noex
     const double q_yaw_yaw = pow(t, 4) / 4 * q_yaw, q_yaw_vyaw = pow(t, 3) / 2 * q_yaw,
                  q_vyaw_vyaw = pow(t, 2) * q_yaw;
     const double q_r = cfg.q_r;
-    const double q_whole_car_roll_pitch = cfg.q_whole_car_roll_pitch;
     // clang-format off
-            //      xc      v_xc    yc      v_yc    zc      v_zc    yaw         v_yaw       r       l   h   w_r w_p
-            q <<    q_x_x,  q_x_vx, 0,      0,      0,      0,      0,          0,          0,      0,  0,  0,  0,
-                    q_x_vx, q_vx_vx,0,      0,      0,      0,      0,          0,          0,      0,  0,  0,  0,
-                    0,      0,      q_y_y,  q_y_vy, 0,      0,      0,          0,          0,      0,  0,  0,  0,
-                    0,      0,      q_y_vy, q_vy_vy,0,      0,      0,          0,          0,      0,  0,  0,  0,
-                    0,      0,      0,      0,      q_z_z,  q_z_vz, 0,          0,          0,      0,  0,  0,  0,
-                    0,      0,      0,      0,      q_z_vz, q_vz_vz,0,          0,          0,      0,  0,  0,  0,
-                    0,      0,      0,      0,      0,      0,      q_yaw_yaw,  q_yaw_vyaw, 0,      0,  0,  0,  0,
-                    0,      0,      0,      0,      0,      0,      q_yaw_vyaw, q_vyaw_vyaw,0,      0,  0,  0,  0,
-                    0,      0,      0,      0,      0,      0,      0,          0,          q_r,    0,  0,  0,  0,
-                    0,      0,      0,      0,      0,      0,      0,          0,          0,      q_l,0,  0,  0,
-                    0,      0,      0,      0,      0,      0,      0,          0,          0,      0,  q_h,0,  0,
-                    0,      0,      0,      0,      0,      0,      0,          0,          0,      0, 0,   q_whole_car_roll_pitch,0,
-                    0,      0,      0,      0,      0,      0,      0,          0,          0,      0, 0,   0,  q_whole_car_roll_pitch;
+            //      xc      v_xc    yc      v_yc    zc      v_zc    yaw         v_yaw       r       l   h  
+            q <<    q_x_x,  q_x_vx, 0,      0,      0,      0,      0,          0,          0,      0,  0, 
+                    q_x_vx, q_vx_vx,0,      0,      0,      0,      0,          0,          0,      0,  0,  
+                    0,      0,      q_y_y,  q_y_vy, 0,      0,      0,          0,          0,      0,  0, 
+                    0,      0,      q_y_vy, q_vy_vy,0,      0,      0,          0,          0,      0,  0,  
+                    0,      0,      0,      0,      q_z_z,  q_z_vz, 0,          0,          0,      0,  0,  
+                    0,      0,      0,      0,      q_z_vz, q_vz_vz,0,          0,          0,      0,  0,  
+                    0,      0,      0,      0,      0,      0,      q_yaw_yaw,  q_yaw_vyaw, 0,      0,  0,  
+                    0,      0,      0,      0,      0,      0,      q_yaw_vyaw, q_vyaw_vyaw,0,      0,  0,  
+                    0,      0,      0,      0,      0,      0,      0,          0,          q_r,    0,  0,  
+                    0,      0,      0,      0,      0,      0,      0,          0,          0,      q_l,0,  
+                    0,      0,      0,      0,      0,      0,      0,          0,          0,      0,  q_h;
 
     // clang-format on
     return q;
@@ -324,7 +317,7 @@ void ArmorTarget::predict_ekf(const TimePoint& timestamp) {
     esekf.value().set_update_Q([&]() { return process_noise(dt); });
     target_state.x = esekf.value().predict();
     target_state.timestamp = timestamp;
-    this_id = GOBAL_ID++;
+    this_id = GOBAL_ID++;//全局状态标记，下游控制对同一id的不重复构建轨迹
 }
 
 int ArmorTarget::update(
@@ -382,8 +375,8 @@ int ArmorTarget::update(
         used_id[id] = true;
         if (armor.color_classifier) {
             const auto& colors = armor.color_classifier->light_colors;
-
-            // if (colors[Armor::ColorClassifierCtx::LEFT] != ArmorColor::NONE) {
+            //网络可能看到单个灯条，不过对另一个预测挺准的这里看感觉选下面两个逻辑
+            // if (colors[Armor::ColorClassifierCtx::LEFT] != ArmorColor::NONE) { 
             //     add_obs(armor, id, true);
             // }
 
@@ -401,7 +394,7 @@ int ArmorTarget::update(
         ++update_count;
     }
     for (const auto& [id, is_left, light]: matched_lights) {
-        if (used_id[id]) {
+        if (used_id[id]) { 
             continue;
         }
         auto ctx = uvmeasure_ctx;
@@ -420,7 +413,7 @@ int ArmorTarget::update(
     target_state.x = esekf.value().update_multi(obs);
     target_state.timestamp = timestamp;
     last_update = timestamp;
-    this_id = GOBAL_ID++;
+    this_id = GOBAL_ID++;//全局状态标记，下游控制对同一id的不重复构建轨迹
     return updated;
 }
 std::vector<std::pair<int, Armor>> ArmorTarget::match_armor(
@@ -439,7 +432,7 @@ std::vector<std::pair<int, Armor>> ArmorTarget::match_armor(
     const double max_cost = 1e9;
     std::vector<std::vector<double>> cost(n_obs, std::vector<double>(armors_num, max_cost + 1));
 
-    std::vector<YPDVecZ> meas_list(n_obs);
+    std::vector<YPDVecZ> meas_list(n_obs); //纯图像点匹配只能纯位置误差，要不就是和match_light基于逻辑，不如随便pnp一下ypda匹配
     for (int j = 0; j < n_obs; ++j) {
         armor_pnp(armors[j], camera_info, camera_cv_in_odom);
         meas_list[j] = get_ypdmeasurement(armors[j]);
@@ -519,7 +512,8 @@ std::vector<std::tuple<int, bool, Light>> ArmorTarget::match_light(
     std::vector<std::pair<int, Armor>>& matched_armors,
     const CameraInfo& camera_info,
     const ISO3& camera_cv_in_odom
-) const noexcept {
+) const noexcept { 
+    //可见灯条逻辑判断不优雅，不过这比较个稳定可观
     std::vector<std::tuple<int, bool, Light>> result;
 
     if (target_number == ArmorClass::OUTPOST || target_number == ArmorClass::BASE
@@ -531,7 +525,6 @@ std::vector<std::tuple<int, bool, Light>> ArmorTarget::match_light(
     const int armors_num = armor_num();
     const int armor_id = matched_armors.front().first;
     constexpr double max_cost = 1e9;
-
     auto predict_light = [&](int id, bool is_left) -> std::pair<cv::Point2f, cv::Point2f> {
         UVMeasure::Ctx ctx { .armor_num = armors_num,
                              .id = id,
@@ -548,10 +541,13 @@ std::vector<std::tuple<int, bool, Light>> ArmorTarget::match_light(
             cv::Point2f(z[std::to_underlying(idx::BOTTOM_X)], z[std::to_underlying(idx::BOTTOM_Y)])
         };
     };
-
-    std::array<std::pair<cv::Point2f, cv::Point2f>, 2> visible_lights {
-        predict_light((armor_id + 3) % 4, false), // 左可见
-        predict_light((armor_id + 1) % 4, true), // 右可见
+    const std::array visible_mapping {
+        std::pair { (armor_id + 3) % 4, false }, // 左可见
+        std::pair { (armor_id + 1) % 4, true }, // 右可见
+    };
+    std::array<std::pair<cv::Point2f, cv::Point2f>, visible_mapping.size()> visible_lights {
+        predict_light(visible_mapping[0].first, visible_mapping[0].second), // 左可见
+        predict_light(visible_mapping[1].first, visible_mapping[1].second), // 右可见
     };
 
     const int n_obs = static_cast<int>(lights.size());
@@ -599,13 +595,7 @@ std::vector<std::tuple<int, bool, Light>> ArmorTarget::match_light(
     }
 
     std::vector<bool> used_obs(n_obs, false);
-    const std::array<std::pair<int, bool>, visible_lights.size()> mapping {
-        std::pair { (armor_id + 3) % 4, false }, // 左可见
-        std::pair { (armor_id + 1) % 4, true }, // 右可见
-    };
-
-    std::array<bool, mapping.size()> used_id { false, false }; // 只匹配左可见/右可见
-
+    std::array<bool, visible_mapping.size()> used_id { false, false }; // 只匹配左可见/右可见
     while (true) {
         double best = max_cost;
         int best_j = -1, best_id = -1;
@@ -630,7 +620,7 @@ std::vector<std::tuple<int, bool, Light>> ArmorTarget::match_light(
         used_obs[best_j] = true;
         used_id[best_id] = true;
 
-        auto [matched_id, is_left] = mapping[best_id];
+        auto [matched_id, is_left] = visible_mapping[best_id];
         result.emplace_back(matched_id, is_left, lights[best_j]);
     }
 

@@ -1,8 +1,10 @@
 #pragma once
 #include "KalmanHyLib/error_state_extended_kalman_filter.hpp"
+#include "tasks/auto_aim/type.hpp"
 #include "tasks/base/common.hpp"
 #include "utils/common/type_common.hpp"
 #include "utils/utils.hpp"
+#include <Eigen/src/Core/Matrix.h>
 #include <algorithm>
 #include <ceres/ceres.h>
 #include <ceres/jet.h>
@@ -11,32 +13,19 @@
 #include <optional>
 #include <utility>
 #include <vector>
-namespace awakening::rune_point_motion_model {
-
-constexpr int X_N = 11;
-constexpr int Z_N = 8;
-
-using VecX = Eigen::Matrix<double, X_N, 1>;
-using VecZ = Eigen::Matrix<double, Z_N, 1>;
+namespace awakening::auto_buff::motion_model {
 
 namespace idx {
-    enum { CX, VCX, CY, VCY, CZ, VCZ, YAW, VYAW, R, P1, P2 };
-    constexpr int L = P1;
-    constexpr int H = P2;
-    constexpr int OUTPOST01DZ = P1;
-    constexpr int OUTPOST02DZ = P2;
-    enum {
-        LEFT_TOP_X,
-        LEFT_TOP_Y,
-        LEFT_BOTTOM_X,
-        LEFT_BOTTOM_Y,
-        RIGHT_BOTTOM_X,
-        RIGHT_BOTTOM_Y,
-        RIGHT_TOP_X,
-        RIGHT_TOP_Y
-    };
+    enum { CX, CY, CZ, YAW, ROLL, V_ROLL, X_N };
+    enum { TOP_X, TOP_Y, BOTTOM_X, BOTTOM_Y, _UVZ_N };
+    enum { YPD_Y, YPD_P, YPD_D, ROT_YAW, ROT_ROLL, _YPD_Z_N };
 } // namespace idx
-
+constexpr int X_N = idx::X_N;
+constexpr int UVZ_N = idx::_UVZ_N;
+constexpr int YPDZ_N = idx::_YPD_Z_N;
+using VecX = Eigen::Matrix<double, X_N, 1>;
+using UVVecZ = Eigen::Matrix<double, UVZ_N, 1>;
+using YPDVecZ = Eigen::Matrix<double, YPDZ_N, 1>;
 template<typename T>
 inline T normalize_angle(T a) {
     const T two_pi = T(2.0 * M_PI);
@@ -49,6 +38,7 @@ struct Predict {
     template<typename T>
     inline void operator()(const T x0[X_N], T x1[X_N]) const {
         std::copy(x0, x0 + X_N, x1);
+        x1[idx::ROLL] += x0[idx::V_ROLL] * T(dt);
 
         clamp(x1);
     }
@@ -62,21 +52,21 @@ struct Predict {
     }
 };
 
-struct Measure {
+struct UVMeasure {
     struct Ctx {
         int id { 0 };
         ISO3 camera_cv_in_odom = ISO3::Identity();
         CameraInfo camera_info;
-
     } ctx;
 
     template<typename T>
-    inline void operator()(const T x[X_N], T z[Z_N]) const {}
+    inline void operator()(const T x[X_N], T z[UVZ_N]) const {}
 
-    inline void h(const VecX& x, VecZ& z) const {
+    inline void h(const VecX& x, UVVecZ& z) const {
         operator()(x.data(), z.data());
     }
 };
+
 struct State {
     VecX x;
     TimePoint timestamp;
@@ -85,6 +75,6 @@ struct State {
 
 // using RobotStateEKF = kalman_hybird_lib::ExtendedKalmanFilter<X_N, Z_N, Predict, Measure>;
 
-using RobotStateESEKF = kalman_hybird_lib::ErrorStateEKF<X_N, Predict>;
+using ESEKF = kalman_hybird_lib::ErrorStateEKF<X_N, Predict>;
 
-} // namespace awakening::rune_point_motion_model
+} // namespace awakening::auto_buff::motion_model

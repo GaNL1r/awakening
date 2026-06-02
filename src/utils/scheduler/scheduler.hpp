@@ -69,7 +69,6 @@ public:
         condition_.notify_one();
     }
 
-
     void cancel_pending() {
         std::lock_guard lock(mutex_);
         std::queue<std::function<void()>> empty;
@@ -217,7 +216,6 @@ public:
         }
         rate_threads_.clear();
 
-        // 清空待处理队列，等待正在执行的任务完成
         pool_.cancel_pending();
         pool_.wait();
 
@@ -238,7 +236,6 @@ public:
             connect(node);
         }
 
-        // 检查孤立节点
         for (auto& [_, nodes]: static_tasks_snapshot_) {
             for (auto& node: nodes) {
                 if (node->connected_count == 0) {
@@ -269,7 +266,6 @@ private:
             task_queue_.push(node);
         }
 
-        // 向线程池提交任务处理队列
         pool_.enqueue([this] { process_queue(); });
     }
 
@@ -312,7 +308,7 @@ private:
     std::vector<RateWorker> rate_workers_;
     std::vector<std::jthread> rate_threads_;
 
-    ThreadPool pool_; 
+    ThreadPool pool_;
 
     std::atomic<bool> running_ { false };
     bool built_ { false };
