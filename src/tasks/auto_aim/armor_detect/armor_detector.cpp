@@ -578,7 +578,7 @@ struct ArmorDetector::Impl {
                 }
                 armor.tidy();
                 armor.transform(net_output.transform_matrix);
-                armor.add_offset(frame.offset);
+                armor.add_offset(frame.expanded.tl());
             }
         }
 

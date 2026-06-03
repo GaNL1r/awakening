@@ -306,7 +306,6 @@ int main(int argc, char** argv) {
             .id = current_id++,
             .frame_id = std::to_underlying(SentryFrame::CAMERA_CV),
             .expanded = cv::Rect(0, 0, frame.img_frame.src_img.cols, frame.img_frame.src_img.rows),
-            .offset = cv::Point2f(0, 0),
         };
 
         return std::make_tuple(std::optional<CommonFrameIo::second_type>(std::move(frame)));
@@ -489,7 +488,6 @@ int main(int argc, char** argv) {
             );
             if (bbox.area() > 200) {
                 frame.expanded = bbox;
-                frame.offset = cv::Point2f(bbox.x, bbox.y);
             }
 
             if (target.need_detect_lights()) {
@@ -697,7 +695,6 @@ int main(int argc, char** argv) {
 
         CommonFrame common_frame;
         common_frame.expanded = cv::Rect(0, 0, img_frame.src_img.cols, img_frame.src_img.rows);
-        common_frame.offset = cv::Point2f(0, 0);
         common_frame.img_frame = std::move(img_frame);
         common_frame.frame_id = one.cv_frame_id;
         common_frame.id = one.order_id++;

@@ -10,7 +10,6 @@ struct CommonFrame {
     int id;
     int frame_id;
     cv::Rect expanded;
-    cv::Point2f offset = cv::Point2f(0, 0);
 };
 enum class EnemyColor : bool {
     RED = 0,
