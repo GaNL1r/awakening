@@ -591,29 +591,34 @@ struct ArmorDetector::Impl {
 
             for (auto& armor: result) {
                 auto& pts = armor.key_points.points;
-
+                auto armor_fall_back = armor;
+                int left_id = -1;
+                int right_id = -2;
                 auto try_update_light = [&](ArmorKeyPointsIndex top_idx,
-                                            ArmorKeyPointsIndex bottom_idx) -> bool {
+                                            ArmorKeyPointsIndex bottom_idx,
+                                            int& light_id) -> bool {
                     auto& top = pts[std::to_underlying(top_idx)].value();
                     auto& bottom = pts[std::to_underlying(bottom_idx)].value();
 
                     const float len = cv::norm(top - bottom);
                     const cv::Point2f center = (top + bottom) * 0.5f;
 
-                    for (const auto& light: lights) {
+                    for (int i = 0; i < lights.size(); i++) {
+                        const auto& light = lights[i];
                         if (!light.corrected) {
                             continue;
                         }
                         const auto bbox = light.boundingRect();
 
-                        if (!bbox.contains(center)) {
+                        if (!bbox.contains(center) || !bbox.contains(top) || !bbox.contains(bottom))
+                        {
                             continue;
                         }
 
                         if (std::abs(len - light.length) > len * 0.2f) {
                             continue;
                         }
-
+                        light_id = i;
                         top = light.corrected->first;
                         bottom = light.corrected->second;
                         return true;
@@ -622,12 +627,20 @@ struct ArmorDetector::Impl {
                     return false;
                 };
 
-                // try_update_light(
-                //     ArmorKeyPointsIndex::LEFT_TOP,
-                //     ArmorKeyPointsIndex::LEFT_BOTTOM
-                // ); //简易匹配，相同灯条传统覆盖网络
+                try_update_light(
+                    ArmorKeyPointsIndex::LEFT_TOP,
+                    ArmorKeyPointsIndex::LEFT_BOTTOM,
+                    left_id
+                ); //简易匹配，相同灯条传统覆盖网络
 
-                // try_update_light(ArmorKeyPointsIndex::RIGHT_TOP, ArmorKeyPointsIndex::RIGHT_BOTTOM);
+                try_update_light(
+                    ArmorKeyPointsIndex::RIGHT_TOP,
+                    ArmorKeyPointsIndex::RIGHT_BOTTOM,
+                    right_id
+                );
+                if (left_id == right_id) {
+                    armor = armor_fall_back;
+                }
             }
         }
 
@@ -640,10 +653,8 @@ struct ArmorDetector::Impl {
         return ratio_ok;
     }
 
-    std::tuple<std::vector<Light>, std::vector<Armor>> detect_cv(
-        const CommonFrame& frame,
-        const std::optional<cv::Rect>& detect_light
-    ) const { //copy form sp_vision_25
+    std::tuple<std::vector<Light>, std::vector<Armor>>
+    detect_cv(const CommonFrame& frame, const std::optional<cv::Rect>& detect_light) const {
         const auto& src_img = frame.img_frame.src_img;
         auto bbox = detect_light ? detect_light.value() : frame.expanded;
 
@@ -658,7 +669,7 @@ struct ArmorDetector::Impl {
             return a.center.x < b.center.x;
         });
         std::list<Armor> tmp_armors;
-        for (auto left = lights.begin(); left != lights.end(); left++) {
+        for (auto left = lights.begin(); left != lights.end(); left++) { //copy form sp_vision_25
             for (auto right = std::next(left); right != lights.end(); right++) {
                 if (left->color != right->color) {
                     continue;
@@ -682,42 +693,8 @@ struct ArmorDetector::Impl {
         }
         classify_number_batch(batch_armors);
         tmp_armors.remove_if([](const Armor& a) {
-            bool invalid = false;
-            if (a.number_classifier->number == ArmorClass::UNKNOWN) {
-                invalid = true;
-            }
-            return invalid;
+            return a.number_classifier->number == ArmorClass::UNKNOWN;
         });
-        for (auto armor1 = tmp_armors.begin(); armor1 != tmp_armors.end(); ++armor1) {
-            for (auto armor2 = std::next(armor1); armor2 != tmp_armors.end(); ++armor2) {
-                if (armor1->cv->left.id != armor2->cv->left.id
-                    && armor1->cv->left.id != armor2->cv->right.id
-                    && armor1->cv->right.id != armor2->cv->left.id
-                    && armor1->cv->right.id != armor2->cv->right.id)
-                {
-                    continue;
-                }
-                // if (armor1->cv->left.id == armor2->cv->left.id
-                //     || armor1->cv->right.id == armor2->cv->right.id) {
-                //     auto area1 = armor1->number_classifier->number_img.cols
-                //         * armor1->number_classifier->number_img.rows;
-                //     auto area2 = armor2->number_classifier->number_img.cols
-                //         * armor2->number_classifier->number_img.rows;
-                //     if (area1 < area2)
-                //         armor2->cv->duplicated = true;
-                //     else
-                //         armor1->cv->duplicated = true;
-                // }
-                // if (armor1->cv->left.id == armor2->cv->right.id
-                //     || armor1->cv->right.id == armor2->cv->left.id) {
-                //     if (armor1->number_classifier->confidence
-                //         < armor2->number_classifier->confidence)
-                //         armor1->cv->duplicated = true;
-                //     else
-                //         armor2->cv->duplicated = true;
-                // }
-            }
-        }
         for (auto& armor: tmp_armors) {
             if (!armor.cv->duplicated) {
                 armor.tidy();
