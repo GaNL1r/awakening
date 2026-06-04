@@ -17,14 +17,14 @@ namespace awakening::auto_buff::motion_model {
 
 namespace idx {
     enum { CX, CY, CZ, YAW, ROLL, V_ROLL, X_N };
-    enum { TOP_X, TOP_Y, BOTTOM_X, BOTTOM_Y, _UVZ_N };
+    enum {  R_X, R_Y, R_Z_N };
     enum { YPD_Y, YPD_P, YPD_D, ROT_YAW, ROT_ROLL, _YPD_Z_N };
 } // namespace idx
 constexpr int X_N = idx::X_N;
-constexpr int UVZ_N = idx::_UVZ_N;
+constexpr int RZ_N = idx::R_Z_N;
 constexpr int YPDZ_N = idx::_YPD_Z_N;
 using VecX = Eigen::Matrix<double, X_N, 1>;
-using UVVecZ = Eigen::Matrix<double, UVZ_N, 1>;
+using RVecZ = Eigen::Matrix<double, RZ_N, 1>;
 using YPDVecZ = Eigen::Matrix<double, YPDZ_N, 1>;
 template<typename T>
 inline T normalize_angle(T a) {
@@ -52,7 +52,7 @@ struct Predict {
     }
 };
 
-struct UVMeasure {
+struct RMeasure {
     struct Ctx {
         int id { 0 };
         ISO3 camera_cv_in_odom = ISO3::Identity();
@@ -60,9 +60,9 @@ struct UVMeasure {
     } ctx;
 
     template<typename T>
-    inline void operator()(const T x[X_N], T z[UVZ_N]) const {}
+    inline void operator()(const T x[X_N], T z[RZ_N]) const {}
 
-    inline void h(const VecX& x, UVVecZ& z) const {
+    inline void h(const VecX& x, RVecZ& z) const {
         operator()(x.data(), z.data());
     }
 };

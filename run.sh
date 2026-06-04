@@ -112,7 +112,6 @@ if [[ "$1" == "run" || "$1" == "debug" || "$1" == "race" ]]; then
         exit 1
     fi
 
-    # 每次 run/debug 前都 build
     if [[ "$MODE" != "race" ]]; then
         do_build
     fi
