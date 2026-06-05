@@ -23,7 +23,8 @@ __pycache__
 *.gv
 
 *.pdf
-
+.codex/
+codex
 
 bin
 
