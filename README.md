@@ -27,6 +27,7 @@
 * 华北理工大学Horizon战队 https://github.com/BreCaspian/ROBOMASTER-HORIZON-LiDAR-2025/releases/tag/2026.04.24
 * 香港科技大学ENTERPRIZE战队 https://github.com/hkustenterprize/RM2025-Radar-Algorithm
 * 南京理工大学Alliance战队 https://github.com/Alliance-Algorithm
+* 五大湖联合大学The Great Lakes 战队 https://github.com/wele0612/Pacific_doorlock_sniper
 * 深圳大学RobotPilots战队 https://github.com/broalantaps/RobotDetectionModel
 * 华中科技大学狼牙战队 https://github.com/HUSTLYRM/HUST_HeroAim_2024
 * 吉林大学TARS Go战队 https://github.com/Fskaaaaaaaa/jlu_vision_26
