@@ -10,7 +10,7 @@
 
 ### 作者
 
-- 刘壁洁 [MoCI-L](https://github.com/MoCI-L) 雷达识别/通信部分开发与维护
+- 刘璧洁 [MoCI-L](https://github.com/MoCI-L) 雷达识别/通信部分开发与维护
 - 岳长鑫 [TRIAuAuAu](https://github.com/TRIAuAuAu) 英雄图传/工程机械臂规划（未在本仓库）
 - 武晓健 [hyheiyue](https://github.com/hyheiyue) qq:1836871898 vx:hy_xiaojian 自动瞄准/能量机关/哨兵决策/哨兵导航（未在本仓库）/雷达识别/镖体、镖架制导（未在本仓库）
 
