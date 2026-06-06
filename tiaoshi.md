@@ -1,19 +1,27 @@
 # 连接小电脑
-使用vscode的 Remote - SSH插件 
+
+使用vscode的 Remote - SSH插件
 哨兵： ssh nuc@192.168.10.51
 连接后进入主目录下的awakening，
+
 # 运行自瞄程序
+
 ```
 sudo ./run.sh run [exe名] [使用config的绝对路径] 【是否开启debug模式？true:xxx】
 #eg：
 sudo ./run.sh run auto_aim /home/hy/awakening/config/sentry.yaml true
 ```
+
 # 可视化：
+
 ```
-python3 web.py 
+python3 web.py
 ```
+
 浏览器进入： http://小电脑有线ip:8000
+
 # 调参
+
 ```
 enemy_color: red #识别颜色，只有调试时使用，比赛使用裁判系统数据
 max_infer_num: 5 #最大识别并发数 一般不用改
@@ -37,7 +45,7 @@ player:
 tf: #有ros2环境的可以开rviz看效果
   camera_in_gimbal: #相机与云台旋旋转中心外参，影响去运动畸变精度，弹道补偿
     t: [0.00,0.00,0.08]
-    R: [1.0,0.0,0.0,0.0,1.0,0.0,0.0,0.0,1.0] 
+    R: [1.0,0.0,0.0,0.0,1.0,0.0,0.0,0.0,1.0]
   shoot_in_gimbal: #测速枪口与云台旋转中心外参，这里只影响可视化的弹道重现
     t: [0.1,0.0,0.0]
     R: [1.0,0.0,0.0,0.0,1.0,0.0,0.0,0.0,1.0]
@@ -46,7 +54,7 @@ bullet_pick_up: #弹道重现参数，与very_aimer设置的一直即可
   ballistic_trajectory:
     gravity: 9.8
     resistance: 0.092
-  
+
 auto_exposure: #自动曝光
   enable: true
   target_brightness: 35.0 #目标平均亮度，10 - 50 一般不用调
@@ -85,8 +93,8 @@ armor_detector: #用车上原来的参数就行已经是最优解
     diff_threshold: 20.0
 
 armor_tracker: #跟踪参数，没有把握就不改
-  lost_time_thres: 0.5 
-  tracking_thres: 10 
+  lost_time_thres: 0.5
+  tracking_thres: 10
   match_gate: 300.0
   match_gate_not_all_init: 3000.0
   qxyz_common: [20.0, 20.0, 1.0]
@@ -101,9 +109,9 @@ armor_tracker: #跟踪参数，没有把握就不改
   esekf_iter_num: 5
 
 auto_aim_fsm: #多种瞄准模式target vyaw控制阈值 single：目标速度小锁定较优板 whole： 锁定全部板 pair： 4选2 center：瞄准中心
-  single_whole_up: 1.5 
+  single_whole_up: 1.5
   single_whole_down: 1.0
-  whole_pair_up: 6.5 
+  whole_pair_up: 6.5
   whole_pair_down: 7.5 #1s内至少换2次板子  2pi  否则轨迹规划无意义
   pair_center_up: 16.5
   pair_center_down: 15.0
@@ -115,16 +123,16 @@ very_aimer:
   base_pitch_offset: 2.0 # pitch补偿 两个都调好理论上发出弹丸会与可视化弹道重现重合，可以在没有靶车的时候临时调整
   # base_yaw_offset: -0.0
   # base_pitch_offset: -0.0
-  sample_total_time: 1.0 
-  
+  sample_total_time: 1.0
+
   sample_horizon: 200
 
   control_delay: 0.2 #发弹延迟 当前轨迹时间后发弹延迟如果最佳控制打不中则提前不开火，反之以最小允许误差尝试开火
-  
-  max_yaw_acc: 40 
+
+  max_yaw_acc: 40
   #全向yaw加速度测算37
   max_pitch_acc: 50
-  
+
 
   prediction_delay: 0.00 #预测时间调整 可通过击打平移单装甲板靶调试出
   aim_center_more_prediction_time: 0.0
@@ -132,7 +140,7 @@ very_aimer:
   leaving_angle: 20
 
 
-  shooting_range_h: 0.12 #目标装甲板高 
+  shooting_range_h: 0.12 #目标装甲板高
   shooting_range_w_small: 0.12 #宽 两个影响开火允许误差
   shooting_range_w_large: 0.24
   min_enable_pitch_deg: 0.25
@@ -143,7 +151,7 @@ very_aimer:
 
 
 
-camera: 
+camera:
   hik_camera:
     target_sn: DA2166432 #sn码 不匹配的话看终端提示就是
     adc_bit_depth: Bits_8
@@ -162,7 +170,7 @@ camera:
     trigger_mode: Off
     trigger_source: ""
     trigger_activation: ""
-    format: "bgr" 
+    format: "bgr"
     use_cuda_cvt: true
   camera_info: #相机内参，根据相机焦距选择以下预设或者自己标定
     #8mm

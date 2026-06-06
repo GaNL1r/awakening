@@ -342,7 +342,8 @@ int main(int argc, char** argv) {
             .img_frame = std::move(f),
             .id = current_id++,
             .frame_id = std::to_underlying(SimpleFrame::CAMERA_CV),
-            .expanded = cv::Rect2f(0, 0, frame.img_frame.src_img.cols, frame.img_frame.src_img.rows),
+            .expanded =
+                cv::Rect2f(0, 0, frame.img_frame.src_img.cols, frame.img_frame.src_img.rows),
 
         };
 

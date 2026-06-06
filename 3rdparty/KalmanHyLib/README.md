@@ -2,10 +2,10 @@
 
 **KalmanHyLib** is a lightweight, extensible, and **header-only** C++ library that implements advanced iterative Kalman filter variants, including:
 
-- 🔁 **IEKF** – *Iterated Extended Kalman Filter*  
-- 🔄 **IESEKF** – *Iterated Error-State Extended Kalman Filter*  
-- ➕ **IAEKF** – *Iterated Adaptive Extended Kalman Filter*  
-- 🧭 **IUKF** – *Iterated Unscented Kalman Filter*
+- 🔁 **IEKF** – _Iterated Extended Kalman Filter_
+- 🔄 **IESEKF** – _Iterated Error-State Extended Kalman Filter_
+- ➕ **IAEKF** – _Iterated Adaptive Extended Kalman Filter_
+- 🧭 **IUKF** – _Iterated Unscented Kalman Filter_
 
 The library is ideal for systems with **nonlinear dynamics and measurements**, where high-precision estimation and **iterative refinement** are critical.
 
@@ -34,10 +34,10 @@ The library is ideal for systems with **nonlinear dynamics and measurements**, w
 
 KalmanHyLib is suitable for:
 
-- 📷 Visual-Inertial Odometry (VIO) & SLAM  
-- 🎯 Target tracking and motion prediction  
-- 🧭 Navigation, control, and guidance systems  
-- 🤖 Robotic estimation and autonomy  
+- 📷 Visual-Inertial Odometry (VIO) & SLAM
+- 🎯 Target tracking and motion prediction
+- 🧭 Navigation, control, and guidance systems
+- 🤖 Robotic estimation and autonomy
 - 🔗 Complex multi-sensor fusion tasks
 
 ---
@@ -48,7 +48,7 @@ KalmanHyLib is actively used in the following real-time robotic vision project:
 
 ### [WUST-RM/wust_vision](https://github.com/WUST-RM/wust_vision)
 
-> ⚙️ *A real-time vision system for RoboMaster armor detection, 3D pose estimation, and state prediction using hybrid Kalman filtering.*
+> ⚙️ _A real-time vision system for RoboMaster armor detection, 3D pose estimation, and state prediction using hybrid Kalman filtering._
 
 In this project, **KalmanHyLib** is used to:
 
@@ -118,3 +118,4 @@ struct Measure {
 
 using RobotStateEKF = kalman_hybird_lib::ExtendedKalmanFilter<X_N, Z_N, Predict, Measure>;
 using RobotStateESEKF = kalman_hybird_lib::ErrorStateEKF<X_N, Z_N, Predict, Measure>;
+```
