@@ -94,13 +94,13 @@ public:
         const CameraInfo& camera_info,
         const ISO3& camera_cv_in_odom
     );
-    [[nodiscard]] cv::Rect expanded_one_one(
+    [[nodiscard]] cv::Rect2f expanded_one_one(
         const TimePoint& timestamp,
         const ISO3& camera_cv_in_odom,
         const CameraInfo& camera_info,
         const cv::Size& image_size
     ) const noexcept;
-    [[nodiscard]] cv::Rect expanded(
+    [[nodiscard]] cv::Rect2f expanded(
         const TimePoint& timestamp,
         const ISO3& camera_cv_in_odom,
         const CameraInfo& camera_info,

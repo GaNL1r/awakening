@@ -50,11 +50,11 @@ struct RuneDetector::Impl {
     ) const noexcept {
         bool need_red = enemy_color == EnemyColor::BLUE;
         for (int i = 0; i < contours.size(); i++) {
-            cv::Rect r = cv::boundingRect(contours[i]);
+            cv::Rect2f r = cv::boundingRect(contours[i]);
             if (r.width < 5 || r.height < 5)
                 continue;
 
-            cv::Rect rr = r & cv::Rect(0, 0, color.cols, color.rows);
+            cv::Rect2f rr = r & cv::Rect2f(0, 0, color.cols, color.rows);
             if (rr.width < 2 || rr.height < 2)
                 continue;
 

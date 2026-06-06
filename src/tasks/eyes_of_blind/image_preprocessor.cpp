@@ -73,7 +73,7 @@ struct ImagePreprocessor::Impl {
         y = std::max(0, y);
         int w = std::min(params_.crop_size, input.cols - x);
         int h = std::min(params_.crop_size, input.rows - y);
-        cv::Mat cropped = input(cv::Rect(x, y, w, h));
+        cv::Mat cropped = input(cv::Rect2f(x, y, w, h));
 
         // 2. 缩放
         cv::Mat resized;
@@ -143,7 +143,7 @@ struct ImagePreprocessor::Impl {
             int y0 = std::max(0, working.rows / 2 - clear / 2);
             int cw = std::min(clear, working.cols - x0);
             int ch = std::min(clear, working.rows - y0);
-            cv::rectangle(motion_mask, cv::Rect(x0, y0, cw, ch), cv::Scalar(255), cv::FILLED);
+            cv::rectangle(motion_mask, cv::Rect2f(x0, y0, cw, ch), cv::Scalar(255), cv::FILLED);
         }
 
         // 决定彩色掩码
@@ -156,7 +156,7 @@ struct ImagePreprocessor::Impl {
                 int y0 = std::max(0, working.rows / 2 - clear / 2);
                 int cw = std::min(clear, working.cols - x0);
                 int ch = std::min(clear, working.rows - y0);
-                cv::rectangle(color_mask, cv::Rect(x0, y0, cw, ch), cv::Scalar(255), cv::FILLED);
+                cv::rectangle(color_mask, cv::Rect2f(x0, y0, cw, ch), cv::Scalar(255), cv::FILLED);
             } else {
                 color_mask = cv::Mat::zeros(working.size(), CV_8UC1);
             }

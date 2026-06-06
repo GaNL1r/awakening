@@ -283,7 +283,7 @@ public:
                 cv::Mat
                     vis(drawed.rows, drawed.cols + panel_width, CV_8UC3, cv::Scalar(40, 40, 40));
 
-                drawed.copyTo(vis(cv::Rect(0, 0, drawed.cols, drawed.rows)));
+                drawed.copyTo(vis(cv::Rect2f(0, 0, drawed.cols, drawed.rows)));
                 int start_x = drawed.cols + padding;
                 int start_y = 30;
                 int line_h = 20;

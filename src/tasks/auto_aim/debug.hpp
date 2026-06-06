@@ -16,7 +16,7 @@ struct AutoAimDebugCtx {
     utils::Locked<Armors> armors;
     utils::Locked<ArmorTarget> armor_target;
     utils::Locked<ImageFrame> img_frame;
-    utils::Locked<cv::Rect> expanded;
+    utils::Locked<cv::Rect2f> expanded;
     utils::Locked<double> avg_latency_ms;
     utils::Locked<GimbalCmd> gimbal_cmd;
     utils::Locked<AutoAimFsm> fsm_state;

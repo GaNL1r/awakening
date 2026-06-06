@@ -305,7 +305,7 @@ int main(int argc, char** argv) {
             .img_frame = std::move(f),
             .id = current_id++,
             .frame_id = std::to_underlying(SentryFrame::CAMERA_CV),
-            .expanded = cv::Rect(0, 0, frame.img_frame.src_img.cols, frame.img_frame.src_img.rows),
+            .expanded = cv::Rect2f(0, 0, frame.img_frame.src_img.cols, frame.img_frame.src_img.rows),
         };
 
         return std::make_tuple(std::optional<CommonFrameIo::second_type>(std::move(frame)));
@@ -469,7 +469,7 @@ int main(int argc, char** argv) {
             detector_sem =
                 std::make_unique<std::counting_semaphore<>>(config["max_infer_num"].as<int>());
         }
-        std::optional<cv::Rect> detect_light = std::nullopt;
+        std::optional<cv::Rect2f> detect_light = std::nullopt;
         auto target = armor_target.read();
         if (target.check()) {
             auto camera_cv_in_old = tf->pose_a_in_b(
@@ -501,7 +501,7 @@ int main(int argc, char** argv) {
                 detect_light->y -= detect_light->height * 0.3;
                 detect_light->width *= 1.6;
                 detect_light->height *= 1.6;
-                const cv::Rect
+                const cv::Rect2f
                     img_rect(0, 0, frame.img_frame.src_img.cols, frame.img_frame.src_img.rows);
                 detect_light.value() &= img_rect;
                 if (detect_light->area() > frame.expanded.area()) {
@@ -694,7 +694,7 @@ int main(int argc, char** argv) {
         }
 
         CommonFrame common_frame;
-        common_frame.expanded = cv::Rect(0, 0, img_frame.src_img.cols, img_frame.src_img.rows);
+        common_frame.expanded = cv::Rect2f(0, 0, img_frame.src_img.cols, img_frame.src_img.rows);
         common_frame.img_frame = std::move(img_frame);
         common_frame.frame_id = one.cv_frame_id;
         common_frame.id = one.order_id++;

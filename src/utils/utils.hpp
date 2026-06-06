@@ -230,16 +230,20 @@ inline cv::Mat letterbox(
     cv::resize(img, resized, cv::Size(resize_w, resize_h), 0, 0, cv::INTER_LINEAR);
 
     cv::Mat out;
-    cv::copyMakeBorder(
-        resized,
-        out,
-        top,
-        pad_h - top,
-        left,
-        pad_w - left,
-        cv::BORDER_CONSTANT,
-        cv::Scalar(114, 114, 114)
-    );
+    if (pad_h == 0 && pad_w == 0) {
+        out = resized;
+    } else {
+        cv::copyMakeBorder(
+            resized,
+            out,
+            top,
+            pad_h - top,
+            left,
+            pad_w - left,
+            cv::BORDER_CONSTANT,
+            cv::Scalar(114, 114, 114)
+        );
+    }
 
     const float inv_scale = 1.0f / scale;
 

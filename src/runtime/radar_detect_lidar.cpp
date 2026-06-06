@@ -111,7 +111,7 @@
 //             .img_frame = std::move(f),
 //             .id = current_id++,
 //             .frame_id = 0,
-//             .expanded = cv::Rect(x, y, w, h),
+//             .expanded = cv::Rect2f(x, y, w, h),
 //             .offset = cv::Point2f(x, y),
 //         };
 

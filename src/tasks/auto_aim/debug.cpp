@@ -21,8 +21,8 @@ void draw_auto_aim(cv::Mat& img, const AutoAimDebugCtx& ctx) {
     auto cmd = ctx.gimbal_cmd.get();
     auto fsm = ctx.fsm_state.get();
     auto bullet_poss = ctx.bullet_positions.get();
-    const cv::Rect img_rect(0, 0, img.cols, img.rows);
-    const cv::Rect roi = ctx.expanded.get() & img_rect;
+    const cv::Rect2f img_rect(0, 0, img.cols, img.rows);
+    const cv::Rect2f roi = ctx.expanded.get() & img_rect;
     if (roi.width > 0 && roi.height > 0) {
         cv::rectangle(img, roi, cv::Scalar(255, 255, 255), 2);
     }

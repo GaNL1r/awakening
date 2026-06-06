@@ -225,8 +225,7 @@ int main(int argc, char** argv) {
             .img_frame = std::move(f),
             .id = current_id++,
             .frame_id = 0,
-            .expanded = cv::Rect(x, y, w, h),
-            .offset = cv::Point2f(x, y),
+            .expanded = cv::Rect2f(x, y, w, h),
         };
         log_ctx.image_count++;
         if (video_saver) {
@@ -256,7 +255,6 @@ int main(int argc, char** argv) {
                     [&]() {
                         CommonFrame f = frame;
                         f.expanded = outpost_bbox;
-                        f.offset = outpost_bbox.tl();
                         outpost_armors = detector.detect_armors(f);
                         enemy_outpost_active = false;
                         for (const auto& o: outpost_armors) {

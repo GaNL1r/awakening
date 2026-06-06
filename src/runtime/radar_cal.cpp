@@ -92,12 +92,12 @@ int main(int argc, char** argv) {
         } else if (cal_type == 3) {
             struct BBoxState {
                 cv::Mat current_img;
-                cv::Rect current_box;
+                cv::Rect2f current_box;
                 bool drawing = false;
                 bool has_box = false;
                 cv::Point start_pt;
 
-                std::vector<cv::Rect> boxes;
+                std::vector<cv::Rect2f> boxes;
             };
 
             auto state = std::make_shared<BBoxState>();
@@ -110,7 +110,7 @@ int main(int argc, char** argv) {
                     if (event == cv::EVENT_LBUTTONDOWN) {
                         s->drawing = true;
                         s->start_pt = cv::Point(x, y);
-                        s->current_box = cv::Rect(x, y, 0, 0);
+                        s->current_box = cv::Rect2f(x, y, 0, 0);
                     }
 
                     else if (event == cv::EVENT_MOUSEMOVE && s->drawing)
@@ -120,7 +120,7 @@ int main(int argc, char** argv) {
                         int w = std::abs(x - s->start_pt.x);
                         int h = std::abs(y - s->start_pt.y);
 
-                        s->current_box = cv::Rect(x0, y0, w, h);
+                        s->current_box = cv::Rect2f(x0, y0, w, h);
                     }
 
                     else if (event == cv::EVENT_LBUTTONUP)
@@ -132,7 +132,7 @@ int main(int argc, char** argv) {
                         int w = std::abs(x - s->start_pt.x);
                         int h = std::abs(y - s->start_pt.y);
 
-                        s->current_box = cv::Rect(x0, y0, w, h);
+                        s->current_box = cv::Rect2f(x0, y0, w, h);
 
                         if (w > 5 && h > 5) {
                             s->boxes.push_back(s->current_box);

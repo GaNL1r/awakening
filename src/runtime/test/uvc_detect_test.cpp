@@ -82,7 +82,7 @@ int main(int argc, char** argv) {
     //         return;
     //     }
     //     CommonFrame common_frame;
-    //     common_frame.expanded = cv::Rect(0, 0, img_frame.src_img.cols, img_frame.src_img.rows);
+    //     common_frame.expanded = cv::Rect2f(0, 0, img_frame.src_img.cols, img_frame.src_img.rows);
     //     common_frame.offset = cv::Point2f(0, 0);
     //     common_frame.img_frame = std::move(img_frame);
     //     common_frame.frame_id = 0;

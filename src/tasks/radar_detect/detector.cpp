@@ -124,24 +124,24 @@ struct Detector::Impl {
         }
         const auto& src_img = frame.img_frame.src_img;
 
-        cv::Rect src_rect(0, 0, src_img.cols, src_img.rows);
-        cv::Rect safe_expanded = frame.expanded & src_rect;
+        cv::Rect2f src_rect(0, 0, src_img.cols, src_img.rows);
+        cv::Rect2f safe_expanded = frame.expanded & src_rect;
         if (safe_expanded.area() <= 0) {
             return armors;
         }
 
         const auto roi = src_img(safe_expanded);
-        cv::Rect roi_safe_bounds(0, 0, roi.cols, roi.rows);
+        cv::Rect2f roi_safe_bounds(0, 0, roi.cols, roi.rows);
         auto armor_output = armor_trt_->detect(roi, frame.img_frame.format);
         armors = armor_post_process(armor_output.output);
         for (auto& armor: armors) {
             armor.bbox = utils::transform_rect(armor_output.transform_matrix, armor.bbox);
             armor.color = get_color(
-                roi(cv::Rect(armor.bbox) & roi_safe_bounds),
+                roi(cv::Rect2f(armor.bbox) & roi_safe_bounds),
                 params_.armor_color_diff_threshold,
                 frame.img_frame.format
             );
-            armor.bbox += frame.offset;
+            armor.bbox += frame.expanded.tl();
         }
         // Implementation for detecting armors
         return armors;
@@ -154,8 +154,8 @@ struct Detector::Impl {
 
         const auto& src_img = frame.img_frame.src_img;
 
-        cv::Rect src_rect(0, 0, src_img.cols, src_img.rows);
-        cv::Rect safe_expanded = frame.expanded & src_rect;
+        cv::Rect2f src_rect(0, 0, src_img.cols, src_img.rows);
+        cv::Rect2f safe_expanded = frame.expanded & src_rect;
         if (safe_expanded.area() <= 0) {
             return cars;
         }
@@ -173,12 +173,12 @@ struct Detector::Impl {
             cv::Rect2f bbox_in_concatenated;
         };
         std::vector<Ctx> car_ctxs;
-        cv::Rect roi_safe_bounds(0, 0, roi.cols, roi.rows);
+        cv::Rect2f roi_safe_bounds(0, 0, roi.cols, roi.rows);
 
         for (auto& car: cars) {
             car.bbox = utils::transform_rect(car_output.transform_matrix, car.bbox);
             car.timestamp = frame.img_frame.timestamp;
-            cv::Rect clamped_bbox = cv::Rect(car.bbox) & roi_safe_bounds;
+            cv::Rect2f clamped_bbox = cv::Rect2f(car.bbox) & roi_safe_bounds;
 
             if (clamped_bbox.area() <= 0) {
                 continue;
@@ -224,7 +224,7 @@ struct Detector::Impl {
             for (int c = 0; c < cols; ++c) {
                 if (idx >= num_imgs)
                     break;
-                cv::Rect roi_rect(c * img_width, r * img_height, img_width, img_height);
+                cv::Rect2f roi_rect(c * img_width, r * img_height, img_width, img_height);
                 car_ctxs[idx].img.copyTo(concatenated_img(roi_rect));
                 car_ctxs[idx].bbox_in_concatenated = roi_rect;
                 ++idx;
@@ -249,7 +249,7 @@ struct Detector::Impl {
                     armor.bbox.x += ctx.raw_bbox.x;
                     armor.bbox.y += ctx.raw_bbox.y;
                     armor.color = get_color(
-                        roi(cv::Rect(armor.bbox) & roi_safe_bounds),
+                        roi(cv::Rect2f(armor.bbox) & roi_safe_bounds),
                         params_.armor_color_diff_threshold,
                         frame.img_frame.format
                     );
@@ -261,9 +261,9 @@ struct Detector::Impl {
         }
 
         for (auto& car: cars) {
-            car.bbox += frame.offset;
+            car.bbox += frame.expanded.tl();
             for (auto& armor: car.armors) {
-                armor.bbox += frame.offset;
+                armor.bbox += frame.expanded.tl();
             }
             car.tidy();
         }

@@ -17,7 +17,7 @@ namespace awakening::auto_buff::motion_model {
 
 namespace idx {
     enum { CX, CY, CZ, YAW, ROLL, V_ROLL, X_N };
-    enum {  R_X, R_Y, R_Z_N };
+    enum { R_X, R_Y, R_Z_N };
     enum { YPD_Y, YPD_P, YPD_D, ROT_YAW, ROT_ROLL, _YPD_Z_N };
 } // namespace idx
 constexpr int X_N = idx::X_N;

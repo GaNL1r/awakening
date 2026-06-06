@@ -187,7 +187,7 @@ struct ArmorDetector::Impl {
 
         // Get ROI
         number_image =
-            number_image(cv::Rect(cv::Point((warp_width - roi_size.width) / 2, 0), roi_size));
+            number_image(cv::Rect2f(cv::Point((warp_width - roi_size.width) / 2, 0), roi_size));
 
         // Binarize
         cv::cvtColor(number_image, number_image, cv::COLOR_RGB2GRAY);
@@ -243,8 +243,8 @@ struct ArmorDetector::Impl {
         armor.color_classifier = Armor::ColorClassifierCtx();
         armor.color_classifier->lights_box = lights_box;
         auto extractRotatedROI = [](const cv::Mat& src, const cv::RotatedRect& rect) {
-            cv::Rect bbox = rect.boundingRect();
-            bbox &= cv::Rect(0, 0, src.cols, src.rows);
+            cv::Rect2f bbox = rect.boundingRect();
+            bbox &= cv::Rect2f(0, 0, src.cols, src.rows);
             if (bbox.width <= 0 || bbox.height <= 0)
                 return cv::Mat();
             return src(bbox);
@@ -389,14 +389,14 @@ struct ArmorDetector::Impl {
         constexpr float SEARCH_END = 0.6f; // 搜索结束位置比例
 
         // 扩展ROI
-        cv::Rect roi_box = light.boundingRect();
+        cv::Rect2f roi_box = light.boundingRect();
         roi_box.x -= static_cast<int>(roi_box.width * ROI_SCALE);
         roi_box.y -= static_cast<int>(roi_box.height * ROI_SCALE);
         roi_box.width += static_cast<int>(2 * roi_box.width * ROI_SCALE);
         roi_box.height += static_cast<int>(2 * roi_box.height * ROI_SCALE);
 
         // 边界约束
-        roi_box &= cv::Rect(0, 0, gray.cols, gray.rows);
+        roi_box &= cv::Rect2f(0, 0, gray.cols, gray.rows);
         if (roi_box.width <= 0 || roi_box.height <= 0)
             return;
 
@@ -502,7 +502,7 @@ struct ArmorDetector::Impl {
         light.corrected->second = find_corner(-1, light.bottom);
     }
     std::vector<Light>
-    detect_lights(const cv::Mat& src, PixelFormat format, cv::Rect bbox) const noexcept {
+    detect_lights(const cv::Mat& src, PixelFormat format, cv::Rect2f bbox) const noexcept {
         const auto detect_roi = src(bbox);
         cv::Mat gray, bin;
         cv::cvtColor(detect_roi, gray, cv::COLOR_BGR2GRAY);
@@ -550,7 +550,7 @@ struct ArmorDetector::Impl {
         return lights;
     }
     std::tuple<std::vector<Light>, std::vector<Armor>>
-    detect_net(const CommonFrame& frame, const std::optional<cv::Rect>& detect_light) const {
+    detect_net(const CommonFrame& frame, const std::optional<cv::Rect2f>& detect_light) const {
         const auto& src_img = frame.img_frame.src_img;
         const auto roi = src_img(frame.expanded);
         utils::NetDetectorBase::OutPut net_output;
@@ -654,7 +654,7 @@ struct ArmorDetector::Impl {
     }
 
     std::tuple<std::vector<Light>, std::vector<Armor>>
-    detect_cv(const CommonFrame& frame, const std::optional<cv::Rect>& detect_light) const {
+    detect_cv(const CommonFrame& frame, const std::optional<cv::Rect2f>& detect_light) const {
         const auto& src_img = frame.img_frame.src_img;
         auto bbox = detect_light ? detect_light.value() : frame.expanded;
 
@@ -704,7 +704,7 @@ struct ArmorDetector::Impl {
         return { std::move(lights), std::move(result) };
     }
     std::tuple<std::vector<Light>, std::vector<Armor>>
-    detect(const CommonFrame& frame, const std::optional<cv::Rect>& detect_light) const {
+    detect(const CommonFrame& frame, const std::optional<cv::Rect2f>& detect_light) const {
         if (net_detector_) {
             return detect_net(frame, detect_light);
         } else {
@@ -722,7 +722,7 @@ ArmorDetector::~ArmorDetector() noexcept {
     _impl.reset();
 }
 std::tuple<std::vector<Light>, std::vector<Armor>>
-ArmorDetector::detect(const CommonFrame& frame, const std::optional<cv::Rect>& detect_light) {
+ArmorDetector::detect(const CommonFrame& frame, const std::optional<cv::Rect2f>& detect_light) {
     return _impl->detect(frame, detect_light);
 }
 } // namespace awakening::auto_aim

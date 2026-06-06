@@ -627,7 +627,7 @@ std::vector<std::tuple<int, bool, Light>> ArmorTarget::match_light(
 
     return result;
 }
-[[nodiscard]] cv::Rect ArmorTarget::expanded_one_one(
+[[nodiscard]] cv::Rect2f ArmorTarget::expanded_one_one(
     const TimePoint& timestamp,
     const ISO3& camera_cv_in_odom,
     const CameraInfo& camera_info,
@@ -636,7 +636,7 @@ std::vector<std::tuple<int, bool, Light>> ArmorTarget::match_light(
     const double dt = std::chrono::duration<double>(timestamp - last_update).count();
 
     if (!is_inited || dt > cfg.lost_time_thres) {
-        return cv::Rect(0, 0, image_size.width, image_size.height);
+        return cv::Rect2f(0, 0, image_size.width, image_size.height);
     }
 
     float car_box_half = std::max(target_state.r(), target_state.r() + target_state.l()) + 0.15f;
@@ -656,7 +656,7 @@ std::vector<std::tuple<int, bool, Light>> ArmorTarget::match_light(
     auto target_pos_in_camera_cv = camera_cv_in_odom.inverse() * target_pos_in_odom;
 
     if (target_pos_in_camera_cv.z() <= 0.2) {
-        return cv::Rect(0, 0, image_size.width, image_size.height);
+        return cv::Rect2f(0, 0, image_size.width, image_size.height);
     }
 
     const cv::Mat tvec =
@@ -695,12 +695,12 @@ std::vector<std::tuple<int, bool, Light>> ArmorTarget::match_light(
         pts_2d
     );
 
-    const cv::Rect rect = cv::boundingRect(pts_2d);
+    const cv::Rect2f rect = cv::boundingRect(pts_2d);
 
-    const cv::Rect img_rect(0, 0, image_size.width, image_size.height);
+    const cv::Rect2f img_rect(0, 0, image_size.width, image_size.height);
 
     if ((rect & img_rect).area() <= 0) {
-        return cv::Rect(0, 0, image_size.width, image_size.height);
+        return cv::Rect2f(0, 0, image_size.width, image_size.height);
     }
 
     const double lost_dt = cfg.lost_time_thres;
@@ -727,7 +727,7 @@ std::vector<std::tuple<int, bool, Light>> ArmorTarget::match_light(
     x2 = x2 + (img_x2 - x2) * alpha;
     y2 = y2 + (img_y2 - y2) * alpha;
 
-    cv::Rect expanded_rect(
+    cv::Rect2f expanded_rect(
         static_cast<int>(x1),
         static_cast<int>(y1),
         static_cast<int>(x2 - x1),
@@ -739,13 +739,13 @@ std::vector<std::tuple<int, bool, Light>> ArmorTarget::match_light(
 
     int side = std::max(expanded_rect.width, expanded_rect.height);
 
-    cv::Rect square(cx - side / 2, cy - side / 2, side, side);
+    cv::Rect2f square(cx - side / 2, cy - side / 2, side, side);
 
     square &= img_rect;
 
     return square;
 }
-[[nodiscard]] cv::Rect ArmorTarget::expanded(
+[[nodiscard]] cv::Rect2f ArmorTarget::expanded(
     const TimePoint& timestamp,
     const ISO3& camera_cv_in_odom,
     const CameraInfo& camera_info,
@@ -779,10 +779,10 @@ std::vector<std::tuple<int, bool, Light>> ArmorTarget::match_light(
             pts.push_back(cv::Point2f(z_pred[idx::BOTTOM_X], z_pred[idx::BOTTOM_Y]));
         }
     }
-    cv::Rect rect = cv::boundingRect(pts);
-    const cv::Rect img_rect(0, 0, image_size.width, image_size.height);
+    cv::Rect2f rect = cv::boundingRect(pts);
+    const cv::Rect2f img_rect(0, 0, image_size.width, image_size.height);
     if ((rect & img_rect).area() <= 0) {
-        return cv::Rect(0, 0, image_size.width, image_size.height);
+        return cv::Rect2f(0, 0, image_size.width, image_size.height);
     }
     return rect;
 }

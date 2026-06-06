@@ -192,7 +192,7 @@ public:
 
             // --- 整体画布 ---
             cv::Mat vis(map_vis.rows, map_vis.cols + panel_width, CV_8UC3, cv::Scalar(40, 40, 40));
-            map_vis.copyTo(vis(cv::Rect(0, 0, map_vis.cols, map_vis.rows)));
+            map_vis.copyTo(vis(cv::Rect2f(0, 0, map_vis.cols, map_vis.rows)));
 
             // --- 绘制地图点 ---
             int idx = 0;
