@@ -103,30 +103,13 @@ struct RuneDetector::Impl {
             }
         }
     }
-    struct RuneR {
-        cv::Point2f center;
-        cv::RotatedRect rr;
-        bool is_valid = false;
-        RuneR() = default;
-        RuneR(cv::RotatedRect rect): rr(rect) {
-            center = rect.center;
-            is_valid = rr.size.area() > 0;
-        }
-    };
-    RuneR get_rune_r(
+
+    std::vector<RuneR> get_rune_rs(
         const std::vector<std::vector<cv::Point>>& contours,
         const std::vector<cv::Vec4i>& hierarchy,
-        std::vector<bool>& used_flags,
-        cv::Point2f center_ref
+        std::vector<bool>& used_flags
     ) const noexcept {
-        RuneR result;
-        struct Node {
-            cv::Point2f center;
-            int idx;
-            cv::RotatedRect rr;
-        };
-
-        std::vector<Node> nodes;
+        std::vector<RuneR> result;
 
         for (int i = 0; i < contours.size(); i++) {
             if (used_flags[i])
@@ -157,36 +140,12 @@ struct RuneDetector::Impl {
             if (fill_ratio < params_.rune_r_fill_ratio_min)
                 continue;
 
-            nodes.push_back({ rr.center, i, rr });
+            result.emplace_back(RuneR { .rr = rr });
         }
 
-        if (nodes.empty())
-            return result;
-
-        double best_dist = 1e18;
-        int best_idx = -1;
-        cv::RotatedRect best_rr;
-
-        for (auto& n: nodes) {
-            double dx = n.center.x - center_ref.x;
-            double dy = n.center.y - center_ref.y;
-            double dist2 = dx * dx + dy * dy;
-
-            if (dist2 < best_dist) {
-                best_dist = dist2;
-                best_idx = n.idx;
-                best_rr = n.rr;
-            }
-        }
-
-        return RuneR(best_rr);
+        return result;
     }
-    struct RunePan {
-        cv::Point2f center;
-        std::vector<cv::Point2f> corners;
-        bool is_valid = false;
-        bool has_refer = false;
-    };
+
     inline int find_top_parent(int idx, const std::vector<cv::Vec4i>& hierarchy) const noexcept {
         int p = hierarchy[idx][3]; // parent
         while (p != -1 && hierarchy[p][3] != -1) {
@@ -322,18 +281,14 @@ struct RuneDetector::Impl {
                 std::sort(dist_list.begin(), dist_list.end(), [](auto& a, auto& b) {
                     return a.first > b.first;
                 });
-
-                std::vector<cv::Point2f> corner_points;
-                for (int i = 0; i < 4 && i < dist_list.size(); i++)
-                    corner_points.push_back(dist_list[i].second);
-
-                RunePan pan;
-                pan.center = rr.center;
-                pan.corners = corner_points;
-                if (corner_points.size() > 3)
-                    pan.is_valid = true;
-
-                results.push_back(pan);
+                if (dist_list.size() >= 4) {
+                    RunePan pan;
+                    pan.center = rr.center;
+                    for (int i = 0; i < 4; i++) {
+                        pan.corners[i] = dist_list[i].second;
+                    }
+                    results.push_back(pan);
+                }
             }
         }
         return results;
@@ -348,26 +303,9 @@ struct RuneDetector::Impl {
         std::vector<bool> used_flags;
         used_flags.assign(contours.size(), false);
         color_filter(roi, frame.img_frame.format, contours, used_flags, enemy_color);
-        auto rune_r = get_rune_r(
-            contours,
-            hierarchy,
-            used_flags,
-            cv::Point2f(roi.cols * 0.5f, roi.rows * 0.5f)
-        );
-        auto rune_pans = get_rune_pans(contours, hierarchy, used_flags);
-        if (rune_r.is_valid) {
-            result.r_tag = rune_r.center;
-        }
-        for (const auto& pan: rune_pans) {
-            if (pan.is_valid && pan.corners.size() >= 4) {
-                RuneDetection::RunePan p;
-                p.center = pan.center;
-                for (int i = 0; i < 4; i++) {
-                    p.corners[i] = pan.corners[i];
-                }
-                result.pans.push_back(p);
-            }
-        }
+        result.pans = get_rune_pans(contours, hierarchy, used_flags);
+        result.r_tags = get_rune_rs(contours, hierarchy, used_flags);
+        result.add_offset(frame.expanded.tl());
         return result;
     }
 };

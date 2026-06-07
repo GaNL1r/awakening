@@ -29,7 +29,7 @@ struct ArmorTypeTraits<ArmorType::Large> {
 };
 template<>
 struct ArmorTypeTraits<ArmorType::BuildingSmall> {
-    static constexpr double WIDTH = 129.0 / 1000.0;
+    static constexpr double WIDTH = 133.0 / 1000.0;
     static constexpr double HEIGHT = 50.0 / 1000.0;
 };
 template<typename PointT, ArmorType T>

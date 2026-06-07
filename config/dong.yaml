@@ -11,11 +11,7 @@ serial:
 serial_send_to_image_microseconds: 2000
 use_sim: false
 
-recorder:
-  enable: false
-player:
-  enable: false
-  path: /home/hy/awakening/record/auto_aim/2026-04-08_00-43-38.bin
+
 
 tf:
   camera_in_gimbal:

@@ -3,6 +3,7 @@
 #include "utils/common/type_common.hpp"
 #include <opencv2/core/eigen.hpp>
 #include <opencv2/core/types.hpp>
+#include <optional>
 #include <pwd.h>
 #include <regex>
 namespace awakening::utils {
@@ -399,4 +400,11 @@ inline void project_points_jets(
     auto h = node["h"].as<double>();
     return cv::Rect2f(x, y, w, h);
 }
+inline std::optional<std::string> get_arg(int i, int argc, char* argv[]) {
+    if (i < argc) {
+        std::cout << "get args " << std::string(argv[i]) << std::endl;
+        return std::make_optional(std::string(argv[i]));
+    }
+    return std::nullopt;
+};
 } // namespace awakening::utils

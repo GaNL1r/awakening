@@ -517,9 +517,7 @@ std::vector<std::tuple<int, bool, Light>> ArmorTarget::match_light(
     //可见灯条逻辑判断不优雅，不过这比较个稳定可观
     std::vector<std::tuple<int, bool, Light>> result;
 
-    if (target_number == ArmorClass::OUTPOST || target_number == ArmorClass::BASE
-        || matched_armors.size() != 1)
-    {
+    if (target_number == ArmorClass::BASE || matched_armors.size() != 1) {
         return result;
     }
 

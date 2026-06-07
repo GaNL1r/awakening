@@ -1,9 +1,11 @@
 #include "ascii_banner.hpp"
 #include "tasks/auto_aim/armor_track/motion_model.hpp"
 #include "tasks/base/ballistic_trajectory.hpp"
+#include "tasks/base/packet_typedef_send.hpp"
 #include "tasks/base/wheel_odometry.hpp"
 #include "utils/drivers/mv_camera.hpp"
 #include "video_stream.pb.h"
+#include <algorithm>
 #include <array>
 #include <chrono>
 #include <cstdint>
@@ -22,8 +24,8 @@
     #include <rclcpp/qos.hpp>
 #endif
 #include "backward-cpp/backward.hpp"
-#include "config.hpp"
 #include "param_deliver.h"
+#include "runtime/config.hpp"
 #include "tasks/auto_aim/armor_control/very_aimer.hpp"
 #include "tasks/auto_aim/armor_detect/armor_detector.hpp"
 #include "tasks/auto_aim/armor_track/armor_target.hpp"
@@ -33,8 +35,6 @@
 #include "tasks/auto_aim/type.hpp"
 #include "tasks/base/common.hpp"
 #include "tasks/base/packet_typedef_receive.hpp"
-#include "tasks/base/packet_typedef_send.hpp"
-#include "tasks/base/recorder_player..hpp"
 #include "tasks/base/web.hpp"
 #include "tasks/eyes_of_blind/decoder.hpp"
 #include "tasks/eyes_of_blind/encoder.hpp"
@@ -80,31 +80,7 @@ struct CameraTag {};
 struct SerialTag {};
 struct DetectTag {};
 struct FrameTag {};
-namespace awakening {
-template<>
-struct RecordTagTraits<CameraTag> {
-    static constexpr uint32_t id = 1;
-    using Type = ImageFrame;
-    static std::vector<uint8_t> serialize(const Type& img) {
-        return img.serialize();
-    }
-    static Type deserialize(const std::vector<uint8_t>& buf) {
-        return Type::deserialize(buf);
-    }
-};
 
-template<>
-struct RecordTagTraits<SerialTag> {
-    static constexpr uint32_t id = 2;
-    using Type = std::vector<uint8_t>;
-    static std::vector<uint8_t> serialize(const Type& obj) {
-        return obj;
-    }
-    static Type deserialize(const std::vector<uint8_t>& buf) {
-        return buf;
-    }
-};
-} // namespace awakening
 using CameraIO = IOPair<CameraTag, ImageFrame>;
 using SerialIO = IOPair<SerialTag, std::vector<uint8_t>>;
 using CommonFrameIo = IOPair<FrameTag, CommonFrame>;
@@ -118,32 +94,28 @@ struct LogCtx {
     int found_count = 0;
     double latency_ms_total = 0.0;
     void reset() {
-        camera_count = 0;
-        detect_count = 0;
-        track_count = 0;
-        solve_count = 0;
-        serial_count = 0;
-        found_count = 0;
-        latency_ms_total = 0.0;
+        *this = {};
     }
 };
-static constexpr auto RECORD_FOLDER_PATH_ARR = utils::concat(ROOT_DIR, "/record/auto_aim");
-static constexpr std::string_view RECORD_FOLDER_PATH(RECORD_FOLDER_PATH_ARR.data());
-inline std::string generate_record_filename(const std::string& folder_path) {
-    auto now = std::chrono::system_clock::now();
-    auto t = std::chrono::system_clock::to_time_t(now);
-    std::tm tm {};
+struct AutoExposureCfg {
+    double target_brightness = 0.0;
+    double step_gain = 0.0;
+    double decay_step = 0.0;
+    double tolerance = 0.0;
+    double exposure_min = 0.0;
+    double exposure_max = 0.0;
+    double control_interval_ms = 0.0;
 
-#ifdef _WIN32
-    localtime_s(&tm, &t);
-#else
-    localtime_r(&t, &tm);
-#endif
+    explicit AutoExposureCfg(const YAML::Node& c):
+        target_brightness(c["target_brightness"].as<double>()),
+        step_gain(c["step_gain"].as<double>()),
+        decay_step(c["decay_step"].as<double>()),
+        tolerance(c["tolerance"].as<double>()),
+        exposure_min(c["exposure_min"].as<double>()),
+        exposure_max(c["exposure_max"].as<double>()),
+        control_interval_ms(c["control_interval_ms"].as<double>()) {}
+};
 
-    std::ostringstream oss;
-    oss << folder_path << "/" << std::put_time(&tm, "%Y-%m-%d_%H-%M-%S") << ".bin";
-    return oss.str();
-}
 bool is_web_running() {
     static std::atomic<bool> cached { true };
     utils::dt_once(
@@ -161,40 +133,23 @@ int main(int argc, char** argv) {
     print_banner();
     auto& signal = utils::SignalGuard::instance();
     logger::init(spdlog::level::trace);
-    auto get_arg = [&](int i) -> std::optional<std::string> {
-        if (i < argc) {
-            AWAKENING_INFO("get args {} ", std::string(argv[i]));
-            return std::make_optional(std::string(argv[i]));
-        }
-        return std::nullopt;
-    };
+
     bool debug = false;
     std::string config_path;
     std::string robot_name;
-    auto first_arg = get_arg(1);
+    auto first_arg = utils::get_arg(1, argc, argv);
     if (first_arg) {
         robot_name = first_arg.value();
         config_path = get_robot_config_path(robot_name).value_or(robot_name);
     } else {
         return 1;
     }
-    auto second_arg = get_arg(2);
+    auto second_arg = utils::get_arg(2, argc, argv);
     if (second_arg) {
         debug = second_arg.value() == "true";
     }
     auto config = YAML::LoadFile(config_path);
 
-    std::unique_ptr<Recorder> recorder;
-    if (config["recorder"]["enable"].as<bool>()) {
-        recorder =
-            std::make_unique<Recorder>(generate_record_filename(std::string(RECORD_FOLDER_PATH)));
-    }
-    std::unique_ptr<Player> player;
-    if (!recorder) {
-        if (config["player"]["enable"].as<bool>()) {
-            player = std::make_unique<Player>(config["player"]["path"].as<std::string>());
-        }
-    }
     Scheduler s;
     EnemyColor enemy_color = enemy_color_from_string(config["enemy_color"].as<std::string>());
     double bullet_speed = config["bullet_speed"].as<double>();
@@ -204,12 +159,9 @@ int main(int argc, char** argv) {
 #endif
 
     std::unique_ptr<SerialDriver> serial;
-    if (!player) {
-        if (config["serial"]["enable"].as<bool>()) {
-            serial = std::make_unique<SerialDriver>(config["serial"], s);
-        }
+    if (config["serial"]["enable"].as<bool>()) {
+        serial = std::make_unique<SerialDriver>(config["serial"], s);
     }
-    int serial_send_to_image_microseconds = config["serial_send_to_image_microseconds"].as<int>();
 
     auto camera_config = config["camera"];
     std::unique_ptr<MvCamera> camera;
@@ -218,13 +170,13 @@ int main(int argc, char** argv) {
             camera->stop();
         }
     });
-    if (!player) {
-        camera = std::make_unique<MvCamera>(camera_config["mv_camera"], s);
-        camera->init();
-        if (!camera->running_) {
-            return 0;
-        }
+
+    camera = std::make_unique<MvCamera>(camera_config["mv_camera"], s);
+    camera->init();
+    if (!camera->running_) {
+        return 0;
     }
+
     Mode mode = Mode::AutoAim;
     CameraInfo camera_info;
     camera_info.load(camera_config["camera_info"]);
@@ -246,19 +198,31 @@ int main(int argc, char** argv) {
     eyes_of_blind::Encoder encoder(config["encoder"]);
     auto tf = SimpleRobotTF::create();
     {
-        tf->add_edge(SimpleFrame::ODOM, SimpleFrame::GIMBAL_ODOM);
-        tf->add_edge(SimpleFrame::GIMBAL_ODOM, SimpleFrame::GIMBAL);
-        tf->add_edge(SimpleFrame::GIMBAL, SimpleFrame::CAMERA);
-        tf->add_edge(SimpleFrame::GIMBAL, SimpleFrame::SHOOT);
-        tf->add_edge(SimpleFrame::CAMERA, SimpleFrame::CAMERA_CV);
+        for (auto [from, to]: std::array {
+                 std::pair { SimpleFrame::ODOM, SimpleFrame::GIMBAL_ODOM },
+                 std::pair { SimpleFrame::GIMBAL_ODOM, SimpleFrame::GIMBAL },
+                 std::pair { SimpleFrame::GIMBAL, SimpleFrame::CAMERA },
+                 std::pair { SimpleFrame::GIMBAL, SimpleFrame::SHOOT },
+                 std::pair { SimpleFrame::CAMERA, SimpleFrame::CAMERA_CV },
+             })
+        {
+            tf->add_edge(from, to);
+        }
         ISO3 cv_in_camera = ISO3::Identity();
-        cv_in_camera.translation() = Vec3(0, 0, 0);
         cv_in_camera.linear() = R_CV2PHYSICS;
         tf->push(SimpleFrame::CAMERA, SimpleFrame::CAMERA_CV, Clock::now(), cv_in_camera);
-        ISO3 camera_in_gimbal = utils::load_isometry3(config["tf"]["camera_in_gimbal"]);
-        tf->push(SimpleFrame::GIMBAL, SimpleFrame::CAMERA, Clock::now(), camera_in_gimbal);
-        ISO3 shoot_in_gimbal = utils::load_isometry3(config["tf"]["shoot_in_gimbal"]);
-        tf->push(SimpleFrame::GIMBAL, SimpleFrame::SHOOT, Clock::now(), shoot_in_gimbal);
+        tf->push(
+            SimpleFrame::GIMBAL,
+            SimpleFrame::CAMERA,
+            Clock::now(),
+            utils::load_isometry3(config["tf"]["camera_in_gimbal"])
+        );
+        tf->push(
+            SimpleFrame::GIMBAL,
+            SimpleFrame::SHOOT,
+            Clock::now(),
+            utils::load_isometry3(config["tf"]["shoot_in_gimbal"])
+        );
     }
 
     s.register_task<CameraIO, CommonFrameIo>("push_common_frame", [&](CameraIO::second_type&& f) {
@@ -267,12 +231,6 @@ int main(int argc, char** argv) {
             return std::make_tuple(std::optional<CommonFrameIo::second_type>(std::nullopt));
         }
         log_ctx.camera_count++;
-        if (recorder) {
-            utils::dt_once(
-                [&]() { recorder->record<CameraTag>(f); },
-                std::chrono::milliseconds(100)
-            );
-        }
 
         CommonFrame frame {
             .img_frame = std::move(f),
@@ -284,24 +242,16 @@ int main(int argc, char** argv) {
 
         return std::make_tuple(std::optional<CommonFrameIo::second_type>(std::move(frame)));
     });
-    if (serial || player) {
+    if (serial) {
         s.register_task<SerialIO>("receive_serial", [&](SerialIO::second_type&& data) {
             static std::mutex mutex;
             std::lock_guard<std::mutex> lock(mutex);
             auto now = std::chrono::steady_clock::now();
-            if (recorder) {
-                utils::dt_once(
-                    [&]() { recorder->record<SerialTag>(data); },
-                    std::chrono::milliseconds(10)
-                );
-            }
 
-            auto robo_opt = ReceiveRobotData::create(data);
             log_ctx.serial_count++;
-            if (robo_opt.has_value()) {
+            if (auto robo_opt = ReceiveRobotData::create(data); robo_opt.has_value()) {
                 auto robo = robo_opt.value();
-                static uint32_t last_pc = -1;
-                static uint32_t delay = 0;
+                static uint32_t last_pc = -1, delay = 0, last_bullet_count = 0;
                 if (robo.time_stamp_pc != last_pc) {
                     last_pc = robo.time_stamp_pc;
                     delay = (std::chrono::duration_cast<std::chrono::microseconds>(now - start_tp)
@@ -310,31 +260,24 @@ int main(int argc, char** argv) {
                              - (robo.time_stamp_send_micro - robo.time_stamp_receive_micro))
                         / 2.0;
                 }
-                // std::chrono::time_point<std::chrono::steady_clock> packet_time =
-                //     std::chrono::steady_clock::now()
-                //     + std::chrono::microseconds(serial_send_to_image_microseconds);
-                std::chrono::time_point<std::chrono::steady_clock> packet_time =
-                    now - std::chrono::microseconds(delay);
-                double yaw = angles::from_degrees(robo.yaw);
-                double pitch = angles::from_degrees(robo.pitch);
-                double roll = angles::from_degrees(robo.roll);
+                auto packet_time = now - std::chrono::microseconds(delay);
                 ISO3 gimbal_2_gimbal_odom = ISO3::Identity();
-                gimbal_2_gimbal_odom.translation() = Vec3(0, 0, 0);
-                gimbal_2_gimbal_odom.linear() =
-                    utils::euler2matrix(Vec3(yaw, pitch, roll), utils::EulerOrder::ZYX);
+                gimbal_2_gimbal_odom.linear() = utils::euler2matrix(
+                    Vec3(
+                        angles::from_degrees(robo.yaw),
+                        angles::from_degrees(robo.pitch),
+                        angles::from_degrees(robo.roll)
+                    ),
+                    utils::EulerOrder::ZYX
+                );
                 tf->push(
                     SimpleFrame::GIMBAL_ODOM,
                     SimpleFrame::GIMBAL,
                     packet_time,
                     gimbal_2_gimbal_odom
                 );
-                operator_offset.first = angles::from_degrees(robo.operator_yaw_offset);
-                operator_offset.second = angles::from_degrees(robo.operator_pitch_offset);
-                // double vx = robo.v_x;
-                // double vy = robo.v_y;
-                // double vz = robo.v_z;
-                // wheel_odometry.predict_ekf(packet_time);
-                // wheel_odometry.update(Vec3(vx, vy, vz), packet_time);
+                operator_offset = { angles::from_degrees(robo.operator_yaw_offset),
+                                    angles::from_degrees(robo.operator_pitch_offset) };
                 ISO3 gimbal_odom_in_odom = ISO3::Identity();
                 gimbal_odom_in_odom.translation() = wheel_odometry.state.pos();
                 tf->push(
@@ -349,24 +292,18 @@ int main(int argc, char** argv) {
                     bullet_speed = 12.0;
                 }
                 robo.update_log(delay);
-                static uint32_t last_bullet_count = 0;
                 if (robo.bullet_count > last_bullet_count) {
-                    auto shoot_in_odom =
-                        tf->pose_a_in_b(SimpleFrame::SHOOT, SimpleFrame::ODOM, Clock::now());
-                    Bullet b { .fire_time = Clock::now(),
-                               .fire_time_shoot_in_odom = shoot_in_odom,
-                               .speed_in_odom = bullet_speed };
-                    bullet_pick_up.push_back(std::move(b));
+                    bullet_pick_up.push_back(Bullet {
+                        .fire_time = Clock::now(),
+                        .fire_time_shoot_in_odom =
+                            tf->pose_a_in_b(SimpleFrame::SHOOT, SimpleFrame::ODOM, Clock::now()),
+                        .speed_in_odom = bullet_speed,
+                    });
                 }
                 last_bullet_count = robo.bullet_count;
             }
-            auto mode_opt = HeroMode::create(data);
-            if (mode_opt.has_value()) {
-                if (mode_opt.value().mode == 1) {
-                    mode = Mode::Blind;
-                } else {
-                    mode = Mode::AutoAim;
-                }
+            if (auto mode_opt = HeroMode::create(data); mode_opt.has_value()) {
+                mode = mode_opt.value().mode == 1 ? Mode::Blind : Mode::AutoAim;
             }
         });
     }
@@ -379,50 +316,26 @@ int main(int argc, char** argv) {
                 // camera->set_AcquisitionFrameRate(30);
                 return;
             }
-            struct AutoExposureCfg {
-                bool enable = false;
-                double ttarget_brightness;
-                double step_gain;
-                double decay_step;
-                double tolerance;
-                double exposure_min;
-                double exposure_max;
-                double control_interval_ms;
-                void load(const YAML::Node& c) {
-                    ttarget_brightness = c["target_brightness"].as<double>();
-                    step_gain = c["step_gain"].as<double>();
-                    decay_step = c["decay_step"].as<double>();
-                    tolerance = c["tolerance"].as<double>();
-                    exposure_min = c["exposure_min"].as<double>();
-                    exposure_max = c["exposure_max"].as<double>();
-                    control_interval_ms = c["control_interval_ms"].as<double>();
-                }
-            };
-            static std::optional<AutoExposureCfg> auto_exposure_cfg;
-            if (config["auto_exposure"]["enable"].as<bool>()) {
-                auto_exposure_cfg.emplace();
-                auto_exposure_cfg.value().load(config["auto_exposure"]);
-            }
+            static std::optional<AutoExposureCfg> auto_exposure_cfg =
+                config["auto_exposure"]["enable"].as<bool>()
+                ? std::optional<AutoExposureCfg>(std::in_place, config["auto_exposure"])
+                : std::nullopt;
             if (auto_exposure_cfg) {
                 auto& cfg = auto_exposure_cfg.value();
                 utils::dt_once(
                     [&]() {
-                        cv::Mat img = frame.img_frame.src_img;
                         cv::Mat gray;
-                        cv::cvtColor(img, gray, cv::COLOR_BGR2GRAY);
-                        const double brightness = cv::mean(gray)[0];
-
-                        const double diff = brightness - cfg.ttarget_brightness;
-                        const double exposure_min = cfg.exposure_min;
-                        const double exposure_max = cfg.exposure_max;
+                        cv::cvtColor(frame.img_frame.src_img, gray, cv::COLOR_BGR2GRAY);
                         double exposure_time = camera->get_ExposureTime();
                         static double last_exposure_time = 0.0;
+                        const double diff = cv::mean(gray)[0] - cfg.target_brightness;
                         if (std::fabs(diff) > cfg.tolerance && exposure_time > 0.0) {
                             exposure_time -= diff * cfg.step_gain;
                         } else {
                             exposure_time -= cfg.decay_step;
                         }
-                        exposure_time = std::clamp(exposure_time, exposure_min, exposure_max);
+                        exposure_time =
+                            std::clamp(exposure_time, cfg.exposure_min, cfg.exposure_max);
                         if (std::abs(exposure_time - last_exposure_time) > 10) {
                             camera->set_ExposureTime(exposure_time);
                             last_exposure_time = exposure_time;
@@ -476,9 +389,8 @@ int main(int argc, char** argv) {
                 detect_light->y -= detect_light->height * 0.3;
                 detect_light->width *= 1.6;
                 detect_light->height *= 1.6;
-                const cv::Rect2f
-                    img_rect(0, 0, frame.img_frame.src_img.cols, frame.img_frame.src_img.rows);
-                detect_light.value() &= img_rect;
+                detect_light.value() &=
+                    cv::Rect2f(0, 0, frame.img_frame.src_img.cols, frame.img_frame.src_img.rows);
                 if (detect_light->area() > frame.expanded.area()) {
                     detect_light = frame.expanded;
                 }
@@ -503,27 +415,20 @@ int main(int argc, char** argv) {
             if (got) {
                 encoder.push_frame(frame.img_frame.src_img);
                 eyes_of_blind::BlindSend pkg;
-                while (true) {
-                    if (encoder.try_pop_packet(pkg)) {
-                        cv::Mat out;
-                        if (serial && config["serial"]["enable"].as<bool>()) {
-                            std::array<uint8_t, eyes_of_blind::MAX_PACKET_SIZE> raw {};
-                            std::memcpy(raw.data(), &pkg, eyes_of_blind::MAX_PACKET_SIZE);
+                while (encoder.try_pop_packet(pkg)) {
+                    if (serial && config["serial"]["enable"].as<bool>()) {
+                        std::array<uint8_t, eyes_of_blind::MAX_PACKET_SIZE> raw {};
+                        std::memcpy(raw.data(), &pkg, eyes_of_blind::MAX_PACKET_SIZE);
 
-                            doorlock_sniper::CustomByteBlock block;
-                            block.set_data(raw.data(), eyes_of_blind::MAX_PACKET_SIZE);
+                        doorlock_sniper::CustomByteBlock block;
+                        block.set_data(raw.data(), eyes_of_blind::MAX_PACKET_SIZE);
 
-                            std::string serialized;
-                            if (!block.SerializeToString(&serialized)) {
-                                AWAKENING_ERROR("Protobuf serialization failed");
-                                continue;
-                            }
-                            serial->write(std::vector<uint8_t>(serialized.begin(), serialized.end())
-                            );
+                        std::string serialized;
+                        if (!block.SerializeToString(&serialized)) {
+                            AWAKENING_ERROR("Protobuf serialization failed");
+                            continue;
                         }
-
-                    } else {
-                        break;
+                        serial->write(std::vector<uint8_t>(serialized.begin(), serialized.end()));
                     }
                 }
             }
@@ -543,24 +448,18 @@ int main(int argc, char** argv) {
         std::lock_guard<std::mutex> lock(mutex);
         for (const auto& armors_raw: io) {
             auto armors = armors_raw;
-            armors.armors.clear();
-            for (auto& a: armors_raw.armors) {
-                if ((enemy_color == EnemyColor::BLUE && a.color == auto_aim::ArmorColor::RED)
-                    || (enemy_color == EnemyColor::RED && a.color == auto_aim::ArmorColor::BLUE))
-                {
-                    continue;
-                }
-                armors.armors.push_back(a);
-            }
-            armors.lights.clear();
-            for (auto& l: armors_raw.lights) {
-                if ((enemy_color == EnemyColor::BLUE && l.color == auto_aim::ArmorColor::RED)
-                    || (enemy_color == EnemyColor::RED && l.color == auto_aim::ArmorColor::BLUE))
-                {
-                    continue;
-                }
-                armors.lights.push_back(l);
-            }
+            auto is_ally = [&](const auto& obj) {
+                return (enemy_color == EnemyColor::BLUE && obj.color == auto_aim::ArmorColor::RED)
+                    || (enemy_color == EnemyColor::RED && obj.color == auto_aim::ArmorColor::BLUE);
+            };
+            armors.armors.erase(
+                std::remove_if(armors.armors.begin(), armors.armors.end(), is_ally),
+                armors.armors.end()
+            );
+            armors.lights.erase(
+                std::remove_if(armors.lights.begin(), armors.lights.end(), is_ally),
+                armors.lights.end()
+            );
             auto camera_cv_in_odom =
                 tf->pose_a_in_b(SimpleFrame(armors.frame_id), SimpleFrame::ODOM, armors.timestamp);
             armors.frame_id = std::to_underlying(SimpleFrame::ODOM);
@@ -602,16 +501,16 @@ int main(int argc, char** argv) {
         auto gimbal_odom_state_in_odom = wheel_odometry.state;
         gimbal_odom_state_in_odom.predict(Clock::now());
         target.set_target_state([&](auto& s) {
+            namespace idx = auto_aim::armor_point_motion_model::idx;
+            const auto pos = gimbal_odom_state_in_odom.pos();
+            const auto vel = gimbal_odom_state_in_odom.vel();
             s.frame_id = std::to_underlying(SimpleFrame::GIMBAL_ODOM);
-            s.x[auto_aim::armor_point_motion_model::idx::CX] -= gimbal_odom_state_in_odom.pos().x();
-            s.x[auto_aim::armor_point_motion_model::idx::CY] -= gimbal_odom_state_in_odom.pos().y();
-            s.x[auto_aim::armor_point_motion_model::idx::CZ] -= gimbal_odom_state_in_odom.pos().z();
-            s.x[auto_aim::armor_point_motion_model::idx::VCX] -=
-                gimbal_odom_state_in_odom.vel().x();
-            s.x[auto_aim::armor_point_motion_model::idx::VCY] -=
-                gimbal_odom_state_in_odom.vel().y();
-            s.x[auto_aim::armor_point_motion_model::idx::VCZ] -=
-                gimbal_odom_state_in_odom.vel().z();
+            s.x[idx::CX] -= pos.x();
+            s.x[idx::CY] -= pos.y();
+            s.x[idx::CZ] -= pos.z();
+            s.x[idx::VCX] -= vel.x();
+            s.x[idx::VCY] -= vel.y();
+            s.x[idx::VCZ] -= vel.z();
         });
         target.this_id = old_this_id;
         GimbalCmd cmd {
@@ -631,22 +530,14 @@ int main(int argc, char** argv) {
         if (serial) {
             SendRobotCmdData send;
             send.cmd_ID = SendRobotCmdData::ID;
-
-            uint32_t t = std::chrono::duration_cast<std::chrono::microseconds>(
-                             std::chrono::steady_clock::now() - start_tp
+            send.time_stamp = std::chrono::duration_cast<std::chrono::microseconds>(
+                                  std::chrono::steady_clock::now() - start_tp
             )
-                             .count();
-            send.time_stamp = t;
-            send.appear = cmd.appear;
-            send.detect_color = std::to_underlying(enemy_color);
-            send.yaw = cmd.yaw;
-            send.pitch = cmd.pitch;
-            send.v_yaw = cmd.v_yaw;
-            send.target_yaw = cmd.target_yaw;
-            send.target_pitch = cmd.target_pitch;
-            send.v_pitch = cmd.v_pitch;
-            send.a_yaw = cmd.a_yaw;
-            send.a_pitch = cmd.a_pitch;
+                                  .count();
+            send.appear = cmd.appear, send.detect_color = std::to_underlying(enemy_color);
+            send.yaw = cmd.yaw, send.pitch = cmd.pitch, send.v_yaw = cmd.v_yaw;
+            send.target_yaw = cmd.target_yaw, send.target_pitch = cmd.target_pitch;
+            send.v_pitch = cmd.v_pitch, send.a_yaw = cmd.a_yaw, send.a_pitch = cmd.a_pitch;
             send.enable_yaw_diff = cmd.enable_yaw_diff;
             send.enable_pitch_diff = cmd.enable_pitch_diff;
             serial->write(std::move(utils::to_vector(send)));
@@ -716,12 +607,10 @@ int main(int argc, char** argv) {
             if (img.format == PixelFormat::RGB) {
                 cv::cvtColor(debug_img, debug_img, cv::COLOR_RGB2BGR);
             }
-            if (!debug_img.empty()) {
-                static cv::Mat last_draw;
-                if (debug_img.data != last_draw.data) {
-                    auto_aim::draw_auto_aim(debug_img, auto_aim_dbg.value());
-                    web::write_shm(debug_img);
-                }
+            static cv::Mat last_draw;
+            if (!debug_img.empty() && debug_img.data != last_draw.data) {
+                auto_aim::draw_auto_aim(debug_img, auto_aim_dbg.value());
+                web::write_shm(debug_img);
                 last_draw = debug_img;
             }
         });
@@ -732,35 +621,15 @@ int main(int argc, char** argv) {
 #endif
     }
 
-    if (player) {
-        auto cam = s.register_source<CameraIO>("hik");
-        auto serial = s.register_source<SerialIO>("serial");
-        player->subscribe<CameraTag>([&](ImageFrame&& f) {
-            s.runtime_push_source<CameraIO>(cam, [&, _f = std::move(f)]() {
-                return std::make_tuple(std::optional<CameraIO::second_type>(std::move(_f)));
-            });
-        });
-        player->subscribe<SerialTag>([&](std::vector<uint8_t>&& buf) {
-            s.runtime_push_source<SerialIO>(serial, [&, __buf = std::move(buf)]() {
-                return std::make_tuple(std::optional<SerialIO::second_type>(std::move(__buf)));
-            });
-        });
-
-    } else {
-        if (camera) {
-            camera->start<CameraTag>("hik");
-        }
-
-        if (serial) {
-            serial->start<SerialTag>("serial");
-        }
+    if (camera) {
+        camera->start<CameraTag>("hik");
     }
-
+    if (serial) {
+        serial->start<SerialTag>("serial");
+    }
     s.build();
     s.run();
-    if (player) {
-        std::thread([&]() { player->play(1.0); }).detach();
-    }
+
 #ifdef USE_ROS2
     std::thread([&]() { rcl_node.spin(); }).detach();
 #endif

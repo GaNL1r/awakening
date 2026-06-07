@@ -588,60 +588,6 @@ struct ArmorDetector::Impl {
             for (auto& light: lights) {
                 light.add_offset(detect_light->tl());
             }
-
-            for (auto& armor: result) {
-                auto& pts = armor.key_points.points;
-                auto armor_fall_back = armor;
-                int left_id = -1;
-                int right_id = -2;
-                auto try_update_light = [&](ArmorKeyPointsIndex top_idx,
-                                            ArmorKeyPointsIndex bottom_idx,
-                                            int& light_id) -> bool {
-                    auto& top = pts[std::to_underlying(top_idx)].value();
-                    auto& bottom = pts[std::to_underlying(bottom_idx)].value();
-
-                    const float len = cv::norm(top - bottom);
-                    const cv::Point2f center = (top + bottom) * 0.5f;
-
-                    for (int i = 0; i < lights.size(); i++) {
-                        const auto& light = lights[i];
-                        if (!light.corrected) {
-                            continue;
-                        }
-                        const auto bbox = light.boundingRect();
-
-                        if (!bbox.contains(center) || !bbox.contains(top) || !bbox.contains(bottom))
-                        {
-                            continue;
-                        }
-
-                        if (std::abs(len - light.length) > len * 0.2f) {
-                            continue;
-                        }
-                        light_id = i;
-                        top = light.corrected->first;
-                        bottom = light.corrected->second;
-                        return true;
-                    }
-
-                    return false;
-                };
-
-                try_update_light(
-                    ArmorKeyPointsIndex::LEFT_TOP,
-                    ArmorKeyPointsIndex::LEFT_BOTTOM,
-                    left_id
-                ); //简易匹配，相同灯条传统覆盖网络
-
-                try_update_light(
-                    ArmorKeyPointsIndex::RIGHT_TOP,
-                    ArmorKeyPointsIndex::RIGHT_BOTTOM,
-                    right_id
-                );
-                if (left_id == right_id) {
-                    armor = armor_fall_back;
-                }
-            }
         }
 
         return { std::move(lights), std::move(result) };

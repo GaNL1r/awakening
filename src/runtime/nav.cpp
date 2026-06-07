@@ -19,15 +19,9 @@ int main(int argc, char** argv) {
     print_banner();
     auto& signal = utils::SignalGuard::instance();
     logger::init(spdlog::level::trace);
-    auto get_arg = [&](int i) -> std::optional<std::string> {
-        if (i < argc) {
-            AWAKENING_INFO("get args {} ", std::string(argv[i]));
-            return std::make_optional(std::string(argv[i]));
-        }
-        return std::nullopt;
-    };
+
     std::string config_path;
-    auto first_arg = get_arg(1);
+    auto first_arg = utils::get_arg(1, argc, argv);
     if (first_arg) {
         config_path = first_arg.value();
     } else {
