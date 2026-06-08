@@ -1,157 +1,38 @@
 #pragma once
 #include "angles.h"
 #include "utils/common/type_common.hpp"
+#include <cmath>
+#include <numbers>
 #include <opencv2/core/eigen.hpp>
 #include <opencv2/core/types.hpp>
 #include <optional>
 #include <pwd.h>
 #include <regex>
+#include <utility>
 namespace awakening::utils {
-enum class EulerOrder { XYZ, XZY, YXZ, YZX, ZXY, ZYX };
-inline Vec3 axis_vec(int axis) {
-    switch (axis) {
-        case 0:
-            return Vec3::UnitX();
-        case 1:
-            return Vec3::UnitY();
-        case 2:
-            return Vec3::UnitZ();
-        default:
-            throw std::invalid_argument("Invalid axis");
-    }
-}
 
-inline std::array<int, 3> get_axes(EulerOrder order) {
-    switch (order) {
-        case EulerOrder::XYZ:
-            return { 0, 1, 2 };
-        case EulerOrder::XZY:
-            return { 0, 2, 1 };
-        case EulerOrder::YXZ:
-            return { 1, 0, 2 };
-        case EulerOrder::YZX:
-            return { 1, 2, 0 };
-        case EulerOrder::ZXY:
-            return { 2, 0, 1 };
-        case EulerOrder::ZYX:
-            return { 2, 1, 0 };
-        default:
-            throw std::invalid_argument("Unsupported EulerOrder");
-    }
-}
-
-inline Quaternion euler2quat(const Vec3& angles, EulerOrder order) {
-    auto axes = get_axes(order);
-
-    Quaternion q = Quaternion::Identity();
-
-    for (int i = 0; i < 3; ++i) {
-        q = q * Quaternion(AngleAxis(angles[i], axis_vec(axes[i])));
-    }
-
+inline Quaternion rpy2quat(const Vec3& rpy) {
+    AngleAxis roll(rpy.x(), Vec3::UnitX());
+    AngleAxis pitch(rpy.y(), Vec3::UnitY());
+    AngleAxis yaw(rpy.z(), Vec3::UnitZ());
+    Quaternion q { yaw * pitch * roll };
+    q.normalize();
     return q;
 }
 
-inline Mat3 euler2matrix(const Vec3& angles, EulerOrder order) {
-    return euler2quat(angles, order).toRotationMatrix();
-}
-inline Vec3 matrix2euler(const Mat3& R, EulerOrder order) {
-    Vec3 angles;
-
-    switch (order) {
-        case EulerOrder::XYZ: {
-            double sy = -R(2, 0);
-            if (std::abs(sy) < 1.0 - 1e-6) {
-                angles[1] = std::asin(sy);
-                angles[0] = std::atan2(R(2, 1), R(2, 2));
-                angles[2] = std::atan2(R(1, 0), R(0, 0));
-            } else {
-                angles[1] = std::asin(sy);
-                angles[0] = std::atan2(-R(1, 2), R(1, 1));
-                angles[2] = 0;
-            }
-            break;
-        }
-
-        case EulerOrder::ZYX: {
-            double sy = -R(2, 0);
-            if (std::abs(sy) < 1.0 - 1e-6) {
-                angles[1] = std::asin(sy);
-                angles[0] = std::atan2(R(1, 0), R(0, 0));
-                angles[2] = std::atan2(R(2, 1), R(2, 2));
-            } else {
-                angles[1] = std::asin(sy);
-                angles[0] = std::atan2(-R(0, 1), R(1, 1));
-                angles[2] = 0;
-            }
-            break;
-        }
-
-        case EulerOrder::XZY: {
-            double sz = R(1, 0);
-            if (std::abs(sz) < 1.0 - 1e-6) {
-                angles[2] = std::asin(sz);
-                angles[0] = std::atan2(-R(1, 2), R(1, 1));
-                angles[1] = std::atan2(-R(2, 0), R(0, 0));
-            } else {
-                angles[2] = std::asin(sz);
-                angles[0] = std::atan2(R(2, 1), R(2, 2));
-                angles[1] = 0;
-            }
-            break;
-        }
-
-        case EulerOrder::YXZ: {
-            double sx = -R(1, 2);
-            if (std::abs(sx) < 1.0 - 1e-6) {
-                angles[0] = std::asin(sx);
-                angles[1] = std::atan2(R(0, 2), R(2, 2));
-                angles[2] = std::atan2(R(1, 0), R(1, 1));
-            } else {
-                angles[0] = std::asin(sx);
-                angles[1] = std::atan2(-R(2, 0), R(0, 0));
-                angles[2] = 0;
-            }
-            break;
-        }
-
-        case EulerOrder::YZX: {
-            double sz = -R(0, 1);
-            if (std::abs(sz) < 1.0 - 1e-6) {
-                angles[2] = std::asin(sz);
-                angles[1] = std::atan2(R(0, 2), R(0, 0));
-                angles[0] = std::atan2(R(2, 1), R(1, 1));
-            } else {
-                angles[2] = std::asin(sz);
-                angles[1] = std::atan2(-R(2, 0), R(2, 2));
-                angles[0] = 0;
-            }
-            break;
-        }
-
-        case EulerOrder::ZXY: {
-            double sx = R(2, 1);
-            if (std::abs(sx) < 1.0 - 1e-6) {
-                angles[0] = std::asin(sx);
-                angles[2] = std::atan2(-R(0, 1), R(1, 1));
-                angles[1] = std::atan2(-R(2, 0), R(2, 2));
-            } else {
-                angles[0] = std::asin(sx);
-                angles[2] = std::atan2(R(1, 0), R(0, 0));
-                angles[1] = 0;
-            }
-            break;
-        }
-
-        default:
-            throw std::invalid_argument("Unsupported EulerOrder");
-    }
-
-    return angles;
+inline Mat3 rpy2matrix(const Vec3& rpy) {
+    return rpy2quat(rpy).toRotationMatrix();
 }
 
-inline Vec3 quat2euler(const Quaternion& q, EulerOrder order) {
-    return matrix2euler(q.toRotationMatrix(), order);
+inline Vec3 matrix2rpy(const Mat3& R) {
+    const double roll = std::atan2(R(2, 1), R(2, 2));
+    const double pitch = std::atan2(-R(2, 0), std::hypot(R(2, 1), R(2, 2)));
+    const double yaw = std::atan2(R(1, 0), R(0, 0));
+    return { roll, pitch, yaw };
+}
+
+inline Vec3 quat2rpy(const Quaternion& q) {
+    return matrix2rpy(q.normalized().toRotationMatrix());
 }
 
 inline std::string expand_env(const std::string& s) {

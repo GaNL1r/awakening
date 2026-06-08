@@ -29,7 +29,7 @@ void draw_auto_aim(cv::Mat& img, const AutoAimDebugCtx& ctx) {
     armors.draw(img);
     if (armor_target.check()) {
         auto target_state = armor_target.get_target_state();
-        target_state.predict(Clock::now(), armor_target.target_number);
+        target_state.predict(ctx.img_frame.get().timestamp, armor_target.target_number);
         auto armors_pose_in_odom = target_state.get_armors_pose(armor_target.target_number);
         auto odom_in_camera_cv = ctx.odom_in_camera_cv.get();
         for (int i = 0; i < armors_pose_in_odom.size(); ++i) {
@@ -364,8 +364,8 @@ void write_debug_data(const AutoAimDebugCtx& ctx) {
     d.yaw_log.handle_once(yaw);
     last_yaw = yaw;
     d.pitch_log.handle_once(cmd.pitch);
-    d.yaw_diff_log.handle_once(yaw-gimbal_yaw_pitch.first);
-    d.pitch_diff_log.handle_once(cmd.pitch-gimbal_yaw_pitch.second);
+    d.yaw_diff_log.handle_once(yaw - gimbal_yaw_pitch.first);
+    d.pitch_diff_log.handle_once(cmd.pitch - gimbal_yaw_pitch.second);
     d.target_yaw_log.handle_once(un_warp(cmd.target_yaw));
     d.target_pitch_log.handle_once(cmd.target_pitch);
     d.gimbal_yaw_log.handle_once(un_warp(gimbal_yaw_pitch.first));

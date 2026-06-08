@@ -40,12 +40,10 @@ public:
     }
     template<typename IO>
     void run_loop() {
-        using clock = std::chrono::steady_clock;
-
         const auto frame_interval =
-            std::chrono::duration_cast<clock::duration>(std::chrono::duration<double>(1.0 / fps_));
+            std::chrono::duration_cast<Clock::duration>(std::chrono::duration<double>(1.0 / fps_));
 
-        auto next_frame_time = clock::now();
+        auto next_frame_time = Clock::now();
 
         while (running_) {
             cv::Mat frame_bgr;
@@ -62,7 +60,7 @@ public:
 
             ImageFrame frame;
             frame.src_img = std::move(frame_bgr);
-            frame.timestamp = clock::now();
+            frame.timestamp = Clock::now();
             frame.format = PixelFormat::BGR;
             scheduler_.runtime_push_source<IO>(source_snapshot_id_, [f = std::move(frame)]() {
                 return std::make_tuple(std::optional<typename IO::second_type>(std::move(f)));

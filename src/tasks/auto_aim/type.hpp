@@ -403,7 +403,7 @@ struct Armor {
 };
 
 struct Armors {
-    std::chrono::steady_clock::time_point timestamp;
+    TimePoint timestamp;
     int id = -1;
     int frame_id = -1;
     std::vector<Armor> armors;

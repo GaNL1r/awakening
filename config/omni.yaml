@@ -8,7 +8,7 @@ serial:
   baud_rate: 115200
   char_size: 8
   read_buf_size: 4096
-serial_send_to_image_microseconds: 0
+serial_send_to_image_microseconds: -2500
 use_sim: false
 
 record:
@@ -78,7 +78,8 @@ armor_detector:
       max_ratio: 5.0
 
 armor_tracker:
-  lost_time_thres: 1.5
+  lost_time_thres: 0.5
+  lost_time_thres_outpost: 2.0
   tracking_thres: 10
   match_gate_at_1m: 50.0
   match_gate_not_all_init_at_1m: 100.0
@@ -89,7 +90,7 @@ armor_tracker:
   q_r: 0.0000001
   q_l: 0.0000001
   q_h: 0.0000001
-  q_outpost_dz: 0.5
+  q_outpost_dz: 0.01
   enable_lights_measure: true
   light_match_length_ratio_gate: 0.2
   light_match_angle_gate: 0.2
@@ -101,8 +102,8 @@ armor_tracker:
 auto_aim_fsm:
   single_whole_up: 1.5 
   single_whole_down: 1.0
-  whole_pair_up: 16.5 
-  whole_pair_down: 9.5 #1s内至少换2次板子  2pi  否则轨迹规划无意义
+  whole_pair_up: 7.5 
+  whole_pair_down: 6.5 #1s内至少换2次板子  2pi  否则轨迹规划无意义
   pair_center_up: 16.5
   pair_center_down: 15.0
   transfer_thresh: 50

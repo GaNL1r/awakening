@@ -1,6 +1,7 @@
 #pragma once
 #include "MvCameraControl.h"
 #include "utils/common/image.hpp"
+#include "utils/common/type_common.hpp"
 #include "utils/logger.hpp"
 #include "utils/scheduler/node.hpp"
 #include "utils/scheduler/scheduler.hpp"
@@ -18,7 +19,7 @@ class HikCamera {
 public:
     struct Frame {
         MV_FRAME_OUT out_frame;
-        std::chrono::steady_clock::time_point timestamp;
+        TimePoint timestamp;
     };
     HikCamera(const YAML::Node& config, Scheduler& scheduler): scheduler_(scheduler) {
         config_ = config;
@@ -63,7 +64,7 @@ public:
             // std::this_thread::sleep_for(std::chrono::milliseconds(1));
             int n_ret = MV_CC_GetImageBuffer(camera_handle_, &frame.out_frame, 100);
             if (n_ret == MV_OK) {
-                const auto current_time = std::chrono::steady_clock::now();
+                const auto current_time = Clock::now();
 
                 const auto half_exposure =
                     std::chrono::microseconds(static_cast<long>(get_ExposureTime() / 2));

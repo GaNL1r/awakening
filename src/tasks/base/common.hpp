@@ -74,7 +74,7 @@ struct AimPoint {
     }
 };
 struct GimbalCmd {
-    std::chrono::steady_clock::time_point timestamp;
+    TimePoint timestamp;
     double pitch = 0;
     double yaw = 0;
     double enable_yaw_diff = 0;

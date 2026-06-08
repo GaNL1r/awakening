@@ -105,7 +105,7 @@ public:
 
         if (cap_.read(mat)) {
             f.src_img = std::move(mat);
-            f.timestamp = std::chrono::steady_clock::now();
+            f.timestamp = Clock::now();
             f.format = PixelFormat::BGR;
         } else {
             AWAKENING_WARN("uvc: {} read_image failed.", device_name_);
@@ -136,6 +136,6 @@ public:
     bool running_ = false;
     cv::VideoCapture cap_;
     std::thread daemon_thread_;
-    std::chrono::steady_clock::time_point last_frame_time_;
+    TimePoint last_frame_time_;
 };
 } // namespace awakening

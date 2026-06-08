@@ -22,7 +22,7 @@ reset="\033[0m"
 
 if [ "$EUID" -eq 0 ]; then
     USER_HOME=$(getent passwd $SUDO_USER | cut -d: -f6)
-    COPY_BASHRC="$WORK_DIR/user_bashrc_copy.bash"
+    COPY_BASHRC="$WORK_DIR/output/user_bashrc_copy.bash"
     if [ -f "$USER_HOME/.bashrc" ]; then
         tail -n +11 "$USER_HOME/.bashrc" > "$COPY_BASHRC"
         chmod 644 "$COPY_BASHRC"

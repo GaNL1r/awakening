@@ -1,4 +1,6 @@
+#include "angles.h"
 #include "ascii_banner.hpp"
+#include "daedalus_interface/shm_layout.hpp"
 #include "tasks/auto_aim/armor_track/motion_model.hpp"
 #include "tasks/base/ballistic_trajectory.hpp"
 #include "tasks/base/wheel_odometry.hpp"
@@ -23,6 +25,7 @@
     #include <rclcpp/qos.hpp>
 #endif
 #include "backward-cpp/backward.hpp"
+#include "daedalus_interface/shm_client.hpp"
 #include "param_deliver.h"
 #include "runtime/config.hpp"
 #include "tasks/auto_aim/armor_control/very_aimer.hpp"
@@ -118,7 +121,7 @@ static constexpr auto RECORD_FOLDER_PATH_ARR = utils::concat(ROOT_DIR, "/record/
 static constexpr std::string_view RECORD_FOLDER_PATH(RECORD_FOLDER_PATH_ARR.data());
 
 int main(int argc, char** argv) {
-    auto start_tp = std::chrono::steady_clock::now();
+    auto start_tp = Clock::now();
     print_banner();
     auto& signal = utils::SignalGuard::instance();
     logger::init(spdlog::level::trace);
@@ -138,10 +141,6 @@ int main(int argc, char** argv) {
         debug = second_arg.value() == "true";
     }
     auto config = YAML::LoadFile(config_path);
-    bool use_sim = false;
-#ifdef USE_ROS2
-    use_sim = config["use_sim"].as<bool>();
-#endif
     Scheduler s;
     EnemyColor enemy_color = enemy_color_from_string(config["enemy_color"].as<std::string>());
     double bullet_speed = config["bullet_speed"].as<double>();
@@ -149,9 +148,18 @@ int main(int argc, char** argv) {
     rcl::RclcppNode rcl_node("auto_aim");
     rcl::TF rcl_tf(rcl_node);
 #endif
-
+    std::unique_ptr<talos::ipc::ShmClient> daedalus_shm_client;
+    if (config["use_sim"].as<bool>()) {
+        auto client = talos::ipc::ShmClient::connect();
+        if (!client) {
+            AWAKENING_ERROR("Failed to connect to talos::ipc::ShmClient");
+            return 1;
+        } else {
+            daedalus_shm_client = std::make_unique<talos::ipc::ShmClient>(std::move(*client));
+        }
+    }
     std::unique_ptr<SerialDriver> serial;
-    if (!use_sim && config["serial"]["enable"].as<bool>()) {
+    if (!daedalus_shm_client && config["serial"]["enable"].as<bool>()) {
         serial = std::make_unique<SerialDriver>(config["serial"], s);
     }
 
@@ -162,7 +170,7 @@ int main(int argc, char** argv) {
             camera->stop();
         }
     });
-    if (!use_sim) {
+    if (!daedalus_shm_client) {
         camera = std::make_unique<HikCamera>(camera_config["hik_camera"], s);
         camera->init();
         if (!camera->running_) {
@@ -221,82 +229,53 @@ int main(int argc, char** argv) {
             utils::load_isometry3(config["tf"]["shoot_in_gimbal"])
         );
     }
-#ifdef USE_ROS2
-    if (use_sim) {
-        auto camera_info_sub = rcl_node.make_sub<sensor_msgs::msg::CameraInfo>(
-            "/camera_info",
-            rclcpp::SensorDataQoS(),
-            [&](sensor_msgs::msg::CameraInfo::ConstSharedPtr _camera_info) {
-                static bool has = false;
-                if (!has) {
-                    auto& msg = *_camera_info;
-                    std::memcpy(camera_info.camera_matrix.data, msg.k.data(), 9 * sizeof(double));
-                    std::memcpy(
-                        camera_info.distortion_coefficients.data,
-                        msg.d.data(),
-                        msg.d.size() * sizeof(double)
-                    );
-                    if (debug) {
-                        auto_aim_dbg->camera_info_ = camera_info;
-                    }
-                    has = true;
-                    AWAKENING_INFO("camera info loaded");
-                }
-            }
+    auto serial_send_to_image_microseconds = config["serial_send_to_image_microseconds"].as<int>();
+    if (daedalus_shm_client) {
+        auto daedalus_imgs = s.register_source<CameraIO>("daedalus_img");
+        s.add_rate_source<>("daedalus_tick", 300.0, [&]() {
+            static bool has_camera_info = false;
+            if (!has_camera_info) {
+                auto daedalus_camera_info = daedalus_shm_client->camera_info();
+                has_camera_info = true;
+                camera_info.camera_matrix = cv::Mat::eye(3, 3, CV_64F);
 
-        );
-        rcl_node.push_sub(camera_info_sub);
-        auto sim_cam = s.register_source<CameraIO>("sim_cam");
-        auto img_sub = rcl_node.make_sub<sensor_msgs::msg::Image>(
-            "/image_raw",
-            rclcpp::SensorDataQoS(),
-            [&](const sensor_msgs::msg::Image::ConstSharedPtr img_msg) {
-                s.runtime_push_source<CameraIO>(sim_cam, [&, i = std::move(img_msg)]() {
-                    if (!i->data.data()) {
-                        return std::make_tuple(std::optional<CameraIO::second_type>(std::nullopt));
-                    }
-                    ImageFrame img_frame {
-                        .src_img =
-                            std::move(cv::Mat(
-                                          i->height,
-                                          i->width,
-                                          CV_8UC3,
-                                          const_cast<unsigned char*>(i->data.data()), // raw pointer
-                                          i->step
-                            )
-                                          .clone()),
-                        .format = PixelFormat::RGB,
-                        .timestamp = Clock::now(),
-                    };
-                    return std::make_tuple(std::optional<CameraIO::second_type>(std::move(img_frame)
-                    ));
+                camera_info.camera_matrix.at<double>(0, 0) = daedalus_camera_info.fx;
+                camera_info.camera_matrix.at<double>(1, 1) = daedalus_camera_info.fy;
+                camera_info.camera_matrix.at<double>(0, 2) = daedalus_camera_info.cx;
+                camera_info.camera_matrix.at<double>(1, 2) = daedalus_camera_info.cy;
+
+                camera_info.distortion_coefficients = cv::Mat(1, 5, CV_64F);
+                std::memcpy(
+                    camera_info.distortion_coefficients.ptr<double>(),
+                    daedalus_camera_info.distortion,
+                    5 * sizeof(double)
+                );
+            }
+            if (auto frame = daedalus_shm_client->recv_image()) {
+                ImageFrame img_frame {
+                    .src_img = std::move(frame->image),
+                    .format = PixelFormat::RGB,
+                    .timestamp = TimePoint(std::chrono::nanoseconds(frame->timestamp_ns)),
+                };
+                s.runtime_push_source<CameraIO>(daedalus_imgs, [f = std::move(img_frame)]() {
+                    return std::make_tuple(std::optional<typename CameraIO::second_type>(std::move(f
+                    )));
                 });
             }
-        );
-        rcl_node.push_sub(img_sub);
-        s.add_rate_source<>("get_sim_tf", 200.0, [&]() {
-            if (use_sim) {
-                auto ros_now = rcl_node.rclcpp->get_clock()->now();
-                auto __tf = rcl_tf.get_transform<double>(
-                    "gimbal_link",
-                    "odom",
-                    ros_now,
-                    rclcpp::Duration::from_seconds(0.1)
+            if (auto pose = daedalus_shm_client->recv_pose(talos::ipc::PoseIndex::POSE_GIMBAL)) {
+                ISO3 gimbal_2_gimbal_odom = ISO3::Identity();
+                gimbal_2_gimbal_odom.linear() =
+                    Quaternion { pose->qw, pose->qx, pose->qy, pose->qz }.toRotationMatrix();
+                tf->push(
+                    SimpleFrame::GIMBAL_ODOM,
+                    SimpleFrame::GIMBAL,
+                    TimePoint(std::chrono::nanoseconds(pose->timestamp_ns)),
+                    gimbal_2_gimbal_odom
                 );
-                if (__tf) {
-                    ISO3 gimbal_in_gimbal_odom = ISO3::Identity();
-                    gimbal_in_gimbal_odom.linear() = __tf->linear();
-                    tf->push(
-                        SimpleFrame::GIMBAL_ODOM,
-                        SimpleFrame::GIMBAL,
-                        Clock::now(),
-                        gimbal_in_gimbal_odom.inverse()
-                    );
-                }
             }
         });
     }
-#endif
+
     if (video_saver) {
         s.register_task<CameraIO>("save_video", [&](CameraIO::second_type&& f) {
             if (!f.src_img.empty()) {
@@ -321,11 +300,12 @@ int main(int argc, char** argv) {
 
         return std::make_tuple(std::optional<CommonFrameIo::second_type>(std::move(frame)));
     });
+
     if (serial) {
         s.register_task<SerialIO>("receive_serial", [&](SerialIO::second_type&& data) {
             static std::mutex mutex;
             std::lock_guard<std::mutex> lock(mutex);
-            auto now = std::chrono::steady_clock::now();
+            auto now = Clock::now();
 
             log_ctx.serial_count++;
             if (auto robo_opt = ReceiveRobotData::create(data); robo_opt.has_value()) {
@@ -340,16 +320,14 @@ int main(int argc, char** argv) {
                         / 2.0;
                 }
 
-                auto packet_time = now - std::chrono::microseconds(delay);
+                auto packet_time =
+                    now - std::chrono::microseconds(serial_send_to_image_microseconds);
                 ISO3 gimbal_2_gimbal_odom = ISO3::Identity();
-                gimbal_2_gimbal_odom.linear() = utils::euler2matrix(
-                    Vec3(
-                        angles::from_degrees(robo.yaw),
-                        angles::from_degrees(robo.pitch),
-                        angles::from_degrees(robo.roll)
-                    ),
-                    utils::EulerOrder::ZYX
-                );
+                gimbal_2_gimbal_odom.linear() = utils::rpy2matrix(Vec3(
+                    angles::from_degrees(robo.roll),
+                    angles::from_degrees(robo.pitch),
+                    angles::from_degrees(robo.yaw)
+                ));
                 tf->push(
                     SimpleFrame::GIMBAL_ODOM,
                     SimpleFrame::GIMBAL,
@@ -514,7 +492,7 @@ int main(int argc, char** argv) {
             armor_target.write(__armor_target);
 
             auto latency_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-                                  std::chrono::steady_clock::now() - armors.timestamp
+                                  Clock::now() - armors.timestamp
             )
                                   .count();
             log_ctx.latency_ms_total += latency_ms;
@@ -565,10 +543,9 @@ int main(int argc, char** argv) {
         if (serial) {
             SendRobotCmdData send;
             send.cmd_ID = SendRobotCmdData::ID;
-            send.time_stamp = std::chrono::duration_cast<std::chrono::microseconds>(
-                                  std::chrono::steady_clock::now() - start_tp
-            )
-                                  .count();
+            send.time_stamp =
+                std::chrono::duration_cast<std::chrono::microseconds>(Clock::now() - start_tp)
+                    .count();
             send.appear = cmd.appear, send.detect_color = std::to_underlying(enemy_color);
             send.yaw = cmd.yaw, send.pitch = cmd.pitch, send.v_yaw = cmd.v_yaw;
             send.target_yaw = cmd.target_yaw, send.target_pitch = cmd.target_pitch;
@@ -576,6 +553,24 @@ int main(int argc, char** argv) {
             send.enable_yaw_diff = cmd.enable_yaw_diff;
             send.enable_pitch_diff = cmd.enable_pitch_diff;
             serial->write(std::move(utils::to_vector(send)));
+        }
+        if (daedalus_shm_client) {
+            auto gimbal_in_gimbal_odom =
+                tf->pose_a_in_b(SimpleFrame::GIMBAL, SimpleFrame::GIMBAL_ODOM, Clock::now());
+            auto rpy = utils::matrix2rpy(gimbal_in_gimbal_odom.linear());
+            daedalus_shm_client->send_gimbal_cmd(
+                cmd.yaw,
+                -cmd.pitch,
+                cmd.appear ? 1.0 : -1.0,
+                (std::abs(
+                     angles::shortest_angular_distance_degrees(angles::to_degrees(rpy[2]), cmd.yaw)
+                 ) < cmd.enable_yaw_diff
+                 && std::abs(angles::shortest_angular_distance_degrees(
+                        angles::to_degrees(-rpy[1]),
+                        cmd.pitch
+                    ))
+                     < cmd.enable_pitch_diff)
+            );
         }
         auto old_in_camera_cv = tf->pose_a_in_b(
             SimpleFrame(cmd.aim_point.frame_id),
@@ -617,10 +612,9 @@ int main(int argc, char** argv) {
             auto_aim_dbg->fsm_state.set(auto_aim_fsm_controller.get_state());
             auto gimbal_in_gimbal_odom =
                 tf->pose_a_in_b(SimpleFrame::GIMBAL, SimpleFrame::GIMBAL_ODOM, Clock::now());
-            auto euler =
-                utils::matrix2euler(gimbal_in_gimbal_odom.linear(), utils::EulerOrder::ZYX);
+            auto rpy = utils::matrix2rpy(gimbal_in_gimbal_odom.linear());
             auto gimbal_yaw_pitch =
-                std::make_pair(angles::to_degrees(euler[0]), -angles::to_degrees(euler[1]));
+                std::make_pair(angles::to_degrees(rpy[2]), -angles::to_degrees(rpy[1]));
             auto_aim_dbg->gimbal_yaw_pitch.set(gimbal_yaw_pitch);
             write_debug_data(auto_aim_dbg.value());
             bullet_pick_up.update(
@@ -638,15 +632,13 @@ int main(int argc, char** argv) {
             auto_aim_dbg->odom_in_camera_cv.set(odom_in_camera_cv);
             auto_aim_dbg->bullet_positions.set(bullet_poss);
             auto img = auto_aim_dbg->img_frame.get();
-            auto debug_img = img.src_img;
+            auto debug_img = img.src_img.clone();
             if (img.format == PixelFormat::RGB) {
                 cv::cvtColor(debug_img, debug_img, cv::COLOR_RGB2BGR);
             }
-            static cv::Mat last_draw;
-            if (!debug_img.empty() && debug_img.data != last_draw.data) {
+            if (!debug_img.empty()) {
                 auto_aim::draw_auto_aim(debug_img, auto_aim_dbg.value());
                 web::write_shm(debug_img);
-                last_draw = debug_img;
             }
         });
 #ifdef USE_ROS2

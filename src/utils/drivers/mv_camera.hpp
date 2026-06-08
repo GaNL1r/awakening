@@ -52,7 +52,7 @@ public:
 
             auto status = CameraGetImageBuffer(h_camera_, &head, &raw, 100);
             if (status == CAMERA_STATUS_SUCCESS) {
-                const auto current_time = std::chrono::steady_clock::now();
+                const auto current_time = Clock::now();
 
                 const auto half_exposure =
                     std::chrono::microseconds(static_cast<long>(get_ExposureTime() / 2));

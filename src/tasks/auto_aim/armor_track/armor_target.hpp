@@ -14,6 +14,7 @@ namespace awakening::auto_aim {
 struct ArmorTrackerCfg {
     int esekf_iter_num;
     double lost_time_thres;
+    double lost_time_thres_outpost;
     int tracking_thres;
     double match_gate_at_1m;
     double match_gate_not_all_init_at_1m;
@@ -34,6 +35,7 @@ struct ArmorTrackerCfg {
     void load(const YAML::Node& config) {
         esekf_iter_num = config["esekf_iter_num"].as<int>();
         lost_time_thres = config["lost_time_thres"].as<double>();
+        lost_time_thres_outpost = config["lost_time_thres_outpost"].as<double>();
         tracking_thres = config["tracking_thres"].as<int>();
         match_gate_at_1m = config["match_gate_at_1m"].as<double>();
         match_gate_not_all_init_at_1m = config["match_gate_not_all_init_at_1m"].as<double>();

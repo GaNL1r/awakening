@@ -27,6 +27,8 @@ namespace idx {
 constexpr int X_N = idx::X_N;
 constexpr int UVZ_N = idx::_UVZ_N;
 constexpr int YPDZ_N = idx::_YPD_Z_N;
+constexpr double OUTPOST_R = 0.27;
+constexpr double OUTPOST_LEVEL_DZ = 0.1;
 using VecX = Eigen::Matrix<double, X_N, 1>;
 using UVVecZ = Eigen::Matrix<double, UVZ_N, 1>;
 using YPDVecZ = Eigen::Matrix<double, YPDZ_N, 1>;
@@ -99,7 +101,8 @@ struct Predict {
                 h = T(0.0);
             }
         } else {
-            r = T(0.27);
+            r = T(OUTPOST_R);
+            constrain_outpost_dz(x);
         }
 
         if (ceres::abs(vyaw) > T(20.0)) {
@@ -113,6 +116,46 @@ struct Predict {
         assert(x0.size() == X_N);
         assert(x1.size() == X_N);
         operator()(x0.data(), x1.data());
+    }
+
+private:
+    template<typename T>
+    static inline void constrain_outpost_dz(T x[X_N]) {
+        const T dz = T(OUTPOST_LEVEL_DZ);
+        const T candidates[6][2] = {
+            { -dz, -T(2.0) * dz }, { -T(2.0) * dz, -dz }, { -dz, dz },
+            { dz, -dz },           { dz, T(2.0) * dz },   { T(2.0) * dz, dz },
+        };
+
+        T best_dz1 = candidates[0][0];
+        T best_dz2 = candidates[0][1];
+        T best_cost =
+            squared(x[idx::OUTPOST01DZ] - best_dz1) + squared(x[idx::OUTPOST02DZ] - best_dz2);
+
+        for (int i = 1; i < 6; ++i) {
+            const T cost = squared(x[idx::OUTPOST01DZ] - candidates[i][0])
+                + squared(x[idx::OUTPOST02DZ] - candidates[i][1]);
+            if (cost < best_cost) {
+                best_cost = cost;
+                best_dz1 = candidates[i][0];
+                best_dz2 = candidates[i][1];
+            }
+        }
+        if (ceres::abs(x[idx::OUTPOST01DZ]) < T(1e-6)) {
+            x[idx::OUTPOST01DZ] = T(0.0);
+        } else {
+            x[idx::OUTPOST01DZ] = best_dz1;
+        }
+        if (ceres::abs(x[idx::OUTPOST02DZ]) < T(1e-6)) {
+            x[idx::OUTPOST02DZ] = T(0.0);
+        } else {
+            x[idx::OUTPOST02DZ] = best_dz2;
+        }
+    }
+
+    template<typename T>
+    static inline T squared(const T& value) {
+        return value * value;
     }
 };
 
@@ -296,8 +339,8 @@ struct State {
             ax = pose_in_odom.translation().x();
             ay = pose_in_odom.translation().y();
             az = pose_in_odom.translation().z();
-            auto ypr = utils::matrix2euler(pose_in_odom.linear(), utils::EulerOrder::ZYX);
-            ayaw = ypr[0];
+            auto rpy = utils::matrix2rpy(pose_in_odom.linear());
+            ayaw = rpy[2];
             r.push_back({ ax, ay, az, ayaw });
         }
         return r;

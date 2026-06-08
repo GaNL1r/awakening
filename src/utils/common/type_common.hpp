@@ -12,6 +12,6 @@ using Mat3 = Eigen::Matrix3d;
 using ISO3 = Eigen::Isometry3d;
 using Quaternion = Eigen::Quaterniond;
 using AngleAxis = Eigen::AngleAxisd;
-using Clock = std::chrono::steady_clock;
+using Clock = std::chrono::system_clock;
 using TimePoint = std::chrono::time_point<Clock>;
 } // namespace awakening

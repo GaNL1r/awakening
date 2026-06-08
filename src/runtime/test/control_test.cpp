@@ -23,7 +23,7 @@ struct SerialTag {};
 using SerialIO = IOPair<SerialTag, std::vector<uint8_t>>;
 
 int main(int argc, char** argv) {
-    auto start_tp = std::chrono::steady_clock::now();
+    auto start_tp = Clock::now();
     print_banner();
     auto& signal = utils::SignalGuard::instance();
     logger::init(spdlog::level::trace);
@@ -71,7 +71,7 @@ int main(int argc, char** argv) {
     s.register_task<SerialIO>("receive_serial", [&](SerialIO::second_type&& data) {
         static std::mutex mutex;
         std::lock_guard<std::mutex> lock(mutex);
-        auto now = std::chrono::steady_clock::now();
+        auto now = Clock::now();
 
         if (auto robo_opt = ReceiveRobotData::create(data); robo_opt.has_value()) {
             auto robo = robo_opt.value();
@@ -87,14 +87,11 @@ int main(int argc, char** argv) {
 
             auto packet_time = now - std::chrono::microseconds(delay);
             ISO3 gimbal_2_gimbal_odom = ISO3::Identity();
-            gimbal_2_gimbal_odom.linear() = utils::euler2matrix(
-                Vec3(
-                    angles::from_degrees(robo.yaw),
-                    angles::from_degrees(robo.pitch),
-                    angles::from_degrees(robo.roll)
-                ),
-                utils::EulerOrder::ZYX
-            );
+            gimbal_2_gimbal_odom.linear() = utils::rpy2matrix(Vec3(
+                angles::from_degrees(robo.roll),
+                angles::from_degrees(robo.pitch),
+                angles::from_degrees(robo.yaw)
+            ));
             tf->push(
                 SimpleFrame::GIMBAL_ODOM,
                 SimpleFrame::GIMBAL,
@@ -111,7 +108,7 @@ int main(int argc, char** argv) {
     double pitch_amplitude_deg = 5.0;
     double pitch_frequency_hz = 1;
     s.add_rate_source<>("solver", 1000.0, [&]() {
-        auto now = std::chrono::steady_clock::now();
+        auto now = Clock::now();
         double t = std::chrono::duration<double>(now - start_tp).count(); // 秒
         GimbalCmd cmd;
         auto sample_sine_motion = [](double amplitude, double frequency, double t) {
@@ -139,10 +136,8 @@ int main(int argc, char** argv) {
         cmd.appear = true;
         SendRobotCmdData send;
         send.cmd_ID = SendRobotCmdData::ID;
-        send.time_stamp = std::chrono::duration_cast<std::chrono::microseconds>(
-                              std::chrono::steady_clock::now() - start_tp
-        )
-                              .count();
+        send.time_stamp =
+            std::chrono::duration_cast<std::chrono::microseconds>(Clock::now() - start_tp).count();
         send.appear = cmd.appear, send.detect_color = 0;
         send.yaw = cmd.yaw, send.pitch = cmd.pitch, send.v_yaw = cmd.v_yaw;
         send.target_yaw = cmd.target_yaw, send.target_pitch = cmd.target_pitch;
@@ -153,9 +148,9 @@ int main(int argc, char** argv) {
         auto_aim_dbg.gimbal_cmd.set(cmd);
         auto gimbal_in_gimbal_odom =
             tf->pose_a_in_b(SimpleFrame::GIMBAL, SimpleFrame::GIMBAL_ODOM, Clock::now());
-        auto euler = utils::matrix2euler(gimbal_in_gimbal_odom.linear(), utils::EulerOrder::ZYX);
+        auto rpy = utils::matrix2rpy(gimbal_in_gimbal_odom.linear());
         auto gimbal_yaw_pitch =
-            std::make_pair(angles::to_degrees(euler[0]), -angles::to_degrees(euler[1]));
+            std::make_pair(angles::to_degrees(rpy[2]), -angles::to_degrees(rpy[1]));
         auto_aim_dbg.gimbal_yaw_pitch.set(gimbal_yaw_pitch);
         write_debug_data(auto_aim_dbg);
     });

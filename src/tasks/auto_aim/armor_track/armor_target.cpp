@@ -79,7 +79,7 @@ void ArmorTarget::reset(
     const double xa = pos.x();
     const double ya = pos.y();
     const double za = pos.z();
-    auto rpy = utils::matrix2euler(a.pose.linear(), utils::EulerOrder::XYZ);
+    auto rpy = utils::matrix2rpy(a.pose.linear());
     const double yaw = rpy[2];
     last_rot_yaw = yaw;
     target_state.x = Eigen::VectorXd::Zero(X_N);
@@ -138,7 +138,7 @@ void ArmorTarget::armor_pnp(
     a.pose.linear() = R_eigen_armor_in_camera_cv;
     auto armor_in_odom = camera_cv_in_odom * a.pose;
     a.pose = armor_in_odom;
-    auto rpy = utils::matrix2euler(a.pose.linear(), utils::EulerOrder::XYZ);
+    auto rpy = utils::matrix2rpy(a.pose.linear());
     double yaw_raw = rpy[2];
     constexpr double SEARCH_RANGE = 140; // 随便穷举（
     auto yaw0 = angles::normalize_angle(yaw_raw - SEARCH_RANGE / 2 * CV_PI / 180.0);
@@ -152,8 +152,8 @@ void ArmorTarget::armor_pnp(
     for (int i = 0; i < SEARCH_RANGE; i++) {
         double yaw = angles::normalize_angle(yaw0 + i * CV_PI / 180.0);
         auto a_pose_in_odom = a.pose;
-        auto search_ypr = Vec3(yaw, armor_pitch, rpy[0]);
-        a_pose_in_odom.linear() = utils::euler2matrix(search_ypr, utils::EulerOrder::ZYX);
+        auto search_rpy = Vec3(0, armor_pitch, yaw);
+        a_pose_in_odom.linear() = utils::rpy2matrix(search_rpy);
         auto a_pose_in_camera_cv = camera_cv_in_odom.inverse() * a_pose_in_odom;
         auto img_points = utils::reprojection(
             camera_info.camera_matrix,
@@ -258,7 +258,7 @@ ArmorTarget::get_ypdmeasurement(Armor& a) const noexcept {
     z[idx::YPD_Y] = ypd_y;
     z[idx::YPD_P] = ypd_p;
     z[idx::YPD_D] = ypd_d;
-    auto rpy = utils::matrix2euler(a.pose.linear(), utils::EulerOrder::XYZ);
+    auto rpy = utils::matrix2rpy(a.pose.linear());
     double yaw = rpy[2];
     z[idx::ROT_YAW] = last_rot_yaw + angles::shortest_angular_distance(last_rot_yaw, yaw);
     last_rot_yaw = z[idx::ROT_YAW];
@@ -441,7 +441,7 @@ std::vector<std::pair<int, Armor>> ArmorTarget::match_armor(
 
     for (int j = 0; j < n_obs; ++j) {
         if (armors[j].number == ArmorClass::OUTPOST) {
-            auto rpy = utils::matrix2euler(armors[j].pose.linear(), utils::EulerOrder::XYZ);
+            auto rpy = utils::matrix2rpy(armors[j].pose.linear());
             if (rpy[1] > 0) {
                 continue;
             }
@@ -460,6 +460,8 @@ std::vector<std::pair<int, Armor>> ArmorTarget::match_armor(
             measure.h(target_state.x, z_pred);
 
             YPDVecZ nu = meas_list[j] - z_pred;
+            nu[idx::YPD_Y] = angles::normalize_angle(nu[idx::YPD_Y]);
+            nu[idx::ROT_YAW] = angles::normalize_angle(nu[idx::ROT_YAW]);
             auto R = ypdmeasurement_covariance(z_pred);
             double d2 = nu.transpose() * R.ldlt().solve(nu);
 
@@ -662,10 +664,8 @@ std::vector<std::tuple<int, bool, Light>> ArmorTarget::match_light(
          target_pos_in_camera_cv.y(),
          target_pos_in_camera_cv.z());
 
-    auto target_R_in_odom = utils::euler2matrix(
-        Vec3(std::atan2(target_pos_in_odom.y(), target_pos_in_odom.x()), 0, 0),
-        utils::EulerOrder::ZYX
-    );
+    auto target_R_in_odom =
+        utils::rpy2matrix(Vec3(0, 0, std::atan2(target_pos_in_odom.y(), target_pos_in_odom.x())));
 
     auto target_R_in_camera_cv = camera_cv_in_odom.inverse() * target_R_in_odom;
 
