@@ -1,6 +1,5 @@
 #include "tasks/sentry_brain/rmuc_2026/map.hpp"
 #include "utils/logger.hpp"
-#include "utils/utils.hpp"
 #include <optional>
 #include <string>
 using namespace awakening::sentry_brain;

@@ -42,7 +42,6 @@ struct RunePan {
         for (int i = 0; i < 4; ++i) {
             cv::line(img, corners[i], corners[(i + 1) % 4], cv::Scalar(255, 0, 0), 2);
         }
-
         cv::circle(img, center, 3, cv::Scalar(0, 0, 255), cv::FILLED);
     }
 };

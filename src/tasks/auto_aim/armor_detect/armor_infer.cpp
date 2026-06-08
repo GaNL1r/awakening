@@ -9,7 +9,7 @@ static constexpr float MERGE_CONF_ERROR = 0.95f;
 static constexpr float MERGE_MIN_IOU = 0.9f;
 static constexpr float NMS_THRESHOLD = 0.35;
 static constexpr int TOP_K = 128;
-enum class Mode : int { TUP, RP, AT1,AT2 };
+enum class Mode : int { TUP, RP, AT1, AT2 };
 inline Mode modeFromString(const std::string& s) noexcept {
     std::string str = utils::to_upper(s);
     if (str == "TUP")
@@ -63,7 +63,7 @@ struct ModelTraits<Mode::RP> {
                                            ArmorColor::PURPLE,
                                            ArmorColor::NONE };
 };
-struct ModelTraits_AT{
+struct ModelTraits_AT {
     static constexpr int NUM_CLASSES = 9;
     static constexpr int NUM_COLORS = 4;
     static constexpr int NUM_KPTS = 4;
@@ -86,9 +86,8 @@ struct ModelTraits<Mode::AT1> {
     static constexpr int NUM_KPTS = ModelTraits_AT::NUM_KPTS;
     static constexpr bool USE_NORM = ModelTraits_AT::USE_NORM;
     static constexpr PixelFormat TARGET_FORMAT = ModelTraits_AT::TARGET_FORMAT;
-    static constexpr std::array CLASSES  = ModelTraits_AT::CLASSES;
+    static constexpr std::array CLASSES = ModelTraits_AT::CLASSES;
     static constexpr std::array COLORS = ModelTraits_AT::COLORS;
-
 };
 template<>
 struct ModelTraits<Mode::AT2> {
@@ -97,7 +96,7 @@ struct ModelTraits<Mode::AT2> {
     static constexpr int NUM_KPTS = ModelTraits_AT::NUM_KPTS;
     static constexpr bool USE_NORM = ModelTraits_AT::USE_NORM;
     static constexpr PixelFormat TARGET_FORMAT = ModelTraits_AT::TARGET_FORMAT;
-    static constexpr std::array CLASSES  = ModelTraits_AT::CLASSES;
+    static constexpr std::array CLASSES = ModelTraits_AT::CLASSES;
     static constexpr std::array COLORS = ModelTraits_AT::COLORS;
 };
 [[nodiscard]] inline double sigmoid(double x) noexcept {

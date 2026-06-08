@@ -1,6 +1,4 @@
 #pragma once
-#include "../node.hpp"
-#include "utils/common/type_common.hpp"
 #include <string>
 #include <visualization_msgs/msg/marker_array.hpp>
 namespace awakening::rcl {

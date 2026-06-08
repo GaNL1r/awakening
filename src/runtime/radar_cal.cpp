@@ -1,13 +1,9 @@
-#include "_rcl/node.hpp"
 #include "ascii_banner.hpp"
 #include "tasks/base/common.hpp"
 #include "tasks/radar_detect/rmuc_2026_map.hpp"
-#include "utils/common/type_common.hpp"
 #include "utils/drivers/hik_camera.hpp"
 #include "utils/drivers/video_player.hpp"
-#include "utils/io/pcd_io.h"
 #include "utils/signal_guard.hpp"
-#include "utils/utils.hpp"
 #include <Eigen/src/Core/Matrix.h>
 #include <chrono>
 #include <memory>

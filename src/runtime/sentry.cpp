@@ -1,9 +1,8 @@
 #include "angles.h"
 #include "ascii_banner.hpp"
 #include "tasks/auto_aim/armor_omni.hpp"
-#include "tasks/base/ballistic_trajectory.hpp"
 #include "tasks/base/wheel_odometry.hpp"
-#include "tasks/sentry_brain/rmuc_2026/gobal_state.hpp"
+#include "tasks/base/wheel_odometry.hpp"
 #include "tasks/sentry_brain/rmuc_2026/mode_factory.hpp"
 #include "utils/io/video_save.hpp"
 #include <algorithm>
@@ -15,11 +14,8 @@
 #include <string>
 #include <utility>
 #ifdef USE_ROS2
-    #include "_rcl/node.hpp"
-    #include "_rcl/tf.hpp"
     #include "_rcl/visual/armor.hpp"
     #include "_rcl/visual/armor_target.hpp"
-    #include "_rcl/visual/arrow.hpp"
     #include "sensor_msgs/msg/camera_info.hpp"
     #include "sensor_msgs/msg/image.hpp"
     #include <rclcpp/qos.hpp>
@@ -28,27 +24,10 @@
 #include "param_deliver.h"
 #include "runtime/config.hpp"
 #include "tasks/auto_aim/armor_control/very_aimer.hpp"
-#include "tasks/auto_aim/armor_detect/armor_detector.hpp"
-#include "tasks/auto_aim/armor_track/armor_target.hpp"
-#include "tasks/auto_aim/armor_track/armor_tracker.hpp"
-#include "tasks/auto_aim/auto_aim_fsm.hpp"
 #include "tasks/auto_aim/debug.hpp"
-#include "tasks/auto_aim/type.hpp"
-#include "tasks/base/common.hpp"
-#include "tasks/base/packet_typedef_receive.hpp"
-#include "tasks/base/packet_typedef_send.hpp"
-#include "tasks/base/web.hpp"
-#include "utils/buffer.hpp"
-#include "utils/common/image.hpp"
-#include "utils/common/type_common.hpp"
 #include "utils/drivers/hik_camera.hpp"
-#include "utils/drivers/serial_driver.hpp"
-#include "utils/logger.hpp"
-#include "utils/runtime_tf.hpp"
-#include "utils/scheduler/scheduler.hpp"
 #include "utils/semaphore_guard.hpp"
 #include "utils/signal_guard.hpp"
-#include "utils/utils.hpp"
 namespace backward {
 static backward::SignalHandling sh;
 }

@@ -5,6 +5,7 @@
 #include <yaml-cpp/node/node.h>
 namespace awakening::auto_buff {
 class RuneDetector {
+public:
     RuneDetector(const YAML::Node& config);
     RuneDetection detect(const CommonFrame& frame, EnemyColor enemy_color);
     AWAKENING_IMPL_DEFINITION(RuneDetector)

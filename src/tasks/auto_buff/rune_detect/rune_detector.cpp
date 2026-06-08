@@ -34,9 +34,15 @@ struct RuneDetector::Impl {
     Impl(const YAML::Node& config) {
         params_.load(config);
     }
-    cv::Mat preprocess(const cv::Mat& src) const noexcept {
+    cv::Mat preprocess(const cv::Mat& src, PixelFormat format) const noexcept {
         cv::Mat bin;
-        cv::cvtColor(src, bin, cv::COLOR_RGB2GRAY);
+        if (format == PixelFormat::RGB) {
+            cv::cvtColor(src, bin, cv::COLOR_RGB2GRAY);
+        } else if (format == PixelFormat::BGR) {
+            cv::cvtColor(src, bin, cv::COLOR_BGR2GRAY);
+        } else {
+            bin = src;
+        }
         cv::threshold(bin, bin, params_.bin_threshold, 255, cv::THRESH_BINARY);
 
         return bin;
@@ -98,8 +104,6 @@ struct RuneDetector::Impl {
             used_flags[i] = !invalid;
 
             if (!used_flags[i]) {
-                // if (!debug_img.empty())
-                //     cv::drawContours(debug_img, contours, i, cv::Scalar(255, 0, 0), 2);
             }
         }
     }
@@ -152,6 +156,15 @@ struct RuneDetector::Impl {
             p = hierarchy[p][3]; // 一直追溯到最顶层 parent
         }
         return p; // 若 p == -1 表示 contour 本身就是顶层轮廓
+    }
+    inline void
+    mark_parent(int idx, const std::vector<cv::Vec4i>& hierarchy, std::vector<bool>& used_flags)
+        const noexcept {
+        int p = hierarchy[idx][3]; // parent
+        while (p != -1 && hierarchy[p][3] != -1) {
+            p = hierarchy[p][3]; // 一直追溯到最顶层 parent
+            used_flags[p] = true;
+        }
     }
     std::vector<RunePan> get_rune_pans(
         const std::vector<std::vector<cv::Point>>& contours,
@@ -249,6 +262,7 @@ struct RuneDetector::Impl {
                 if (cluster_size[cid] >= 3) {
                     int contour_index = candidates[idx_list[i]].idx;
                     used_flags[contour_index] = true;
+                    mark_parent(contour_index, hierarchy, used_flags);
                     cluster_points[cid].push_back(candidates[idx_list[i]].center);
                 }
             }
@@ -296,7 +310,7 @@ struct RuneDetector::Impl {
     RuneDetection detect(const CommonFrame& frame, EnemyColor enemy_color) const noexcept {
         RuneDetection result;
         cv::Mat roi = frame.img_frame.src_img(frame.expanded);
-        auto bin = preprocess(roi);
+        auto bin = preprocess(roi, frame.img_frame.format);
         std::vector<std::vector<cv::Point>> contours;
         std::vector<cv::Vec4i> hierarchy;
         cv::findContours(bin, contours, hierarchy, cv::RETR_TREE, cv::CHAIN_APPROX_SIMPLE);
@@ -306,6 +320,7 @@ struct RuneDetector::Impl {
         result.pans = get_rune_pans(contours, hierarchy, used_flags);
         result.r_tags = get_rune_rs(contours, hierarchy, used_flags);
         result.add_offset(frame.expanded.tl());
+
         return result;
     }
 };

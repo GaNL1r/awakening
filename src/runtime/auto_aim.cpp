@@ -490,9 +490,9 @@ int main(int argc, char** argv) {
             );
             armor_target.write(__armor_target);
             auto latency_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-                                      Clock::now() - armors.timestamp
-                )
-                                      .count();
+                                  Clock::now() - armors.timestamp
+            )
+                                  .count();
             log_ctx.latency_ms_total += latency_ms;
             log_ctx.found_count += armor_tracker.get_count();
             armor_tracker.reset_count();

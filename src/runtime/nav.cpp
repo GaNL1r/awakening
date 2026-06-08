@@ -1,14 +1,8 @@
-#include "_rcl/node.hpp"
-#include "_rcl/tf.hpp"
 #include "ascii_banner.hpp"
 #include "backward-cpp/backward.hpp"
 #include "geometry_msgs/msg/twist.hpp"
-#include "tasks/base/packet_typedef_receive.hpp"
-#include "tasks/base/packet_typedef_send.hpp"
 #include "tasks/sentry_brain/rmuc_2026/mode_factory.hpp"
-#include "utils/drivers/serial_driver.hpp"
 #include "utils/signal_guard.hpp"
-#include "utils/utils.hpp"
 using namespace awakening;
 namespace backward {
 static backward::SignalHandling sh;

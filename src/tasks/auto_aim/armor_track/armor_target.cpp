@@ -655,7 +655,7 @@ std::vector<std::tuple<int, bool, Light>> ArmorTarget::match_light(
     const double lost_dt = cfg.lost_time_thres;
 
     double alpha = std::clamp(dt / lost_dt, 0.0, 1.0);
-    alpha =0.0;
+    alpha = 0.0;
     double x1 = rect.x;
     double y1 = rect.y;
     double x2 = rect.x + rect.width;

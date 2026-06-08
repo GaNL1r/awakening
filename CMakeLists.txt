@@ -224,14 +224,24 @@ function(add_common_executable exe_name src_file)
     target_link_libraries(${exe_name}  ${PROJECT_NAME}_utils relink)
 endfunction()
 add_common_executable(auto_aim src/runtime/auto_aim.cpp)
+add_common_executable(auto_buff src/runtime/auto_buff.cpp)
 add_common_executable(control_test src/runtime/test/control_test.cpp)
+add_common_executable(delay_test src/runtime/test/delay_test.cpp)
 add_common_executable(uvc_detect_test src/runtime/test/uvc_detect_test.cpp)
 
 target_link_libraries(auto_aim
     ${PROJECT_NAME}_auto_aim
     ${PROJECT_NAME}_auto_buff
 )
+target_link_libraries(auto_buff
+    ${PROJECT_NAME}_auto_aim
+    ${PROJECT_NAME}_auto_buff
+)
 target_link_libraries(control_test
+    ${PROJECT_NAME}_auto_aim
+    ${PROJECT_NAME}_auto_buff
+)
+target_link_libraries(delay_test
     ${PROJECT_NAME}_auto_aim
     ${PROJECT_NAME}_auto_buff
 )
