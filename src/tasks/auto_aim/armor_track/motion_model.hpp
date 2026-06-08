@@ -178,7 +178,8 @@ struct UVMeasure {
 
         auto pose_in_camera_cv = camera_cv_in_odom_jet.inverse() * pose_in_odom;
 
-        std::vector<cv::Point3f> object_points = getArmorKeyPoints3D<cv::Point3f>(ctx.armor_number);
+        std::vector<cv::Point3f> object_points =
+            getArmorLightKeyPoints3D<cv::Point3f>(ctx.armor_number, ctx.is_left);
 
         std::vector<Eigen::Matrix<T, 2, 1>> img_pts_jet;
         utils::project_points_jets(
@@ -188,25 +189,11 @@ struct UVMeasure {
             ctx.camera_info.distortion_coefficients,
             img_pts_jet
         );
-        if (ctx.is_left) {
-            z[idx::TOP_X] =
-                img_pts_jet[std::to_underlying(auto_aim::ArmorKeyPointsIndex::LEFT_TOP)].x();
-            z[idx::TOP_Y] =
-                img_pts_jet[std::to_underlying(auto_aim::ArmorKeyPointsIndex::LEFT_TOP)].y();
-            z[idx::BOTTOM_X] =
-                img_pts_jet[std::to_underlying(auto_aim::ArmorKeyPointsIndex::LEFT_BOTTOM)].x();
-            z[idx::BOTTOM_Y] =
-                img_pts_jet[std::to_underlying(auto_aim::ArmorKeyPointsIndex::LEFT_BOTTOM)].y();
-        } else {
-            z[idx::TOP_X] =
-                img_pts_jet[std::to_underlying(auto_aim::ArmorKeyPointsIndex::RIGHT_TOP)].x();
-            z[idx::TOP_Y] =
-                img_pts_jet[std::to_underlying(auto_aim::ArmorKeyPointsIndex::RIGHT_TOP)].y();
-            z[idx::BOTTOM_X] =
-                img_pts_jet[std::to_underlying(auto_aim::ArmorKeyPointsIndex::RIGHT_BOTTOM)].x();
-            z[idx::BOTTOM_Y] =
-                img_pts_jet[std::to_underlying(auto_aim::ArmorKeyPointsIndex::RIGHT_BOTTOM)].y();
-        }
+
+        z[idx::TOP_X] = img_pts_jet[0].x();
+        z[idx::TOP_Y] = img_pts_jet[0].y();
+        z[idx::BOTTOM_X] = img_pts_jet[1].x();
+        z[idx::BOTTOM_Y] = img_pts_jet[1].y();
     }
 
     inline void h(const VecX& x, UVVecZ& z) const {

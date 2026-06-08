@@ -29,7 +29,13 @@ struct ArmorTracker::Impl {
         double dt = std::chrono::duration<double>(armors.timestamp - last_track).count();
         dt = std::clamp(dt, 1e-3, 0.1);
         last_track = armors.timestamp;
-        lost_thres_ = std::abs(static_cast<int>((cur.target_number == ArmorClass::OUTPOST) ? cfg_.lost_time_thres_outpost : cfg_.lost_time_thres) / dt);
+        lost_thres_ = std::abs(
+            static_cast<int>(
+                (cur.target_number == ArmorClass::OUTPOST) ? cfg_.lost_time_thres_outpost
+                                                           : cfg_.lost_time_thres
+            )
+            / dt
+        );
         auto process = [&](int idx) {
             auto& t = target_buf_[idx];
             bool found = (t.track_state.tracker_state == ArmorTarget::TrackState::LOST)
@@ -43,7 +49,6 @@ struct ArmorTracker::Impl {
         };
         //双缓冲，方便异常丢失恢复，方便操作手换目标
         process(cur_target_idx_);
-        
 
         if (cur.track_state.tracker_state == ArmorTarget::TrackState::TEMP_LOST) {
             process(pre_target_idx_);

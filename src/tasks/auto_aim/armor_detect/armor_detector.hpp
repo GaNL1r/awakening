@@ -9,6 +9,7 @@ public:
     ArmorDetector(const YAML::Node& config);
     [[nodiscard]] std::tuple<std::vector<Light>, std::vector<Armor>>
     detect(const CommonFrame& frame, const std::optional<cv::Rect2f>& detect_light);
+    double get_net_wh_ratio() const noexcept;
     AWAKENING_IMPL_DEFINITION(ArmorDetector)
 };
 } // namespace awakening::auto_aim

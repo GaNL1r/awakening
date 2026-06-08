@@ -45,6 +45,12 @@ struct ArmorKeyPoint3D {
             // PointT(0, W / 2, 0),       PointT(0, -W / 2, 0),
         };
     }
+    inline static std::vector<PointT> build_light(bool left) {
+        return {
+            PointT(0, left ? W / 2 : -W / 2, H / 2), // 左上或右上
+            PointT(0, left ? W / 2 : -W / 2, -H / 2), // 左下或右下
+        };
+    }
 };
 enum class ArmorKeyPointsIndex : int {
     LEFT_TOP,
@@ -162,6 +168,17 @@ inline std::vector<PointT> getArmorKeyPoints3D(ArmorClass armor_class) {
         return ArmorKeyPoint3D<PointT, ArmorType::BuildingSmall>::build();
     } else {
         return ArmorKeyPoint3D<PointT, ArmorType::SimpleSmall>::build();
+    }
+}
+template<typename PointT>
+inline std::vector<PointT> getArmorLightKeyPoints3D(ArmorClass armor_class, bool left) {
+    auto armor_type = armor_type_by_armor_class(armor_class);
+    if (armor_type == ArmorType::Large) {
+        return ArmorKeyPoint3D<PointT, ArmorType::Large>::build_light(left);
+    } else if (armor_type == ArmorType::BuildingSmall) {
+        return ArmorKeyPoint3D<PointT, ArmorType::BuildingSmall>::build_light(left);
+    } else {
+        return ArmorKeyPoint3D<PointT, ArmorType::SimpleSmall>::build_light(left);
     }
 }
 enum class ArmorColor : int { BLUE = 0, RED, NONE, PURPLE };

@@ -95,13 +95,13 @@ struct ArmorDetector::Impl {
         }
         armor_infer_ = ArmorInfer::create(config["armor_infer"]);
         auto backend = config["net_detector"]["backend"].as<std::string>();
-        const double scale = armor_infer_->useNorm() ? 1.0 / 255.0f : 1.0f;
-        auto format = armor_infer_->targetFormat();
+        const double scale = armor_infer_->use_norm() ? 1.0 / 255.0f : 1.0f;
+        auto format = armor_infer_->target_format();
         auto net_cfg = utils::NetDetectorBase::Config {
             .target_format = format,
             .preprocess_scale = scale,
-            .target_w = armor_infer_->inputW(),
-            .target_h = armor_infer_->inputH(),
+            .target_w = armor_infer_->input_w(),
+            .target_h = armor_infer_->input_h(),
         };
         bool backend_valid = false;
 #ifdef USE_OPENVINO
@@ -657,6 +657,12 @@ struct ArmorDetector::Impl {
             return detect_cv(frame, detect_light);
         }
     }
+    double get_net_wh_ratio() const noexcept {
+        if (net_detector_) {
+            return armor_infer_->input_w() / static_cast<double>(armor_infer_->input_h());
+        }
+        return 1.0;
+    }
 
     utils::NetDetectorBase::Ptr net_detector_;
     ArmorInfer::Ptr armor_infer_;
@@ -670,5 +676,8 @@ ArmorDetector::~ArmorDetector() noexcept {
 std::tuple<std::vector<Light>, std::vector<Armor>>
 ArmorDetector::detect(const CommonFrame& frame, const std::optional<cv::Rect2f>& detect_light) {
     return _impl->detect(frame, detect_light);
+}
+double ArmorDetector::get_net_wh_ratio() const noexcept {
+    return _impl->get_net_wh_ratio();
 }
 } // namespace awakening::auto_aim

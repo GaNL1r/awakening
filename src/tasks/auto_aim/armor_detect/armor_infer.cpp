@@ -9,15 +9,17 @@ static constexpr float MERGE_CONF_ERROR = 0.95f;
 static constexpr float MERGE_MIN_IOU = 0.9f;
 static constexpr float NMS_THRESHOLD = 0.35;
 static constexpr int TOP_K = 128;
-enum class Mode : int { TUP, RP, AT };
+enum class Mode : int { TUP, RP, AT1,AT2 };
 inline Mode modeFromString(const std::string& s) noexcept {
     std::string str = utils::to_upper(s);
     if (str == "TUP")
         return Mode::TUP;
     if (str == "RP")
         return Mode::RP;
-    if (str == "AT")
-        return Mode::AT;
+    if (str == "AT1")
+        return Mode::AT1;
+    if (str == "AT2")
+        return Mode::AT2;
     return Mode::TUP;
 }
 template<Mode M>
@@ -61,47 +63,42 @@ struct ModelTraits<Mode::RP> {
                                            ArmorColor::PURPLE,
                                            ArmorColor::NONE };
 };
-template<>
-struct ModelTraits<Mode::AT> {
-    static constexpr int INPUT_W = 640;
-    static constexpr int INPUT_H = 640;
+struct ModelTraits_AT{
+    static constexpr int NUM_CLASSES = 9;
+    static constexpr int NUM_COLORS = 4;
     static constexpr int NUM_KPTS = 4;
     static constexpr bool USE_NORM = true;
     static constexpr PixelFormat TARGET_FORMAT = PixelFormat::RGB;
-    static constexpr std::array<std::pair<ArmorColor, ArmorClass>, 64> CLASSES = { {
-        { ArmorColor::BLUE, ArmorClass::SENTRY },    { ArmorColor::BLUE, ArmorClass::NO1 },
-        { ArmorColor::BLUE, ArmorClass::NO2 },       { ArmorColor::BLUE, ArmorClass::NO3 },
-        { ArmorColor::BLUE, ArmorClass::NO4 },       { ArmorColor::BLUE, ArmorClass::NO5 },
-        { ArmorColor::BLUE, ArmorClass::OUTPOST },   { ArmorColor::BLUE, ArmorClass::BASE },
-        { ArmorColor::BLUE, ArmorClass::SENTRY },    { ArmorColor::BLUE, ArmorClass::NO1 },
-        { ArmorColor::BLUE, ArmorClass::NO2 },       { ArmorColor::BLUE, ArmorClass::NO3 },
-        { ArmorColor::BLUE, ArmorClass::NO4 },       { ArmorColor::BLUE, ArmorClass::NO5 },
-        { ArmorColor::BLUE, ArmorClass::OUTPOST },   { ArmorColor::BLUE, ArmorClass::BASE },
-        { ArmorColor::RED, ArmorClass::SENTRY },     { ArmorColor::RED, ArmorClass::NO1 },
-        { ArmorColor::RED, ArmorClass::NO2 },        { ArmorColor::RED, ArmorClass::NO3 },
-        { ArmorColor::RED, ArmorClass::NO4 },        { ArmorColor::RED, ArmorClass::NO5 },
-        { ArmorColor::RED, ArmorClass::OUTPOST },    { ArmorColor::RED, ArmorClass::BASE },
-        { ArmorColor::RED, ArmorClass::SENTRY },     { ArmorColor::RED, ArmorClass::NO1 },
-        { ArmorColor::RED, ArmorClass::NO2 },        { ArmorColor::RED, ArmorClass::NO3 },
-        { ArmorColor::RED, ArmorClass::NO4 },        { ArmorColor::RED, ArmorClass::NO5 },
-        { ArmorColor::RED, ArmorClass::OUTPOST },    { ArmorColor::RED, ArmorClass::BASE },
-        { ArmorColor::NONE, ArmorClass::SENTRY },    { ArmorColor::NONE, ArmorClass::NO1 },
-        { ArmorColor::NONE, ArmorClass::NO2 },       { ArmorColor::NONE, ArmorClass::NO3 },
-        { ArmorColor::NONE, ArmorClass::NO4 },       { ArmorColor::NONE, ArmorClass::NO5 },
-        { ArmorColor::NONE, ArmorClass::OUTPOST },   { ArmorColor::NONE, ArmorClass::BASE },
-        { ArmorColor::NONE, ArmorClass::SENTRY },    { ArmorColor::NONE, ArmorClass::NO1 },
-        { ArmorColor::NONE, ArmorClass::NO2 },       { ArmorColor::NONE, ArmorClass::NO3 },
-        { ArmorColor::NONE, ArmorClass::NO4 },       { ArmorColor::NONE, ArmorClass::NO5 },
-        { ArmorColor::NONE, ArmorClass::OUTPOST },   { ArmorColor::NONE, ArmorClass::BASE },
-        { ArmorColor::PURPLE, ArmorClass::SENTRY },  { ArmorColor::PURPLE, ArmorClass::NO1 },
-        { ArmorColor::PURPLE, ArmorClass::NO2 },     { ArmorColor::PURPLE, ArmorClass::NO3 },
-        { ArmorColor::PURPLE, ArmorClass::NO4 },     { ArmorColor::PURPLE, ArmorClass::NO5 },
-        { ArmorColor::PURPLE, ArmorClass::OUTPOST }, { ArmorColor::PURPLE, ArmorClass::BASE },
-        { ArmorColor::PURPLE, ArmorClass::SENTRY },  { ArmorColor::PURPLE, ArmorClass::NO1 },
-        { ArmorColor::PURPLE, ArmorClass::NO2 },     { ArmorColor::PURPLE, ArmorClass::NO3 },
-        { ArmorColor::PURPLE, ArmorClass::NO4 },     { ArmorColor::PURPLE, ArmorClass::NO5 },
-        { ArmorColor::PURPLE, ArmorClass::OUTPOST }, { ArmorColor::PURPLE, ArmorClass::BASE },
-    } };
+    static constexpr std::array CLASSES = { ArmorClass::SENTRY,  ArmorClass::NO1,
+                                            ArmorClass::NO2,     ArmorClass::NO3,
+                                            ArmorClass::NO4,     ArmorClass::NO5,
+                                            ArmorClass::OUTPOST, ArmorClass::BASE,
+                                            ArmorClass::UNKNOWN };
+    static constexpr std::array COLORS = { ArmorColor::BLUE,
+                                           ArmorColor::RED,
+                                           ArmorColor::NONE,
+                                           ArmorColor::PURPLE };
+};
+template<>
+struct ModelTraits<Mode::AT1> {
+    static constexpr int INPUT_W = 640;
+    static constexpr int INPUT_H = 640;
+    static constexpr int NUM_KPTS = ModelTraits_AT::NUM_KPTS;
+    static constexpr bool USE_NORM = ModelTraits_AT::USE_NORM;
+    static constexpr PixelFormat TARGET_FORMAT = ModelTraits_AT::TARGET_FORMAT;
+    static constexpr std::array CLASSES  = ModelTraits_AT::CLASSES;
+    static constexpr std::array COLORS = ModelTraits_AT::COLORS;
+
+};
+template<>
+struct ModelTraits<Mode::AT2> {
+    static constexpr int INPUT_W = 768;
+    static constexpr int INPUT_H = 576;
+    static constexpr int NUM_KPTS = ModelTraits_AT::NUM_KPTS;
+    static constexpr bool USE_NORM = ModelTraits_AT::USE_NORM;
+    static constexpr PixelFormat TARGET_FORMAT = ModelTraits_AT::TARGET_FORMAT;
+    static constexpr std::array CLASSES  = ModelTraits_AT::CLASSES;
+    static constexpr std::array COLORS = ModelTraits_AT::COLORS;
 };
 [[nodiscard]] inline double sigmoid(double x) noexcept {
     return x >= 0 ? 1.0 / (1.0 + std::exp(-x)) : std::exp(x) / (1.0 + std::exp(x));
@@ -225,8 +222,12 @@ struct ArmorInfer::Impl {
                     setMode<ModelTraits<Mode::RP>>();
                     break;
                 }
-                case Mode::AT: {
-                    setMode<ModelTraits<Mode::AT>>();
+                case Mode::AT1: {
+                    setMode<ModelTraits<Mode::AT1>>();
+                    break;
+                }
+                case Mode::AT2: {
+                    setMode<ModelTraits<Mode::AT2>>();
                     break;
                 }
             }
@@ -250,7 +251,9 @@ struct ArmorInfer::Impl {
                 return post_processTUP_impl(output_buffer);
             case Mode::RP:
                 return {};
-            case Mode::AT:
+            case Mode::AT1:
+                return post_processAT_impl(output_buffer);
+            case Mode::AT2:
                 return post_processAT_impl(output_buffer);
         }
         return {};
@@ -266,8 +269,8 @@ struct ArmorInfer::Impl {
             auto generate_grids_and_stride = [&]() {
                 std::vector<GridAndStride> grid_strides;
                 for (int stride: { 8, 16, 32 }) {
-                    const int num_w = inputW() / stride;
-                    const int num_h = inputH() / stride;
+                    const int num_w = input_w() / stride;
+                    const int num_h = input_h() / stride;
                     grid_strides.reserve(grid_strides.size() + num_w * num_h);
                     for (int gy = 0; gy < num_h; ++gy) {
                         for (int gx = 0; gx < num_w; ++gx) {
@@ -336,34 +339,52 @@ struct ArmorInfer::Impl {
     std::vector<Armor> post_processAT_impl(const cv::Mat& out) const {
         std::vector<Armor> out_objs;
 
-        constexpr int nkpt = ModelTraits<Mode::AT>::NUM_KPTS;
+        constexpr int nkpt = ModelTraits_AT::NUM_KPTS;
         constexpr int nk = nkpt * 2; // keypoints flattened
-        auto max_det = out.rows;
-        auto det_dim = out.cols;
-        auto output_ptr = out.ptr<float>();
+        constexpr int conf_offset = 4;
+        constexpr int cls_offset = 5;
+        constexpr int color_offset = 6;
+        constexpr int kpt_offset = color_offset + ModelTraits_AT::NUM_COLORS;
+        constexpr int min_det_dim = kpt_offset + nk;
+
+        const int max_det = out.rows;
+        const int det_dim = out.cols;
+        if (det_dim < min_det_dim) {
+            return {};
+        }
+
         using I = ArmorKeyPointsIndex;
         for (int i = 0; i < max_det; ++i) {
-            const float* row = output_ptr + i * det_dim;
-            float conf = row[4];
+            const float* row = out.ptr<float>(i);
+            float conf = row[conf_offset];
             if (!std::isfinite(conf) || conf < params_.conf_threshold)
                 continue;
 
-            float x1 = row[0];
-            float y1 = row[1];
-            float x2 = row[2];
-            float y2 = row[3];
-            int cls = static_cast<int>(row[5]);
+            const int cls_id = static_cast<int>(row[cls_offset]);
+            if (cls_id < 0 || cls_id >= ModelTraits_AT::NUM_CLASSES) {
+                continue;
+            }
+
+            int color_id = 0;
+            float color_score = row[color_offset];
+            for (int c = 1; c < ModelTraits_AT::NUM_COLORS; ++c) {
+                const float score = row[color_offset + c];
+                if (score > color_score) {
+                    color_score = score;
+                    color_id = c;
+                }
+            }
+
             Armor obj;
             auto& net = obj.net;
             net = Armor::NetCtx();
 
             net->confidence = conf;
-            auto color_num = ModelTraits<Mode::AT>::CLASSES[cls];
-            net->color = color_num.first;
-            net->number = color_num.second;
+            net->color = ModelTraits_AT::COLORS[color_id];
+            net->number = ModelTraits_AT::CLASSES[cls_id];
             auto getKeyPoints = [&](int k) {
-                float kx = row[6 + 2 * k];
-                float ky = row[6 + 2 * k + 1];
+                float kx = row[kpt_offset + 2 * k];
+                float ky = row[kpt_offset + 2 * k + 1];
                 return cv::Point2f(kx, ky);
             };
             auto& key_points = net->key_points;
@@ -378,16 +399,16 @@ struct ArmorInfer::Impl {
         return out_objs;
     }
 
-    int inputW() const noexcept {
+    int input_w() const noexcept {
         return params_.input_w;
     }
-    int inputH() const noexcept {
+    int input_h() const noexcept {
         return params_.input_h;
     }
-    bool useNorm() const noexcept {
+    bool use_norm() const noexcept {
         return params_.use_norm;
     }
-    PixelFormat targetFormat() const noexcept {
+    PixelFormat target_format() const noexcept {
         return params_.target_format;
     }
 };
@@ -402,16 +423,16 @@ ArmorInfer::~ArmorInfer() noexcept {
     return _impl->process(output_buffer);
 }
 
-int ArmorInfer::inputW() const noexcept {
-    return _impl->inputW();
+int ArmorInfer::input_w() const noexcept {
+    return _impl->input_w();
 }
-int ArmorInfer::inputH() const noexcept {
-    return _impl->inputH();
+int ArmorInfer::input_h() const noexcept {
+    return _impl->input_h();
 }
-bool ArmorInfer::useNorm() const noexcept {
-    return _impl->useNorm();
+bool ArmorInfer::use_norm() const noexcept {
+    return _impl->use_norm();
 }
-PixelFormat ArmorInfer::targetFormat() const noexcept {
-    return _impl->targetFormat();
+PixelFormat ArmorInfer::target_format() const noexcept {
+    return _impl->target_format();
 }
 } // namespace awakening::auto_aim

@@ -49,7 +49,7 @@ armor_detector:
     backend: tensorrt
     openvino:
       model_path: ${ROOT_DIR}/model/opt-1208-001.onnx
-      device_name: "GPU"
+      device_name: "CPU"
       perf_mode: "THROUGHPUT"
       priority: "HIGH"
       # scheduling_core_type: "PCORE_ONLY"
@@ -95,7 +95,7 @@ armor_tracker:
   enable_lights_measure: true
   light_match_length_ratio_gate: 0.2
   light_match_angle_gate: 0.2
-  light_match_pos_gate_by_length_ratio: 5.0
+  light_match_pos_gate_by_length_ratio: 2.0
   r_uv_at_1m: 70.0
   r_uv_min: 30.0
   esekf_iter_num: 5
@@ -112,7 +112,7 @@ auto_aim_fsm:
 
 very_aimer:
   base_yaw_offset: -1.0
-  base_pitch_offset: 1.0
+  base_pitch_offset: 0.7
   # base_yaw_offset: -0.0
   # base_pitch_offset: -0.0
   sample_total_time: 1.0

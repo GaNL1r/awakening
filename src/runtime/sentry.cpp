@@ -416,15 +416,13 @@ int main(int argc, char** argv) {
             target.set_target_state([&](auto_aim::armor_point_motion_model::State& state) {
                 state.predict(frame.img_frame.timestamp, target.target_number);
             });
-            auto bbox = target.expanded_one_one(
+            frame.expanded = target.get_net_focus_roi(
                 frame.img_frame.timestamp,
                 camera_cv_in_old,
                 camera_info,
-                frame.img_frame.src_img.size()
+                frame.img_frame.src_img.size(),
+                armor_detector.get_net_wh_ratio()
             );
-            if (bbox.area() > 200) {
-                frame.expanded = bbox;
-            }
 
             if (target.need_detect_lights()) {
                 detect_light = target.expanded(

@@ -13,10 +13,10 @@ public:
 
     [[nodiscard]] std::vector<Armor> process(const cv::Mat& output_buffer) const;
 
-    int inputW() const noexcept;
-    int inputH() const noexcept;
-    bool useNorm() const noexcept;
-    PixelFormat targetFormat() const noexcept;
+    int input_w() const noexcept;
+    int input_h() const noexcept;
+    bool use_norm() const noexcept;
+    PixelFormat target_format() const noexcept;
 };
 
 } // namespace awakening::auto_aim

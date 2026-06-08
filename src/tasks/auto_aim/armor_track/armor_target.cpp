@@ -627,11 +627,12 @@ std::vector<std::tuple<int, bool, Light>> ArmorTarget::match_light(
 
     return result;
 }
-[[nodiscard]] cv::Rect2f ArmorTarget::expanded_one_one(
+[[nodiscard]] cv::Rect2f ArmorTarget::get_net_focus_roi(
     const TimePoint& timestamp,
     const ISO3& camera_cv_in_odom,
     const CameraInfo& camera_info,
-    const cv::Size& image_size
+    const cv::Size& image_size,
+    double target_wh_ratio
 ) const noexcept {
     const double dt = std::chrono::duration<double>(timestamp - last_update).count();
 
@@ -639,62 +640,12 @@ std::vector<std::tuple<int, bool, Light>> ArmorTarget::match_light(
         return cv::Rect2f(0, 0, image_size.width, image_size.height);
     }
 
-    float car_box_half = std::max(target_state.r(), target_state.r() + target_state.l()) + 0.15f;
-    if (target_number == ArmorClass::OUTPOST) {
-        car_box_half = target_state.r() + 0.15f;
-    }
-    static std::vector<cv::Point3f> CAR_BOX;
-    CAR_BOX = { { 0, car_box_half, -car_box_half },
-                { 0, -car_box_half, -car_box_half },
-                { 0, -car_box_half, car_box_half },
-                { 0, car_box_half, car_box_half } };
-
-    auto target_pos_in_odom = target_state.pos();
-    if (target_number == ArmorClass::OUTPOST) {
-        target_pos_in_odom.z() += (target_state.outpost01DZ() + target_state.outpost02DZ()) / 2.0;
-    }
-    auto target_pos_in_camera_cv = camera_cv_in_odom.inverse() * target_pos_in_odom;
-
-    if (target_pos_in_camera_cv.z() <= 0.2) {
-        return cv::Rect2f(0, 0, image_size.width, image_size.height);
-    }
-
-    const cv::Mat tvec =
-        (cv::Mat_<double>(3, 1) << target_pos_in_camera_cv.x(),
-         target_pos_in_camera_cv.y(),
-         target_pos_in_camera_cv.z());
-
-    auto target_R_in_odom =
-        utils::rpy2matrix(Vec3(0, 0, std::atan2(target_pos_in_odom.y(), target_pos_in_odom.x())));
-
-    auto target_R_in_camera_cv = camera_cv_in_odom.inverse() * target_R_in_odom;
-
-    const cv::Mat rot_mat =
-        (cv::Mat_<double>(3, 3) << target_R_in_camera_cv(0, 0),
-         target_R_in_camera_cv(0, 1),
-         target_R_in_camera_cv(0, 2),
-         target_R_in_camera_cv(1, 0),
-         target_R_in_camera_cv(1, 1),
-         target_R_in_camera_cv(1, 2),
-         target_R_in_camera_cv(2, 0),
-         target_R_in_camera_cv(2, 1),
-         target_R_in_camera_cv(2, 2));
-
-    cv::Mat rvec;
-    cv::Rodrigues(rot_mat, rvec);
-
-    std::vector<cv::Point2f> pts_2d;
-    cv::projectPoints(
-        CAR_BOX,
-        rvec,
-        tvec,
-        camera_info.camera_matrix,
-        camera_info.distortion_coefficients,
-        pts_2d
-    );
-
-    const cv::Rect2f rect = cv::boundingRect(pts_2d);
-
+    cv::Rect2f rect = expanded(timestamp, camera_cv_in_odom, camera_info, image_size);
+    constexpr double expansion_ratio = 0.2;
+    rect.x -= rect.width * expansion_ratio;
+    rect.y -= rect.height * expansion_ratio;
+    rect.width *= (1.0 + 2.0 * expansion_ratio);
+    rect.height *= (1.0 + 2.0 * expansion_ratio);
     const cv::Rect2f img_rect(0, 0, image_size.width, image_size.height);
 
     if ((rect & img_rect).area() <= 0) {
@@ -704,7 +655,7 @@ std::vector<std::tuple<int, bool, Light>> ArmorTarget::match_light(
     const double lost_dt = cfg.lost_time_thres;
 
     double alpha = std::clamp(dt / lost_dt, 0.0, 1.0);
-
+    alpha =0.0;
     double x1 = rect.x;
     double y1 = rect.y;
     double x2 = rect.x + rect.width;
@@ -732,16 +683,30 @@ std::vector<std::tuple<int, bool, Light>> ArmorTarget::match_light(
         static_cast<int>(y2 - y1)
     );
 
-    int cx = expanded_rect.x + expanded_rect.width / 2;
-    int cy = expanded_rect.y + expanded_rect.height / 2;
+    const double rect_w = std::max<double>(expanded_rect.width, 1.0);
+    const double rect_h = std::max<double>(expanded_rect.height, 1.0);
+    const double ratio =
+        (std::isfinite(target_wh_ratio) && target_wh_ratio > 0.0) ? target_wh_ratio : 1.0;
 
-    int side = std::max(expanded_rect.width, expanded_rect.height);
+    double target_w = rect_w;
+    double target_h = rect_h;
+    if (target_w / target_h < ratio) {
+        target_w = target_h * ratio;
+    } else {
+        target_h = target_w / ratio;
+    }
+    const double cx = expanded_rect.x + expanded_rect.width / 2.0;
+    const double cy = expanded_rect.y + expanded_rect.height / 2.0;
+    cv::Rect2f ratio_rect(
+        static_cast<float>(cx - target_w / 2.0),
+        static_cast<float>(cy - target_h / 2.0),
+        static_cast<float>(target_w),
+        static_cast<float>(target_h)
+    );
 
-    cv::Rect2f square(cx - side / 2, cy - side / 2, side, side);
+    ratio_rect &= img_rect;
 
-    square &= img_rect;
-
-    return square;
+    return ratio_rect;
 }
 [[nodiscard]] cv::Rect2f ArmorTarget::expanded(
     const TimePoint& timestamp,

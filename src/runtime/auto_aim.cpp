@@ -409,15 +409,13 @@ int main(int argc, char** argv) {
             target.set_target_state([&](auto_aim::armor_point_motion_model::State& state) {
                 state.predict(frame.img_frame.timestamp, target.target_number);
             });
-            auto bbox = target.expanded_one_one( //送给网络，1：1
+            frame.expanded = target.get_net_focus_roi(
                 frame.img_frame.timestamp,
                 camera_cv_in_old,
                 camera_info,
-                frame.img_frame.src_img.size()
+                frame.img_frame.src_img.size(),
+                armor_detector.get_net_wh_ratio()
             );
-            if (bbox.area() > 200) {
-                frame.expanded = bbox;
-            }
             if (target.need_detect_lights()) {
                 detect_light = target.expanded( // 送给传统越小越好
                     frame.img_frame.timestamp,
@@ -444,6 +442,7 @@ int main(int argc, char** argv) {
             bool got = detector_sem->try_acquire();
             utils::SemaphoreGuard guard(*detector_sem, got); //并发控制
             if (got) {
+                auto start = Clock::now();
                 auto [ls, as] = armor_detector.detect(frame, detect_light);
                 armors.armors = as;
                 armors.lights = ls;
@@ -490,11 +489,10 @@ int main(int argc, char** argv) {
                 __armor_target.jumped
             );
             armor_target.write(__armor_target);
-
             auto latency_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-                                  Clock::now() - armors.timestamp
-            )
-                                  .count();
+                                      Clock::now() - armors.timestamp
+                )
+                                      .count();
             log_ctx.latency_ms_total += latency_ms;
             log_ctx.found_count += armor_tracker.get_count();
             armor_tracker.reset_count();
@@ -558,19 +556,21 @@ int main(int argc, char** argv) {
             auto gimbal_in_gimbal_odom =
                 tf->pose_a_in_b(SimpleFrame::GIMBAL, SimpleFrame::GIMBAL_ODOM, Clock::now());
             auto rpy = utils::matrix2rpy(gimbal_in_gimbal_odom.linear());
-            daedalus_shm_client->send_gimbal_cmd(
-                cmd.yaw,
-                -cmd.pitch,
-                cmd.appear ? 1.0 : -1.0,
-                (std::abs(
-                     angles::shortest_angular_distance_degrees(angles::to_degrees(rpy[2]), cmd.yaw)
-                 ) < cmd.enable_yaw_diff
-                 && std::abs(angles::shortest_angular_distance_degrees(
-                        angles::to_degrees(-rpy[1]),
-                        cmd.pitch
-                    ))
-                     < cmd.enable_pitch_diff)
-            );
+            // daedalus_shm_client->send_gimbal_cmd(
+            //     cmd.yaw,
+            //     -cmd.pitch,
+            //     cmd.appear ? 1.0 : -1.0,
+            //     (std::abs(
+            //          angles::shortest_angular_distance_degrees(angles::to_degrees(rpy[2]), cmd.yaw)
+            //      ) < cmd.enable_yaw_diff
+            //      && std::abs(angles::shortest_angular_distance_degrees(
+            //             angles::to_degrees(-rpy[1]),
+            //             cmd.pitch
+            //         ))
+            //          < cmd.enable_pitch_diff)
+            // );
+            daedalus_shm_client
+                ->send_gimbal_cmd(cmd.yaw, -cmd.pitch, cmd.appear ? 1.0 : -1.0, false);
         }
         auto old_in_camera_cv = tf->pose_a_in_b(
             SimpleFrame(cmd.aim_point.frame_id),
