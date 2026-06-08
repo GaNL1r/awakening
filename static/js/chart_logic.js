@@ -22,6 +22,8 @@ const chartMap = {
   control_a_pitch: { label: "Control A Pitch" },
   fly_time: { label: "Fly Time" },
   target_v_yaw: { label: "Target V Yaw" },
+  yaw_diff: { label: "Yaw Diff" },
+  pitch_diff: { label: "Pitch Diff" }
 };
 
 const mainCtx = document.getElementById("mainChart").getContext("2d");

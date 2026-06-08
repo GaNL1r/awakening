@@ -97,21 +97,7 @@ struct LogCtx {
 };
 static constexpr auto RECORD_FOLDER_PATH_ARR = utils::concat(ROOT_DIR, "/record/radar");
 static constexpr std::string_view RECORD_FOLDER_PATH(RECORD_FOLDER_PATH_ARR.data());
-inline std::string generate_record_filename(const std::string& folder_path) {
-    auto now = std::chrono::system_clock::now();
-    auto t = std::chrono::system_clock::to_time_t(now);
-    std::tm tm {};
 
-#ifdef _WIN32
-    localtime_s(&tm, &t);
-#else
-    localtime_r(&t, &tm);
-#endif
-
-    std::ostringstream oss;
-    oss << folder_path << "/" << std::put_time(&tm, "%Y-%m-%d_%H-%M-%S") << ".avi";
-    return oss.str();
-}
 int main(int argc, char** argv) {
     print_banner();
     auto& signal = utils::SignalGuard::instance();
@@ -159,8 +145,9 @@ int main(int argc, char** argv) {
         video = std::make_unique<VideoPlayer>(camera_config["video"], s);
     } else {
         camera = std::make_unique<HikCamera>(camera_config["hik_camera"], s);
-        video_saver =
-            std::make_unique<VideoSaver>(generate_record_filename(std::string(RECORD_FOLDER_PATH)));
+        video_saver = std::make_unique<VideoSaver>(
+            VideoSaver::generate_record_filename(std::string(RECORD_FOLDER_PATH))
+        );
     }
     if (camera) {
         camera->init();

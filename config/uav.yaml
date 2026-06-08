@@ -11,7 +11,9 @@ serial:
 serial_send_to_image_microseconds: 2500
 use_sim: false
 
-
+record:
+ enable: false
+ 
 tf:
   camera_in_gimbal:
     t: [0.04,0.0,-0.03]

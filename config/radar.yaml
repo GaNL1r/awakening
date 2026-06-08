@@ -1,7 +1,6 @@
 max_infer_num: 3
 self_color: red
 tf:
-
   camera_cv_in_target_map:
     t: [0.18863424, 9.46495291, 1.19410844]
    

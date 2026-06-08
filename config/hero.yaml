@@ -11,7 +11,8 @@ serial:
 serial_send_to_image_microseconds: 0
 
 
-
+record:
+ enable: false
 
 
 tf:

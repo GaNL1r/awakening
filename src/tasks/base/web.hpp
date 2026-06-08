@@ -174,8 +174,9 @@ struct DebugDatas {
     X(double, 100, control_a_yaw) \
     X(double, 100, control_a_pitch) \
     X(double, 100, fly_time) \
-    X(double, 100, target_v_yaw)
-
+    X(double, 100, target_v_yaw) \
+    X(double, 100, yaw_diff) \
+    X(double, 100, pitch_diff) 
 #define GEN_LOG(TYPE, SIZE, NAME) DatasStream<TYPE, SIZE> NAME##_log { #NAME, j, mtx };
 
 #define X(TYPE, SIZE, NAME) GEN_LOG(TYPE, SIZE, NAME)

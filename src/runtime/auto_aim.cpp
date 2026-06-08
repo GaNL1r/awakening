@@ -3,6 +3,7 @@
 #include "tasks/base/ballistic_trajectory.hpp"
 #include "tasks/base/wheel_odometry.hpp"
 #include "utils/drivers/mv_camera.hpp"
+#include "utils/io/video_save.hpp"
 #include <algorithm>
 #include <array>
 #include <chrono>
@@ -113,6 +114,8 @@ bool is_web_running() {
     );
     return cached.load();
 }
+static constexpr auto RECORD_FOLDER_PATH_ARR = utils::concat(ROOT_DIR, "/record/auto_aim");
+static constexpr std::string_view RECORD_FOLDER_PATH(RECORD_FOLDER_PATH_ARR.data());
 
 int main(int argc, char** argv) {
     auto start_tp = std::chrono::steady_clock::now();
@@ -165,6 +168,13 @@ int main(int argc, char** argv) {
         if (!camera->running_) {
             return 0;
         }
+    }
+    std::unique_ptr<VideoSaver> video_saver;
+    if (config["record"]["enable"].as<bool>()) {
+        video_saver = std::make_unique<VideoSaver>(
+            VideoSaver::generate_record_filename(RECORD_FOLDER_PATH.data()),
+            VideoSaver::Mode::NonBlocking
+        );
     }
     CameraInfo camera_info;
     camera_info.load(camera_config["camera_info"]);
@@ -287,20 +297,26 @@ int main(int argc, char** argv) {
         });
     }
 #endif
+    if (video_saver) {
+        s.register_task<CameraIO>("save_video", [&](CameraIO::second_type&& f) {
+            if (!f.src_img.empty()) {
+                video_saver->write_frame(f.src_img);
+            }
+            return std::make_tuple(std::optional<CameraIO::second_type>(std::nullopt));
+        });
+    }
     s.register_task<CameraIO, CommonFrameIo>("push_common_frame", [&](CameraIO::second_type&& f) {
         static int current_id = 0;
         if (f.src_img.empty()) {
             return std::make_tuple(std::optional<CommonFrameIo::second_type>(std::nullopt));
         }
         log_ctx.camera_count++;
-
         CommonFrame frame {
             .img_frame = std::move(f),
             .id = current_id++,
             .frame_id = std::to_underlying(SimpleFrame::CAMERA_CV),
             .expanded =
                 cv::Rect2f(0, 0, frame.img_frame.src_img.cols, frame.img_frame.src_img.rows),
-
         };
 
         return std::make_tuple(std::optional<CommonFrameIo::second_type>(std::move(frame)));

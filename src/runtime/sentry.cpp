@@ -5,6 +5,7 @@
 #include "tasks/base/wheel_odometry.hpp"
 #include "tasks/sentry_brain/rmuc_2026/gobal_state.hpp"
 #include "tasks/sentry_brain/rmuc_2026/mode_factory.hpp"
+#include "utils/io/video_save.hpp"
 #include <algorithm>
 #include <array>
 #include <chrono>
@@ -131,6 +132,8 @@ bool is_web_running() {
     );
     return cached.load();
 }
+static constexpr auto RECORD_FOLDER_PATH_ARR = utils::concat(ROOT_DIR, "/record/auto_aim");
+static constexpr std::string_view RECORD_FOLDER_PATH(RECORD_FOLDER_PATH_ARR.data());
 
 int main(int argc, char** argv) {
     auto start_tp = std::chrono::steady_clock::now();
@@ -179,7 +182,13 @@ int main(int argc, char** argv) {
     if (!camera->running_) {
         return 0;
     }
-
+    std::unique_ptr<VideoSaver> video_saver;
+    if (config["record"]["enable"].as<bool>()) {
+        video_saver = std::make_unique<VideoSaver>(
+            VideoSaver::generate_record_filename(RECORD_FOLDER_PATH.data()),
+            VideoSaver::Mode::NonBlocking
+        );
+    }
     CameraInfo camera_info;
     camera_info.load(camera_config["camera_info"]);
     auto_aim::ArmorDetector armor_detector(config["armor_detector"]);
@@ -256,6 +265,14 @@ int main(int argc, char** argv) {
         );
         tf->push(SentryFrame::OMNI_0, SentryFrame::OMNI_0_CV, Clock::now(), cv_in_camera);
         tf->push(SentryFrame::OMNI_1, SentryFrame::OMNI_1_CV, Clock::now(), cv_in_camera);
+    }
+    if (video_saver) {
+        s.register_task<CameraIO>("save_video", [&](CameraIO::second_type&& f) {
+            if (!f.src_img.empty()) {
+                video_saver->write_frame(f.src_img);
+            }
+            return std::make_tuple(std::optional<CameraIO::second_type>(std::nullopt));
+        });
     }
 
     s.register_task<CameraIO, CommonFrameIo>("push_common_frame", [&](CameraIO::second_type&& f) {
