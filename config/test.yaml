@@ -1,6 +1,6 @@
-enemy_color: red
+enemy_color: blue
 max_infer_num: 5
-bullet_speed: 23.0
+bullet_speed: 25.0
 
 serial:
   enable: false
@@ -111,8 +111,8 @@ auto_aim_fsm:
 
 
 very_aimer:
-  base_yaw_offset: -1.0
-  base_pitch_offset: 0.7
+  base_yaw_offset: -0.0
+  base_pitch_offset: -3.0
   # base_yaw_offset: -0.0
   # base_pitch_offset: -0.0
   sample_total_time: 1.0

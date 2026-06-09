@@ -1,5 +1,6 @@
 #pragma once
 #include "tasks/base/common.hpp"
+#include "tasks/radar_detect/type.hpp"
 #include "type.hpp"
 #include "utils/impl.hpp"
 #include <vector>

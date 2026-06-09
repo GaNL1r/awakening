@@ -1,5 +1,4 @@
 #include "image_preprocessor.hpp"
-#include "utils/logger.hpp"
 #include <algorithm>
 #include <opencv2/imgproc.hpp>
 #include <opencv2/opencv.hpp>

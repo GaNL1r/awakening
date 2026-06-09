@@ -3,10 +3,8 @@
 #include "tasks/eyes_of_blind/encoder.hpp"
 #include "utils/drivers/hik_camera.hpp"
 #include "utils/drivers/serial_driver.hpp"
-#include "utils/logger.hpp"
 #include "utils/semaphore_guard.hpp"
 #include "utils/signal_guard.hpp"
-#include "utils/utils.hpp"
 #include "video_stream.pb.h"
 #include <array>
 #include <cstring>

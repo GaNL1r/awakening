@@ -1,61 +1,69 @@
-function jsonToHtml(data, container) {
-  const title = container.querySelector("h3");
-  container.innerHTML = "";
-  if (title) container.appendChild(title);
-  const contentDiv = document.createElement("div");
-  container.appendChild(contentDiv);
+const jsonSignatures = new Map();
 
-  function buildTree(d, parent) {
-    if (typeof d !== "object" || d === null) {
-      parent.textContent = String(d);
+function jsonToHtml(data, container) {
+  const fragment = document.createDocumentFragment();
+
+  function buildTree(value, parent) {
+    if (typeof value !== "object" || value === null) {
+      parent.textContent = String(value);
       return;
     }
+
     const ul = document.createElement("ul");
     ul.className = "json-tree";
-    const entries = Array.isArray(d) ? d.map((v, i) => [i, v]) : Object.entries(d);
-    entries.forEach(([k, v]) => {
+    const entries = Array.isArray(value) ? value.map((v, i) => [i, v]) : Object.entries(value);
+
+    for (const [key, child] of entries) {
       const li = document.createElement("li");
-      if (typeof v === "object" && v !== null) {
+      if (typeof child === "object" && child !== null) {
         const details = document.createElement("details");
         details.open = true;
+
         const summary = document.createElement("summary");
-        summary.textContent = k;
+        summary.textContent = key;
         details.appendChild(summary);
-        const childUl = document.createElement("ul");
-        childUl.className = "json-tree";
-        buildTree(v, childUl);
-        details.appendChild(childUl);
+
+        buildTree(child, details);
         li.appendChild(details);
       } else {
-        li.textContent = `${k}: ${v}`;
+        const keySpan = document.createElement("span");
+        keySpan.className = "json-leaf-key";
+        keySpan.textContent = `${key}: `;
+
+        const valueSpan = document.createElement("span");
+        valueSpan.className = "json-leaf-value";
+        valueSpan.textContent = String(child);
+
+        li.append(keySpan, valueSpan);
       }
       ul.appendChild(li);
-    });
+    }
+
     parent.appendChild(ul);
   }
-  buildTree(data, contentDiv);
+
+  buildTree(data, fragment);
+  container.replaceChildren(fragment);
 }
 
-let lastSerialData = null, lastTargetData = null;
-
 async function fetchAndDisplayJsonWithTree(id, url) {
-  const parent = document.getElementById(id + "-container");
-  const cont = document.getElementById(id);
-  try {
-    parent.classList.add("json-updating");
-    const res = await fetch(url);
-    if (!res.ok) throw new Error(res.statusText);
-    const data = await res.json();
+  const container = document.getElementById(id);
+  if (!container) return;
 
-    const prev = id === "json-serial" ? lastSerialData : lastTargetData;
-    if (JSON.stringify(data) !== JSON.stringify(prev)) {
-      jsonToHtml(data, cont);
-      if (id === "json-serial") lastSerialData = data;
-      else lastTargetData = data;
+  try {
+    const response = await fetch(url, { cache: "no-store" });
+    if (!response.ok) throw new Error(response.statusText);
+
+    const data = await response.json();
+    const signature = JSON.stringify(data);
+    if (jsonSignatures.get(id) !== signature) {
+      jsonToHtml(data, container);
+      jsonSignatures.set(id, signature);
     }
-  } catch (e) {
-    console.warn(`请求失败(${url}): ${e.message}`);
-  } finally {
-    parent.classList.remove("json-updating");
+
+    setStatus("log-status", true);
+  } catch (error) {
+    setStatus("log-status", false);
+    console.warn(`json fetch failed (${url}): ${error.message}`);
   }
 }

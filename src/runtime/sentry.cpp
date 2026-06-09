@@ -1,7 +1,7 @@
 #include "angles.h"
 #include "ascii_banner.hpp"
 #include "tasks/auto_aim/armor_omni.hpp"
-#include "tasks/base/wheel_odometry.hpp"
+#include "tasks/base/ballistic_trajectory.hpp"
 #include "tasks/base/wheel_odometry.hpp"
 #include "tasks/sentry_brain/rmuc_2026/mode_factory.hpp"
 #include "utils/io/video_save.hpp"

@@ -232,47 +232,64 @@ int main(int argc, char** argv) {
     auto serial_send_to_image_microseconds = config["serial_send_to_image_microseconds"].as<int>();
     if (daedalus_shm_client) {
         auto daedalus_imgs = s.register_source<CameraIO>("daedalus_img");
+
+        auto push_pose = [&](talos::ipc::PoseIndex idx, SimpleFrame parent, SimpleFrame child) {
+            if (auto pose = daedalus_shm_client->recv_pose(idx)) {
+                ISO3 T = ISO3::Identity();
+                T.translation() << pose->x, pose->y, pose->z;
+                T.linear() =
+                    Quaternion { pose->qw, pose->qx, pose->qy, pose->qz }.toRotationMatrix();
+
+                tf->push(parent, child, TimePoint(std::chrono::nanoseconds(pose->timestamp_ns)), T);
+            }
+        };
+
         s.add_rate_source<>("daedalus_tick", 300.0, [&]() {
             static bool has_camera_info = false;
-            if (!has_camera_info) {
-                auto daedalus_camera_info = daedalus_shm_client->camera_info();
-                has_camera_info = true;
-                camera_info.camera_matrix = cv::Mat::eye(3, 3, CV_64F);
 
-                camera_info.camera_matrix.at<double>(0, 0) = daedalus_camera_info.fx;
-                camera_info.camera_matrix.at<double>(1, 1) = daedalus_camera_info.fy;
-                camera_info.camera_matrix.at<double>(0, 2) = daedalus_camera_info.cx;
-                camera_info.camera_matrix.at<double>(1, 2) = daedalus_camera_info.cy;
+            if (!has_camera_info) {
+                auto info = daedalus_shm_client->camera_info();
+
+                has_camera_info = true;
+
+                camera_info.camera_matrix = cv::Mat::eye(3, 3, CV_64F);
+                camera_info.camera_matrix.at<double>(0, 0) = info.fx;
+                camera_info.camera_matrix.at<double>(1, 1) = info.fy;
+                camera_info.camera_matrix.at<double>(0, 2) = info.cx;
+                camera_info.camera_matrix.at<double>(1, 2) = info.cy;
 
                 camera_info.distortion_coefficients = cv::Mat(1, 5, CV_64F);
                 std::memcpy(
                     camera_info.distortion_coefficients.ptr<double>(),
-                    daedalus_camera_info.distortion,
+                    info.distortion,
                     5 * sizeof(double)
                 );
             }
+
             if (auto frame = daedalus_shm_client->recv_image()) {
                 ImageFrame img_frame {
                     .src_img = std::move(frame->image),
                     .format = PixelFormat::RGB,
                     .timestamp = TimePoint(std::chrono::nanoseconds(frame->timestamp_ns)),
                 };
-                s.runtime_push_source<CameraIO>(daedalus_imgs, [f = std::move(img_frame)]() {
-                    return std::make_tuple(std::optional<typename CameraIO::second_type>(std::move(f
-                    )));
-                });
-            }
-            if (auto pose = daedalus_shm_client->recv_pose(talos::ipc::PoseIndex::POSE_GIMBAL)) {
-                ISO3 gimbal_2_gimbal_odom = ISO3::Identity();
-                gimbal_2_gimbal_odom.linear() =
-                    Quaternion { pose->qw, pose->qx, pose->qy, pose->qz }.toRotationMatrix();
-                tf->push(
-                    SimpleFrame::GIMBAL_ODOM,
-                    SimpleFrame::GIMBAL,
-                    TimePoint(std::chrono::nanoseconds(pose->timestamp_ns)),
-                    gimbal_2_gimbal_odom
+
+                s.runtime_push_source<CameraIO>(
+                    daedalus_imgs,
+                    [f = std::move(img_frame)]() mutable {
+                        return std::make_tuple(std::optional<CameraIO::second_type>(std::move(f)));
+                    }
                 );
             }
+
+            push_pose(talos::ipc::PoseIndex::POSE_CAMERA, SimpleFrame::GIMBAL, SimpleFrame::CAMERA);
+
+            push_pose(talos::ipc::PoseIndex::POSE_MUZZLE, SimpleFrame::GIMBAL, SimpleFrame::SHOOT);
+
+            push_pose(
+                talos::ipc::PoseIndex::POSE_GIMBAL,
+                SimpleFrame::GIMBAL_ODOM,
+                SimpleFrame::GIMBAL
+            );
         });
     }
 
@@ -556,21 +573,21 @@ int main(int argc, char** argv) {
             auto gimbal_in_gimbal_odom =
                 tf->pose_a_in_b(SimpleFrame::GIMBAL, SimpleFrame::GIMBAL_ODOM, Clock::now());
             auto rpy = utils::matrix2rpy(gimbal_in_gimbal_odom.linear());
-            // daedalus_shm_client->send_gimbal_cmd(
-            //     cmd.yaw,
-            //     -cmd.pitch,
-            //     cmd.appear ? 1.0 : -1.0,
-            //     (std::abs(
-            //          angles::shortest_angular_distance_degrees(angles::to_degrees(rpy[2]), cmd.yaw)
-            //      ) < cmd.enable_yaw_diff
-            //      && std::abs(angles::shortest_angular_distance_degrees(
-            //             angles::to_degrees(-rpy[1]),
-            //             cmd.pitch
-            //         ))
-            //          < cmd.enable_pitch_diff)
-            // );
-            daedalus_shm_client
-                ->send_gimbal_cmd(cmd.yaw, -cmd.pitch, cmd.appear ? 1.0 : -1.0, false);
+            daedalus_shm_client->send_gimbal_cmd(
+                cmd.yaw,
+                -cmd.pitch,
+                cmd.appear ? 1.0 : -1.0,
+                (std::abs(
+                     angles::shortest_angular_distance_degrees(angles::to_degrees(rpy[2]), cmd.yaw)
+                 ) < cmd.enable_yaw_diff
+                 && std::abs(angles::shortest_angular_distance_degrees(
+                        angles::to_degrees(-rpy[1]),
+                        cmd.pitch
+                    ))
+                     < cmd.enable_pitch_diff)
+            );
+            // daedalus_shm_client
+            //     ->send_gimbal_cmd(cmd.yaw, -cmd.pitch, cmd.appear ? 1.0 : -1.0, false);
         }
         auto old_in_camera_cv = tf->pose_a_in_b(
             SimpleFrame(cmd.aim_point.frame_id),

@@ -1,13 +1,6 @@
 #include "very_aimer.hpp"
 #include "angles.h"
-#include "tasks/auto_aim/armor_track/armor_target.hpp"
-#include "tasks/auto_aim/auto_aim_fsm.hpp"
-#include "tasks/auto_aim/type.hpp"
 #include "tasks/base/ballistic_trajectory.hpp"
-#include "tasks/base/common.hpp"
-#include "tasks/base/traj.hpp"
-#include "utils/common/type_common.hpp"
-#include "utils/logger.hpp"
 #include <cmath>
 #include <cstdlib>
 #include <deque>

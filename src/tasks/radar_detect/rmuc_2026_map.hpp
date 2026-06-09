@@ -1,6 +1,5 @@
 #pragma once
 #include "tasks/radar_detect/tracker.hpp"
-#include "tasks/radar_detect/type.hpp"
 #include <Eigen/src/Core/Matrix.h>
 #include <fstream>
 #include <limits>

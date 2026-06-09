@@ -1,6 +1,5 @@
 #include "decoder.hpp"
 #include "utils/logger.hpp"
-#include "utils/utils.hpp"
 
 #include <cstring>
 #include <mutex>

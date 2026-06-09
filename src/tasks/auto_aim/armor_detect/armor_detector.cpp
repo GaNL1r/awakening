@@ -1,9 +1,6 @@
 #include "armor_detector.hpp"
 #include "armor_infer.hpp"
-#include "tasks/auto_aim/type.hpp"
-#include "utils/common/image.hpp"
 #include "utils/logger.hpp"
-#include "utils/net_detector/net_detector_base.hpp"
 #include <algorithm>
 #include <cstddef>
 #include <cstdlib>

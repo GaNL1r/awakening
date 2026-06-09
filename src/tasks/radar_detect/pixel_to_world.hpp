@@ -1,7 +1,4 @@
 #pragma once
-#include "tasks/base/common.hpp"
-#include "utils/common/type_common.hpp"
-#include "utils/logger.hpp"
 #include <open3d/Open3D.h>
 #include <open3d/core/Tensor.h>
 #include <open3d/io/TriangleMeshIO.h>

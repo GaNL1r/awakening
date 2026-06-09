@@ -6,9 +6,7 @@
 #include "tasks/base/packet_typedef_send.hpp"
 #include "utils/drivers/serial_driver.hpp"
 #include "utils/runtime_tf.hpp"
-#include "utils/scheduler/scheduler.hpp"
 #include "utils/signal_guard.hpp"
-#include "utils/utils.hpp"
 #include <utility>
 namespace backward {
 static backward::SignalHandling sh;

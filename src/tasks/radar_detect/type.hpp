@@ -3,8 +3,6 @@
 #include "tasks/radar_detect/target.hpp"
 #include "utils/buffer.hpp"
 #include "utils/common/image.hpp"
-#include "utils/common/type_common.hpp"
-#include "utils/utils.hpp"
 #include <Eigen/src/Core/Matrix.h>
 #include <array>
 #include <opencv2/core/mat.hpp>

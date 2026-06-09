@@ -1,9 +1,5 @@
 #pragma once
 #include "tasks/radar_detect/rmuc_2026_map.hpp"
-#include "tasks/radar_detect/target.hpp"
-#include "tasks/radar_detect/tracker.hpp"
-#include "tasks/radar_detect/type.hpp"
-#include "utils/common/type_common.hpp"
 #include <chrono>
 #include <unordered_map>
 #include <utility>

@@ -1,9 +1,6 @@
 #pragma once
 #include "tasks/auto_aim/armor_detect/armor_detector.hpp"
-#include "tasks/auto_aim/armor_track/armor_target.hpp"
 #include "tasks/auto_aim/armor_track/armor_tracker.hpp"
-#include "tasks/base/common.hpp"
-#include "type.hpp"
 #include "utils/buffer.hpp"
 #include "utils/drivers/uvc_camera.hpp"
 #include <memory>

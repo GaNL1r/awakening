@@ -1,5 +1,4 @@
 #include "livox_v1_publisher.hpp"
-#include "utils/logger.hpp"
 #include <arpa/inet.h>
 #include <ifaddrs.h>
 #include <net/if.h>

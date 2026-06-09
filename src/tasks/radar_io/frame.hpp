@@ -1,8 +1,6 @@
 #pragma once
 
 #include "tasks/radar_io/crc.hpp"
-#include "utils/logger.hpp"
-#include "utils/utils.hpp"
 #include <cstddef>
 #include <cstdint>
 #include <cstring>

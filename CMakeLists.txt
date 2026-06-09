@@ -123,23 +123,23 @@ else()
     message(FATAL_ERROR "Paho MQTT C++ not found")
 endif()
 
-file(GLOB_RECURSE BLIND_SOURCES  src/tasks/eyes_of_blind/*.cpp)
-list(APPEND BLIND_SOURCES ${PROTO_SRCS})
-add_library(${PROJECT_NAME}_eyes_of_blind SHARED ${BLIND_SOURCES})
-target_include_directories(${PROJECT_NAME}_eyes_of_blind
-    PUBLIC
-    ${GSTREAMER_INCLUDE_DIRS}
-)
-target_link_libraries(${PROJECT_NAME}_eyes_of_blind
-    ${PROJECT_NAME}_utils
-    ${GSTREAMER_LIBRARIES}
-    ${AVUTIL_LIBRARIES}
-    ${AVCODEC_LIBRARIES}
-    ${SWSCALE_LIBRARIES}
-    ${Protobuf_LIBRARIES}
-    ${PAHO_MQTTPP_LIB}
-    ${PAHO_MQTT_C_LIB}
-)
+# file(GLOB_RECURSE BLIND_SOURCES  src/tasks/eyes_of_blind/*.cpp)
+# list(APPEND BLIND_SOURCES ${PROTO_SRCS})
+# add_library(${PROJECT_NAME}_eyes_of_blind SHARED ${BLIND_SOURCES})
+# target_include_directories(${PROJECT_NAME}_eyes_of_blind
+#     PUBLIC
+#     ${GSTREAMER_INCLUDE_DIRS}
+# )
+# target_link_libraries(${PROJECT_NAME}_eyes_of_blind
+#     ${PROJECT_NAME}_utils
+#     ${GSTREAMER_LIBRARIES}
+#     ${AVUTIL_LIBRARIES}
+#     ${AVCODEC_LIBRARIES}
+#     ${SWSCALE_LIBRARIES}
+#     ${Protobuf_LIBRARIES}
+#     ${PAHO_MQTTPP_LIB}
+#     ${PAHO_MQTT_C_LIB}
+# )
 endif()
 
 set(ROS2_PACKAGES
@@ -249,16 +249,16 @@ target_link_libraries(uvc_detect_test
     ${PROJECT_NAME}_auto_aim
 )
 if(BUILD_HERO)
-add_common_executable(blind_test src/runtime/test/blind_test.cpp)
-target_link_libraries(blind_test
-    ${PROJECT_NAME}_eyes_of_blind
-)
-add_common_executable(hero src/runtime/hero.cpp)
-target_link_libraries(hero
-    ${PROJECT_NAME}_eyes_of_blind
-    ${PROJECT_NAME}_utils
-    ${PROJECT_NAME}_auto_aim
-)
+# add_common_executable(blind_test src/runtime/test/blind_test.cpp)
+# target_link_libraries(blind_test
+#     ${PROJECT_NAME}_eyes_of_blind
+# )
+# add_common_executable(hero src/runtime/hero.cpp)
+# target_link_libraries(hero
+#     ${PROJECT_NAME}_eyes_of_blind
+#     ${PROJECT_NAME}_utils
+#     ${PROJECT_NAME}_auto_aim
+# )
 endif()
 if(BUILD_RADAR)
 add_common_executable(radar_detect src/runtime/radar_detect.cpp)
@@ -285,9 +285,9 @@ target_link_libraries(auto_aim
 )
 if(BUILD_HERO)
 
-target_link_libraries(hero
-    ${PROJECT_NAME}_rcl
-)
+# target_link_libraries(hero
+#     ${PROJECT_NAME}_rcl
+# )
 endif()
 if(BUILD_SENTRY)
 add_common_executable(nav src/runtime/nav.cpp)

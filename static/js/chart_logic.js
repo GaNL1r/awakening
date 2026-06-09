@@ -1,237 +1,345 @@
-const UPDATE_HZ = 100;
-const UPDATE_INTERVAL_MS = 1000 / UPDATE_HZ;
-
-let updateTimer = null;
-
-function startUpdateLoop() {
-  if (updateTimer) return;
-  updateTimer = setInterval(fetchDataAndUpdateCharts, UPDATE_INTERVAL_MS);
-}
-startUpdateLoop();
+const DATA_POLL_INTERVAL_MS = 100;
+const CHART_RENDER_INTERVAL_MS = 33;
+const DEFAULT_MAX_POINTS = 100;
 
 const chartMap = {
-  yaw: { label: "Yaw" },
-  pitch: { label: "Pitch" },
-  target_yaw: { label: "Target Yaw" },
-  target_pitch: { label: "Target Pitch" },
-  gimbal_yaw: { label: "Gimbal Yaw" },
-  gimbal_pitch: { label: "Gimbal Pitch" },
-  control_v_yaw: { label: "Control V Yaw" },
-  control_v_pitch: { label: "Control V Pitch" },
-  control_a_yaw: { label: "Control A Yaw" },
-  control_a_pitch: { label: "Control A Pitch" },
-  fly_time: { label: "Fly Time" },
-  target_v_yaw: { label: "Target V Yaw" },
-  yaw_diff: { label: "Yaw Diff" },
-  pitch_diff: { label: "Pitch Diff" }
+  yaw: { label: "Yaw", color: "#2fc3a2" },
+  pitch: { label: "Pitch", color: "#f4b44d" },
+  target_yaw: { label: "Target Yaw", color: "#7aa2ff" },
+  target_pitch: { label: "Target Pitch", color: "#ef6b73" },
+  gimbal_yaw: { label: "Gimbal Yaw", color: "#b18cff" },
+  gimbal_pitch: { label: "Gimbal Pitch", color: "#55c7f7" },
+  control_v_yaw: { label: "Control V Yaw", color: "#7bd88f" },
+  control_v_pitch: { label: "Control V Pitch", color: "#f7cf5d" },
+  control_a_yaw: { label: "Control A Yaw", color: "#ff9f7a" },
+  control_a_pitch: { label: "Control A Pitch", color: "#c9a7ff" },
+  fly_time: { label: "Fly Time", color: "#8bd3dd" },
+  target_v_yaw: { label: "Target V Yaw", color: "#f58ac2" },
+  yaw_diff: { label: "Yaw Diff", color: "#a7d46f" },
+  pitch_diff: { label: "Pitch Diff", color: "#ffcf8a" },
 };
 
-const mainCtx = document.getElementById("mainChart").getContext("2d");
+let mainChart = null;
+let dataTimer = null;
+let dataFetchController = null;
+let latestDataSignature = "";
+let latestChartData = null;
+let renderQueued = false;
+let lastRenderAt = 0;
+let selectedKeys = [];
 let individualCharts = {};
 let individualRanges = {};
 
-const commonChartOptions = {
-  animation: false,
-  responsive: false,
-  interaction: {
-    mode: "nearest",
-    axis: "x",
-    intersect: false,
-  },
-  elements: {
-    line: {
-      tension: 0,
-    },
-    point: {
-      radius: 0,
-      hoverRadius: 0,
-    },
-  },
-  plugins: {
-    tooltip: {
-      enabled: true,
+function chartOptions() {
+  return {
+    animation: false,
+    responsive: true,
+    maintainAspectRatio: false,
+    normalized: true,
+    interaction: {
       mode: "nearest",
+      axis: "x",
       intersect: false,
-      backgroundColor: "rgba(0, 188, 212, 0.85)",
-      padding: 8,
-      cornerRadius: 6,
-      titleFont: {
-        size: 12,
-        family: "'Segoe UI', Tahoma, Geneva, Verdana, sans-serif",
+    },
+    elements: {
+      line: {
+        borderWidth: 1.5,
+        tension: 0,
+        spanGaps: true,
       },
-      bodyFont: {
-        size: 16,
-        family: "'Segoe UI', Tahoma, Geneva, Verdana, sans-serif",
-        weight: "bold",
-      },
-      callbacks: {
-        title: () => "",
-        label: (context) => `值: ${context.parsed.y.toFixed(3)}`,
+      point: {
+        radius: 0,
+        hoverRadius: 0,
       },
     },
-    legend: {
-      labels: {
-        font: {
-          size: 14,
-          family: "'Segoe UI', Tahoma, Geneva, Verdana, sans-serif",
-        },
-        color: "#00bcd4",
+    plugins: {
+      decimation: {
+        enabled: true,
+        algorithm: "min-max",
       },
-    },
-  },
-  scales: {
-    x: {
-      display: false,   
-    },
-    y: {
-      title: { display: true, text: "Value" },
-      ticks: {
-        color: "#00bcd4",
-        font: {
-          size: 14,
-          family: "'Segoe UI', Tahoma, Geneva, Verdana, sans-serif",
+      legend: {
+        labels: {
+          color: "#d8e2ea",
+          boxWidth: 10,
+          boxHeight: 10,
+          font: { size: 12 },
         },
       },
-      grid: { color: "#2f3241" },
+      tooltip: {
+        enabled: true,
+        intersect: false,
+        callbacks: {
+          title: () => "",
+          label: (context) => `${context.dataset.label}: ${Number(context.parsed.y).toFixed(3)}`,
+        },
+      },
     },
-  },
-};
-
-const mainChart = new Chart(mainCtx, {
-  type: "line",
-  data: { labels: [], datasets: [] },
-  options: commonChartOptions,
-});
-
-function updateMainRange() {
-  const maxPts = parseInt(document.getElementById("mainMaxPts").value) || 100;
-  mainChart._maxPoints = maxPts;
+    scales: {
+      x: {
+        display: false,
+        grid: { display: false },
+      },
+      y: {
+        ticks: {
+          color: "#8fa0ad",
+          maxTicksLimit: 6,
+        },
+        grid: { color: "rgba(143, 160, 173, 0.16)" },
+      },
+    },
+  };
 }
 
-function updateCharts() {
-  const showMulti = document.getElementById("multiLineChart").checked;
-  const selected = Array.from(
-    document.querySelectorAll(
-      '.chart-select-controls input[type="checkbox"]:checked'
-    )
-  )
-    .map((cb) => cb.dataset.key)
+function setStatus(id, ok) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.classList.toggle("ok", ok);
+  el.classList.toggle("error", !ok);
+}
+
+function getMaxPoints() {
+  const input = document.getElementById("mainMaxPts");
+  const parsed = Number.parseInt(input?.value, 10);
+  return Number.isFinite(parsed) ? Math.min(Math.max(parsed, 10), 1000) : DEFAULT_MAX_POINTS;
+}
+
+function getSelectedKeys() {
+  return Array.from(document.querySelectorAll("#chartSelectControls input[type='checkbox']:checked"))
+    .map((input) => input.dataset.key)
     .filter(Boolean);
+}
 
-  const container = document.getElementById("individualCharts");
-  container.innerHTML = "";
-  individualCharts = {};
-  individualRanges = {};
-
-  if (showMulti) {
-    mainChart.data.datasets = selected.map((key) => ({
-      label: chartMap[key]?.label || key,
-      data: [],
-      fill: false,
-    }));
-  } else {
-    mainChart.data.datasets = [];
+function setAutoScale(chart, values, range) {
+  if (range?.enabled) {
+    chart.options.scales.y.min = range.min;
+    chart.options.scales.y.max = range.max;
+    return;
   }
-  mainChart.update();
 
-  selected.forEach((key) => {
-    const box = document.createElement("div");
-    box.className = "chart-box";
-    const title = document.createElement("h4");
-    title.textContent = chartMap[key]?.label || key;
-    box.appendChild(title);
+  const clean = values.filter((value) => Number.isFinite(value));
+  if (clean.length === 0) {
+    chart.options.scales.y.min = undefined;
+    chart.options.scales.y.max = undefined;
+    return;
+  }
 
-    const rdiv = document.createElement("div");
-    rdiv.className = "range-controls";
-    rdiv.innerHTML = `
-      <label><input type="checkbox" class="childEnable" /> 固定范围</label>
-      min:<input type="number" class="childMin" value="0" step="0.1" />
-      max:<input type="number" class="childMax" value="1" step="0.1" />
-      <button type="button" class="applyRange">应用</button>
-    `;
-    box.appendChild(rdiv);
+  let min = clean[0];
+  let max = clean[0];
+  for (const value of clean) {
+    if (value < min) min = value;
+    if (value > max) max = value;
+  }
 
-    const canvas = document.createElement("canvas");
-    canvas.width = 440;
-    canvas.height = 280;
-    box.appendChild(canvas);
-    container.appendChild(box);
+  const padding = (max - min) * 0.1 || 1;
+  chart.options.scales.y.min = min - padding;
+  chart.options.scales.y.max = max + padding;
+}
 
-    const ctx = canvas.getContext("2d");
-    const chart = new Chart(ctx, {
-      type: "line",
-      data: {
-        labels: [],
-        datasets: [
-          {
-            label: chartMap[key]?.label || key,
-            data: [],
-            fill: false,
-          },
-        ],
-      },
-      options: commonChartOptions,
-    });
-    individualCharts[key] = chart;
+function createDataset(key) {
+  const meta = chartMap[key] || { label: key, color: "#d8e2ea" };
+  return {
+    label: meta.label,
+    data: [],
+    borderColor: meta.color,
+    backgroundColor: meta.color,
+    fill: false,
+  };
+}
 
-    const applyBtn = rdiv.querySelector(".applyRange");
-    applyBtn.addEventListener("click", () => {
-      const enabled = rdiv.querySelector(".childEnable").checked;
-      const minVal = parseFloat(rdiv.querySelector(".childMin").value);
-      const maxVal = parseFloat(rdiv.querySelector(".childMax").value);
-      chart.options.scales.y.min = enabled ? minVal : undefined;
-      chart.options.scales.y.max = enabled ? maxVal : undefined;
-      chart.update("none");
-    });
+function createChart(canvas, datasets) {
+  return new Chart(canvas.getContext("2d"), {
+    type: "line",
+    data: {
+      labels: [],
+      datasets,
+    },
+    options: chartOptions(),
   });
 }
 
-async function fetchDataAndUpdateCharts() {
-  try {
-    const res = await fetch("/data");
-    const json = await res.json();
-    const time = json.time;
-    if (!time) return;
-
-    const maxPts = mainChart._maxPoints || 100;
-    const start = time.length > maxPts ? time.length - maxPts : 0;
-    const slicedTime = time.slice(start);
-
-    if (document.getElementById("multiLineChart").checked) {
-      mainChart.data.labels = slicedTime;
-      const keys = Object.keys(individualCharts);
-      mainChart.data.datasets.forEach((ds, i) => {
-        const key = keys[i];
-        ds.data = json[key]?.slice(start) || [];
-      });
-
-      const allValues = mainChart.data.datasets.flatMap(ds => ds.data);
-      if (allValues.length > 0) {
-        const minVal = Math.min(...allValues);
-        const maxVal = Math.max(...allValues);
-        const padding = (maxVal - minVal) * 0.1 || 1; // 至少留1的余量
-        mainChart.options.scales.y.min = minVal - padding;
-        mainChart.options.scales.y.max = maxVal + padding;
-      }
-      mainChart.update();
-    }
-
-    Object.entries(individualCharts).forEach(([key, ch]) => {
-      ch.data.labels = slicedTime;
-      ch.data.datasets[0].data = json[key]?.slice(start) || [];
-
-      // 每个子图也加 margin，避免线条贴边
-      const arr = ch.data.datasets[0].data;
-      if (arr.length > 0) {
-        const minVal = Math.min(...arr);
-        const maxVal = Math.max(...arr);
-        const padding = (maxVal - minVal) * 0.1 || 1;
-        ch.options.scales.y.min = minVal - padding;
-        ch.options.scales.y.max = maxVal + padding;
-      }
-      ch.update();
-    });
-  } catch (e) {
-    console.error("fetch error:", e);
+function initCharts() {
+  if (!window.Chart) {
+    setStatus("data-status", false);
+    console.warn("Chart.js is not available");
+    return;
   }
+
+  const mainCanvas = document.getElementById("mainChart");
+  mainChart = createChart(mainCanvas, []);
+  updateCharts();
+}
+
+function updateMainRange() {
+  if (!mainChart) return;
+  mainChart._maxPoints = getMaxPoints();
+  latestDataSignature = "";
+  fetchDataAndQueueRender();
+}
+
+function updateCharts() {
+  if (!mainChart) return;
+
+  selectedKeys = getSelectedKeys();
+  const showMulti = document.getElementById("multiLineChart")?.checked ?? true;
+  const container = document.getElementById("individualCharts");
+
+  mainChart.data.datasets = showMulti ? selectedKeys.map(createDataset) : [];
+  mainChart.update("none");
+
+  for (const chart of Object.values(individualCharts)) {
+    chart.destroy();
+  }
+  individualCharts = {};
+  container.replaceChildren();
+
+  for (const key of selectedKeys) {
+    const meta = chartMap[key] || { label: key };
+    const box = document.createElement("section");
+    box.className = "chart-box";
+
+    const title = document.createElement("h4");
+    title.textContent = meta.label;
+    box.appendChild(title);
+
+    const controls = document.createElement("div");
+    controls.className = "range-controls";
+    controls.innerHTML = `
+      <label><input type="checkbox" class="childEnable" /> 固定范围</label>
+      <span>min</span><input type="number" class="childMin" value="0" step="0.1" />
+      <span>max</span><input type="number" class="childMax" value="1" step="0.1" />
+      <button type="button" class="applyRange">应用</button>
+    `;
+    box.appendChild(controls);
+
+    const canvasWrap = document.createElement("div");
+    canvasWrap.className = "chart-canvas-wrap";
+    const canvas = document.createElement("canvas");
+    canvasWrap.appendChild(canvas);
+    box.appendChild(canvasWrap);
+    container.appendChild(box);
+
+    const chart = createChart(canvas, [createDataset(key)]);
+    individualCharts[key] = chart;
+
+    controls.querySelector(".applyRange").addEventListener("click", () => {
+      const enabled = controls.querySelector(".childEnable").checked;
+      const min = Number.parseFloat(controls.querySelector(".childMin").value);
+      const max = Number.parseFloat(controls.querySelector(".childMax").value);
+      individualRanges[key] = {
+        enabled,
+        min: Number.isFinite(min) ? min : undefined,
+        max: Number.isFinite(max) ? max : undefined,
+      };
+      latestDataSignature = "";
+      fetchDataAndQueueRender();
+    });
+  }
+
+  latestDataSignature = "";
+  fetchDataAndQueueRender();
+}
+
+function dataSignature(json, keys) {
+  const time = Array.isArray(json.time) ? json.time : [];
+  const lastTime = time.length ? time[time.length - 1] : "";
+  const lengths = keys.map((key) => `${key}:${Array.isArray(json[key]) ? json[key].length : 0}`).join("|");
+  return `${time.length}:${lastTime}:${lengths}`;
+}
+
+function updateChartData(json) {
+  const labels = Array.isArray(json.time) ? json.time : [];
+  if (labels.length === 0) return;
+
+  if (document.getElementById("multiLineChart")?.checked) {
+    mainChart.data.labels = labels;
+    const allValues = [];
+    mainChart.data.datasets.forEach((dataset, index) => {
+      const key = selectedKeys[index];
+      const values = Array.isArray(json[key]) ? json[key] : [];
+      dataset.data = values;
+      allValues.push(...values);
+    });
+    setAutoScale(mainChart, allValues);
+    mainChart.update("none");
+  }
+
+  for (const [key, chart] of Object.entries(individualCharts)) {
+    const values = Array.isArray(json[key]) ? json[key] : [];
+    chart.data.labels = labels;
+    chart.data.datasets[0].data = values;
+    setAutoScale(chart, values, individualRanges[key]);
+    chart.update("none");
+  }
+}
+
+function queueChartRender() {
+  if (renderQueued) return;
+  renderQueued = true;
+  requestAnimationFrame(renderChartFrame);
+}
+
+function renderChartFrame(timestamp) {
+  if (!latestChartData) {
+    renderQueued = false;
+    return;
+  }
+
+  const elapsed = timestamp - lastRenderAt;
+  if (elapsed < CHART_RENDER_INTERVAL_MS) {
+    setTimeout(() => requestAnimationFrame(renderChartFrame), CHART_RENDER_INTERVAL_MS - elapsed);
+    return;
+  }
+
+  lastRenderAt = timestamp;
+  renderQueued = false;
+  updateChartData(latestChartData);
+}
+
+async function fetchDataAndQueueRender() {
+  if (!mainChart) return;
+  if (dataFetchController) return;
+
+  const controller = new AbortController();
+  dataFetchController = controller;
+  const maxPoints = getMaxPoints();
+  try {
+    const response = await fetch(`/data?max_points=${maxPoints}`, {
+      cache: "no-store",
+      signal: controller.signal,
+    });
+    if (!response.ok) throw new Error(response.statusText);
+
+    const json = await response.json();
+    const time = Array.isArray(json.time) ? json.time : [];
+    if (time.length === 0) return;
+
+    const signature = dataSignature(json, selectedKeys);
+    if (signature === latestDataSignature) {
+      setStatus("data-status", true);
+      return;
+    }
+    latestDataSignature = signature;
+    latestChartData = json;
+    queueChartRender();
+
+    setStatus("data-status", true);
+  } catch (error) {
+    if (error.name !== "AbortError") {
+      setStatus("data-status", false);
+      console.warn("data fetch failed:", error.message);
+    }
+  } finally {
+    if (dataFetchController === controller) {
+      dataFetchController = null;
+    }
+  }
+}
+
+function startDataLoop() {
+  if (dataTimer) return;
+  const tick = async () => {
+    await fetchDataAndQueueRender();
+    dataTimer = setTimeout(tick, DATA_POLL_INTERVAL_MS);
+  };
+  dataTimer = setTimeout(tick, 0);
 }

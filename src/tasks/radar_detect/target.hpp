@@ -1,8 +1,6 @@
 #pragma once
 #include "KalmanHyLib/error_state_extended_kalman_filter.hpp"
 #include "rclcpp/rclcpp.hpp"
-#include "utils/common/type_common.hpp"
-#include "utils/utils.hpp"
 #include <array>
 #include <ceres/jet.h>
 

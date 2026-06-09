@@ -1,10 +1,4 @@
 #pragma once
-#include "_rcl/tf.hpp"
-#include "mode_base.hpp"
-#include "tasks/base/packet_typedef_send.hpp"
-#include "tasks/sentry_brain/rmuc_2026/map.hpp"
-#include "utils/drivers/serial_driver.hpp"
-#include "utils/impl.hpp"
 
 namespace awakening::sentry_brain {
 

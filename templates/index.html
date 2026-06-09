@@ -1,206 +1,98 @@
 <!doctype html>
-<html lang="zh">
+<html lang="zh-CN">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>崇实战队自瞄系统网页调试器</title>
-    <link rel="icon" href="static/崇实战队logo图标.png" type="image/png" />
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <link rel="stylesheet" href="/static/css/style.css" />
+    <link rel="icon" href="{{ url_for('static', filename='崇实战队logo图标.png') }}" type="image/png" />
+    <link rel="preload" href="{{ url_for('static', filename='css/style.css', v='20260609d') }}" as="style" />
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css', v='20260609d') }}" />
+    <script defer src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script defer src="{{ url_for('static', filename='js/chart_logic.js', v='20260609d') }}"></script>
+    <script defer src="{{ url_for('static', filename='js/json_view.js', v='20260609d') }}"></script>
+    <script defer src="{{ url_for('static', filename='js/main.js', v='20260609d') }}"></script>
   </head>
 
   <body>
-    <div id="header">
-      <img src="/static/logo.JPG" alt="logo" />
-      <div>
+    <header id="header">
+      <img src="{{ url_for('static', filename='logo.JPG') }}" alt="崇实战队" width="52" height="52" />
+      <div class="header-copy">
         <h1>崇实战队自瞄系统网页调试器</h1>
-        <p>访问地址：{{ server_url }}</p>
+        <p>{{ server_url }}</p>
       </div>
-    </div>
+      <div class="header-status">
+        <span id="data-status" class="status-pill">DATA</span>
+        <span id="log-status" class="status-pill">LOG</span>
+      </div>
+    </header>
 
-    <div id="video-tab">
-      <div id="main-grid">
-        <!-- 左上：视频流 -->
-        <div class="panel" id="video-panel">
-          <div class="video-container">
-            <img
-              src="{{ url_for('video_feed') }}"
-              alt="视频流"
-              id="video-stream"
-            />
-            <button class="fullscreen-btn" onclick="toggleFullscreen()">
-              ⛶ 全屏
-            </button>
+    <main id="video-tab">
+      <section id="main-grid" aria-label="调试面板">
+        <article class="panel" id="video-panel">
+          <div class="panel-title">
+            <h2>视频流</h2>
+            <button class="icon-btn fullscreen-btn" type="button" id="fullscreenBtn" title="全屏">⛶</button>
           </div>
-        </div>
+          <div class="video-container">
+            <img src="{{ url_for('video_feed') }}" alt="视频流" id="video-stream" decoding="async" />
+          </div>
+        </article>
 
-        <!-- 右上：JSON -->
-        <div class="panel" id="json-info">
+        <article class="panel" id="json-info">
+          <div class="panel-title">
+            <h2>Log</h2>
+          </div>
           <div class="json-container" id="json-log-container">
-            <h3>Log</h3>
             <div id="json-log"></div>
           </div>
-        </div>
+        </article>
 
-        <!-- 左下：主图表 -->
-        <div class="panel" id="main-chart-panel">
-          <div class="chart-controls">
-            <div class="chart-select-controls">
-              <label
-                ><input
-                  type="checkbox"
-                  id="multiLineChart"
-                  checked
-                  onchange="updateCharts()"
-                />
-                显示总图（多曲线）</label
-              >
-              <label
-                ><input
-                  type="checkbox"
-                  data-key="yaw"
-                  onchange="updateCharts()"
-                />
-                Yaw</label
-              >
-              <label
-                ><input
-                  type="checkbox"
-                  data-key="pitch"
-                  onchange="updateCharts()"
-                />
-                Pitch</label
-              >
-              <label
-                ><input
-                  type="checkbox"
-                  data-key="target_yaw"
-                  onchange="updateCharts()"
-                />
-                Target Yaw</label
-              >
-              <label
-                ><input
-                  type="checkbox"
-                  data-key="target_pitch"
-                  onchange="updateCharts()"
-                />
-                Target Pitch</label
-              >
-              <label
-                ><input
-                  type="checkbox"
-                  data-key="gimbal_yaw"
-                  onchange="updateCharts()"
-                />
-                Gimbal Yaw</label
-              >
-              <label
-                ><input
-                  type="checkbox"
-                  data-key="gimbal_pitch"
-                  onchange="updateCharts()"
-                />
-                Gimbal Pitch</label
-              >
-              <label
-                ><input
-                  type="checkbox"
-                  data-key="control_v_yaw"
-                  onchange="updateCharts()"
-                />
-                Control V Yaw</label
-              >
-              <label
-                ><input
-                  type="checkbox"
-                  data-key="control_v_pitch"
-                  onchange="updateCharts()"
-                />
-                Control V Pitch</label
-              >
-              
-              <label
-                ><input
-                  type="checkbox"
-                  data-key="control_a_yaw"
-                  onchange="updateCharts()"
-                />
-                Control A Yaw</label
-              >
- 
-              <label
-                ><input
-                  type="checkbox"
-                  data-key="control_a_pitch"
-                  onchange="updateCharts()"
-                />
-                Control A Pitch</label
-              >
-              
-              <label
-                ><input
-                  type="checkbox"
-                  data-key="fly_time"
-                  onchange="updateCharts()"
-                />
-                Fly time</label
-              >
-              <label
-                ><input
-                  type="checkbox"
-                  data-key="target_v_yaw"
-                  onchange="updateCharts()"
-                />
-                Target V Yaw</label
-              >
-              <label
-                ><input
-                  type="checkbox"
-                  data-key="yaw_diff"
-                  onchange="updateCharts()"
-                />
-                Yaw Diff</label
-              >
-              <label
-                ><input
-                  type="checkbox"
-                  data-key="pitch_diff"
-                  onchange="updateCharts()"
-                />
-                Pitch Diff</label
-              >
-             
-              
-
-            <fieldset>
-              <legend>主图范围设置</legend>
-              <label
-                >最大点数:<input
-                  type="number"
-                  id="mainMaxPts"
-                  value="100"
-                  min="10"
-                  max="1000"
-                  step="1" /></label
-              ><br />
-              <button type="button" onclick="updateMainRange()">
-                应用主图范围
-              </button>
-            </fieldset>
+        <article class="panel" id="main-chart-panel">
+          <div class="panel-title">
+            <h2>主图</h2>
+            <label class="toggle-line">
+              <input type="checkbox" id="multiLineChart" checked />
+              <span>总图</span>
+            </label>
           </div>
-          <canvas id="mainChart" height="200"></canvas>
-        </div>
 
-        <!-- 右下：独立图表 -->
-        <div class="panel" id="individual-chart-panel">
+          <div class="chart-toolbar">
+            <div class="chart-select-controls" id="chartSelectControls">
+              <label><input type="checkbox" data-key="yaw" checked /> Yaw</label>
+              <label><input type="checkbox" data-key="pitch" checked /> Pitch</label>
+              <label><input type="checkbox" data-key="target_yaw" /> Target Yaw</label>
+              <label><input type="checkbox" data-key="target_pitch" /> Target Pitch</label>
+              <label><input type="checkbox" data-key="gimbal_yaw" checked /> Gimbal Yaw</label>
+              <label><input type="checkbox" data-key="gimbal_pitch" checked /> Gimbal Pitch</label>
+              <label><input type="checkbox" data-key="control_v_yaw" /> Control V Yaw</label>
+              <label><input type="checkbox" data-key="control_v_pitch" /> Control V Pitch</label>
+              <label><input type="checkbox" data-key="control_a_yaw" /> Control A Yaw</label>
+              <label><input type="checkbox" data-key="control_a_pitch" /> Control A Pitch</label>
+              <label><input type="checkbox" data-key="fly_time" /> Fly Time</label>
+              <label><input type="checkbox" data-key="target_v_yaw" /> Target V Yaw</label>
+              <label><input type="checkbox" data-key="yaw_diff" /> Yaw Diff</label>
+              <label><input type="checkbox" data-key="pitch_diff" /> Pitch Diff</label>
+            </div>
+
+            <div class="range-row">
+              <label for="mainMaxPts">最大点数</label>
+              <input type="number" id="mainMaxPts" value="100" min="10" max="1000" step="10" />
+              <button type="button" id="applyMainRange">应用</button>
+            </div>
+          </div>
+
+          <div class="main-chart-wrap">
+            <canvas id="mainChart"></canvas>
+          </div>
+        </article>
+
+        <article class="panel" id="individual-chart-panel">
+          <div class="panel-title">
+            <h2>独立图表</h2>
+          </div>
           <div id="individualCharts"></div>
-        </div>
-      </div>
-    </div>
-
-    <script src="/static/js/chart_logic.js"></script>
-    <script src="/static/js/json_view.js"></script>
-    <script src="/static/js/main.js"></script>
+        </article>
+      </section>
+    </main>
   </body>
 </html>

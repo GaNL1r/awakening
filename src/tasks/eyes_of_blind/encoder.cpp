@@ -1,6 +1,5 @@
 #include "encoder.hpp"
 #include "image_preprocessor.hpp"
-#include "utils/logger.hpp"
 #include <algorithm>
 #include <chrono>
 #include <condition_variable>

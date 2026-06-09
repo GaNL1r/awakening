@@ -4,13 +4,10 @@
 #include "tasks/base/common.hpp"
 #include "tasks/base/packet_typedef_receive.hpp"
 #include "tasks/base/packet_typedef_send.hpp"
-#include "utils/common/type_common.hpp"
 #include "utils/drivers/hik_camera.hpp"
 #include "utils/drivers/serial_driver.hpp"
 #include "utils/runtime_tf.hpp"
-#include "utils/scheduler/scheduler.hpp"
 #include "utils/signal_guard.hpp"
-#include "utils/utils.hpp"
 #include <algorithm>
 #include <array>
 #include <chrono>

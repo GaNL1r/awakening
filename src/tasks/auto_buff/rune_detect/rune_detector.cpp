@@ -1,7 +1,4 @@
 #include "rune_detector.hpp"
-#include "tasks/auto_buff/type.hpp"
-#include "tasks/base/common.hpp"
-#include "utils/common/image.hpp"
 #include <memory>
 #include <opencv2/core/mat.hpp>
 #include <vector>

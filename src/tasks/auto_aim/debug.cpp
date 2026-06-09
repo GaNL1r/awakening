@@ -1,11 +1,5 @@
 #include "debug.hpp"
 #include "angles.h"
-#include "tasks/auto_aim/auto_aim_fsm.hpp"
-#include "tasks/auto_aim/type.hpp"
-#include "tasks/base/common.hpp"
-#include "tasks/base/web.hpp"
-#include "utils/common/type_common.hpp"
-#include "utils/utils.hpp"
 #include <fmt/format.h>
 #include <opencv2/core/types.hpp>
 #include <utility>
@@ -364,8 +358,8 @@ void write_debug_data(const AutoAimDebugCtx& ctx) {
     d.yaw_log.handle_once(yaw);
     last_yaw = yaw;
     d.pitch_log.handle_once(cmd.pitch);
-    d.yaw_diff_log.handle_once(yaw - gimbal_yaw_pitch.first);
-    d.pitch_diff_log.handle_once(cmd.pitch - gimbal_yaw_pitch.second);
+    d.yaw_diff_log.handle_once(angles::normalize_degrees(yaw - gimbal_yaw_pitch.first));
+    d.pitch_diff_log.handle_once(angles::normalize_degrees(cmd.pitch - gimbal_yaw_pitch.second));
     d.target_yaw_log.handle_once(un_warp(cmd.target_yaw));
     d.target_pitch_log.handle_once(cmd.target_pitch);
     d.gimbal_yaw_log.handle_once(un_warp(gimbal_yaw_pitch.first));

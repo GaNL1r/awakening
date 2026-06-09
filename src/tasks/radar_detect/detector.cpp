@@ -1,8 +1,5 @@
 #include "detector.hpp"
-#include "tasks/base/common.hpp"
-#include "tasks/radar_detect/type.hpp"
 #include "utils/net_detector/tensorrt/net_detector_tensorrt.hpp"
-#include "utils/utils.hpp"
 #include <array>
 #include <memory>
 #include <opencv2/core/mat.hpp>

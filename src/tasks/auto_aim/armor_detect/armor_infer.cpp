@@ -1,6 +1,4 @@
 #include "armor_infer.hpp"
-#include "tasks/auto_aim/type.hpp"
-#include "utils/common/image.hpp"
 #include <cstddef>
 #include <memory>
 

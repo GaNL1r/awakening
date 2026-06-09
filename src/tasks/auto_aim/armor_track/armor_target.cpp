@@ -1,11 +1,5 @@
 #include "armor_target.hpp"
 #include "angles.h"
-#include "tasks/auto_aim/armor_track/motion_model.hpp"
-#include "tasks/auto_aim/type.hpp"
-#include "tasks/base/common.hpp"
-#include "utils/common/type_common.hpp"
-#include "utils/logger.hpp"
-#include "utils/utils.hpp"
 #include <Eigen/src/Core/Matrix.h>
 #include <algorithm>
 #include <array>
