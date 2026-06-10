@@ -10,6 +10,7 @@
 #include <ceres/jet.h>
 #include <chrono>
 #include <cstdlib>
+#include <opencv2/core/types.hpp>
 #include <optional>
 #include <utility>
 #include <vector>
@@ -54,13 +55,31 @@ struct Predict {
 
 struct RMeasure {
     struct Ctx {
-        int id { 0 };
         ISO3 camera_cv_in_odom = ISO3::Identity();
         CameraInfo camera_info;
     } ctx;
 
     template<typename T>
-    inline void operator()(const T x[X_N], T z[RZ_N]) const {}
+    inline void operator()(const T x[X_N], T z[RZ_N]) const {
+        Eigen::Transform<T, 3, Eigen::Isometry> pose_in_odom =
+            Eigen::Transform<T, 3, Eigen::Isometry>::Identity();
+        pose_in_odom.translation() << x[idx::CX], x[idx::CY], x[idx::CZ];
+
+        Eigen::Transform<T, 3, Eigen::Isometry> camera_cv_in_odom_jet;
+        camera_cv_in_odom_jet.matrix() = ctx.camera_cv_in_odom.matrix().template cast<T>();
+
+        auto pose_in_camera_cv = camera_cv_in_odom_jet.inverse() * pose_in_odom;
+        std::vector<Eigen::Matrix<T, 2, 1>> img_pts_jet;
+        utils::project_points_jets(
+            { cv::Point3f(0, 0, 0) },
+            pose_in_camera_cv,
+            ctx.camera_info.camera_matrix,
+            ctx.camera_info.distortion_coefficients,
+            img_pts_jet
+        );
+        z[idx::R_X] = img_pts_jet[0].x();
+        z[idx::R_Y] = img_pts_jet[0].y();
+    }
 
     inline void h(const VecX& x, RVecZ& z) const {
         operator()(x.data(), z.data());

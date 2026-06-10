@@ -2,7 +2,7 @@ import open3d as o3d
 import numpy as np
 
 # 读取 STL mesh
-mesh = o3d.io.read_triangle_mesh("/home/hy/awakening/radar.stl")
+mesh = o3d.io.read_triangle_mesh("/home/hy/awakening/src/tasks/radar_detect/data/radar.stl")
 
 # 计算法线（可选）
 mesh.compute_vertex_normals()

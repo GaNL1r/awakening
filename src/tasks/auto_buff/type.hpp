@@ -7,8 +7,8 @@
 #include <optional>
 #include <vector>
 namespace awakening::auto_buff {
-constexpr double RUNE_PAN_BOX_DIS = 0.16;
-constexpr double RUNE_R2PANCENTER = 0.75;
+constexpr double RUNE_PAN_BOX_DIS = 0.15;
+constexpr double RUNE_R2PANCENTER = 0.70;
 struct RuneR {
     cv::RotatedRect rr;
 

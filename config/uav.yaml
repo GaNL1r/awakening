@@ -82,8 +82,8 @@ armor_tracker:
   lost_time_thres: 0.5
   lost_time_thres_outpost: 2.0
   tracking_thres: 10
-  match_gate_at_1m: 50.0
-  match_gate_not_all_init_at_1m: 100.0
+  match_gate_armor: 50.0
+  match_gate_not_all_init_armor: 100.0
   qxyz_common: [30.0, 30.0, 1.0]
   qyaw_common: 100.0
   qxyz_output: [1.0, 1.0, 0.5]

@@ -16,8 +16,8 @@ struct ArmorTrackerCfg {
     double lost_time_thres;
     double lost_time_thres_outpost;
     int tracking_thres;
-    double match_gate_at_1m;
-    double match_gate_not_all_init_at_1m;
+    double match_gate_armor;
+    double match_gate_not_all_init_armor;
     double qyaw_common;
     double qyaw_output;
     Vec3 qxyz_common;
@@ -37,8 +37,8 @@ struct ArmorTrackerCfg {
         lost_time_thres = config["lost_time_thres"].as<double>();
         lost_time_thres_outpost = config["lost_time_thres_outpost"].as<double>();
         tracking_thres = config["tracking_thres"].as<int>();
-        match_gate_at_1m = config["match_gate_at_1m"].as<double>();
-        match_gate_not_all_init_at_1m = config["match_gate_not_all_init_at_1m"].as<double>();
+        match_gate_armor = config["match_gate_armor"].as<double>();
+        match_gate_not_all_init_armor = config["match_gate_not_all_init_armor"].as<double>();
         qyaw_common = config["qyaw_common"].as<double>();
         qyaw_output = config["qyaw_output"].as<double>();
         auto qxyz_common_vec = config["qxyz_common"].as<std::vector<double>>();
@@ -84,7 +84,6 @@ public:
             lost_count = 0;
         }
     };
-    enum MeasureType { ARMOR, R_LIGHT, L_LIGHT };
     ArmorTarget() = default;
     static void
     armor_pnp(Armor& a, const CameraInfo& camera_info, const ISO3& camera_cv_in_odom) noexcept;

@@ -3,12 +3,14 @@
 #include "utils/common/type_common.hpp"
 #include <cmath>
 #include <numbers>
+#include <opencv2/calib3d.hpp>
 #include <opencv2/core/eigen.hpp>
 #include <opencv2/core/types.hpp>
 #include <optional>
 #include <pwd.h>
 #include <regex>
 #include <utility>
+#include <vector>
 namespace awakening::utils {
 
 inline Quaternion rpy2quat(const Vec3& rpy) {
@@ -288,4 +290,35 @@ inline std::optional<std::string> get_arg(int i, int argc, char* argv[]) {
     }
     return std::nullopt;
 };
+template<class LandMark, class ObjectPoint>
+inline ISO3 solve_pnp(
+    const LandMark& landmarks,
+    const ObjectPoint& object_points,
+    const cv::Mat& camera_matrix,
+    const cv::Mat& distortion_coefficients,
+    int flags = cv::SOLVEPNP_ITERATIVE
+) {
+    ISO3 pose;
+    cv::Mat rvec, tvec;
+    cv::solvePnP(
+        object_points,
+        landmarks,
+        camera_matrix,
+        distortion_coefficients,
+        rvec,
+        tvec,
+        false,
+        flags
+    );
+    cv::Mat R_cv;
+    cv::Rodrigues(rvec, R_cv);
+    Mat3 R_eigen;
+    cv::cv2eigen(R_cv, R_eigen);
+    pose.linear() = R_eigen;
+    Vec3 t_eigen;
+    cv::cv2eigen(tvec, t_eigen);
+    pose.translation() = t_eigen;
+    return pose;
+}
+
 } // namespace awakening::utils

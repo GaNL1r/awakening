@@ -1,13 +1,17 @@
 #include "armor_target.hpp"
 #include "angles.h"
+#include "tasks/auto_aim/type.hpp"
+#include "utils/utils.hpp"
 #include <Eigen/src/Core/Matrix.h>
 #include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstdlib>
+#include <opencv2/calib3d.hpp>
 #include <opencv2/core.hpp>
 #include <opencv2/core/mat.hpp>
 #include <opencv2/core/types.hpp>
+#include <limits>
 #include <optional>
 #include <stdexcept>
 #include <tuple>
@@ -15,6 +19,32 @@
 #include <vector>
 namespace awakening::auto_aim {
 using namespace armor_point_motion_model;
+
+namespace {
+constexpr double MAX_COST = 1e9;
+
+[[nodiscard]] cv::Rect2f full_image_rect(const cv::Size& image_size) noexcept {
+    return cv::Rect2f(0, 0, image_size.width, image_size.height);
+}
+
+void fill_constant_accel_noise(
+    Eigen::Matrix<double, X_N, X_N>& q,
+    int pos_idx,
+    int vel_idx,
+    double noise,
+    double dt
+) noexcept {
+    const double dt2 = dt * dt;
+    const double dt3 = dt2 * dt;
+    const double dt4 = dt2 * dt2;
+
+    q(pos_idx, pos_idx) = dt4 * 0.25 * noise;
+    q(pos_idx, vel_idx) = dt3 * 0.5 * noise;
+    q(vel_idx, pos_idx) = q(pos_idx, vel_idx);
+    q(vel_idx, vel_idx) = dt2 * noise;
+}
+} // namespace
+
 void ArmorTarget::reset(
     Armor& a,
     const ArmorTrackerCfg& c,
@@ -109,27 +139,15 @@ void ArmorTarget::armor_pnp(
     const CameraInfo& camera_info,
     const ISO3& camera_cv_in_odom
 ) noexcept {
-    cv::Mat rvec, tvec;
     auto key_points = a.key_points.landmarks();
-    if (!cv::solvePnP(
-            getArmorKeyPoints3D<cv::Point3f>(a.number),
-            key_points,
-            camera_info.camera_matrix,
-            camera_info.distortion_coefficients,
-            rvec,
-            tvec,
-            false,
-            cv::SOLVEPNP_IPPE
-        ))
-    {}
-    cv::Mat R_cv_armor_in_camera_cv;
-    cv::Rodrigues(rvec, R_cv_armor_in_camera_cv);
-    Mat3 R_eigen_armor_in_camera_cv;
-    cv::cv2eigen(R_cv_armor_in_camera_cv, R_eigen_armor_in_camera_cv);
-    Vec3 t_eigen_armor_in_camera_cv;
-    cv::cv2eigen(tvec, t_eigen_armor_in_camera_cv);
-    a.pose.translation() = t_eigen_armor_in_camera_cv;
-    a.pose.linear() = R_eigen_armor_in_camera_cv;
+
+    a.pose = utils::solve_pnp(
+        key_points,
+        getArmorKeyPoints3D<cv::Point3f>(a.number),
+        camera_info.camera_matrix,
+        camera_info.distortion_coefficients,
+        cv::SOLVEPNP_IPPE
+    );
     auto armor_in_odom = camera_cv_in_odom * a.pose;
     a.pose = armor_in_odom;
     auto rpy = utils::matrix2rpy(a.pose.linear());
@@ -139,7 +157,6 @@ void ArmorTarget::armor_pnp(
     auto min_error = 1e10;
     auto best_rot = a.pose.linear();
     auto obj_points = getArmorKeyPoints3D<cv::Point3f>(a.number);
-    double best_yaw = yaw_raw;
     const double armor_pitch = (a.number == auto_aim::ArmorClass::OUTPOST)
         ? -auto_aim::FIFTTEN_DEGREE_RAD
         : auto_aim::FIFTTEN_DEGREE_RAD;
@@ -184,7 +201,6 @@ void ArmorTarget::armor_pnp(
         if (error < min_error) {
             min_error = error;
             best_rot = a_pose_in_odom.linear();
-            best_yaw = yaw;
         }
     }
     a.pose.linear() = best_rot;
@@ -274,31 +290,15 @@ Eigen::Matrix<double, X_N, X_N> ArmorTarget::process_noise(double dt) const noex
         q_l = cfg.q_l;
         q_h = cfg.q_h;
     }
-    const double t = dt;
-    const double q_x_x = pow(t, 4) / 4 * q_xyz.x(), q_x_vx = pow(t, 3) / 2 * q_xyz.x(),
-                 q_vx_vx = pow(t, 2) * q_xyz.x();
-    const double q_y_y = pow(t, 4) / 4 * q_xyz.y(), q_y_vy = pow(t, 3) / 2 * q_xyz.y(),
-                 q_vy_vy = pow(t, 2) * q_xyz.y();
-    const double q_z_z = pow(t, 4) / 4 * q_xyz.z(), q_z_vz = pow(t, 3) / 2 * q_xyz.z(),
-                 q_vz_vz = pow(t, 2) * q_xyz.z();
-    const double q_yaw_yaw = pow(t, 4) / 4 * q_yaw, q_yaw_vyaw = pow(t, 3) / 2 * q_yaw,
-                 q_vyaw_vyaw = pow(t, 2) * q_yaw;
-    const double q_r = cfg.q_r;
-    // clang-format off
-            //      xc      v_xc    yc      v_yc    zc      v_zc    yaw         v_yaw       r       l   h  
-            q <<    q_x_x,  q_x_vx, 0,      0,      0,      0,      0,          0,          0,      0,  0, 
-                    q_x_vx, q_vx_vx,0,      0,      0,      0,      0,          0,          0,      0,  0,  
-                    0,      0,      q_y_y,  q_y_vy, 0,      0,      0,          0,          0,      0,  0, 
-                    0,      0,      q_y_vy, q_vy_vy,0,      0,      0,          0,          0,      0,  0,  
-                    0,      0,      0,      0,      q_z_z,  q_z_vz, 0,          0,          0,      0,  0,  
-                    0,      0,      0,      0,      q_z_vz, q_vz_vz,0,          0,          0,      0,  0,  
-                    0,      0,      0,      0,      0,      0,      q_yaw_yaw,  q_yaw_vyaw, 0,      0,  0,  
-                    0,      0,      0,      0,      0,      0,      q_yaw_vyaw, q_vyaw_vyaw,0,      0,  0,  
-                    0,      0,      0,      0,      0,      0,      0,          0,          q_r,    0,  0,  
-                    0,      0,      0,      0,      0,      0,      0,          0,          0,      q_l,0,  
-                    0,      0,      0,      0,      0,      0,      0,          0,          0,      0,  q_h;
 
-    // clang-format on
+    q.setZero();
+    fill_constant_accel_noise(q, idx::CX, idx::VCX, q_xyz.x(), dt);
+    fill_constant_accel_noise(q, idx::CY, idx::VCY, q_xyz.y(), dt);
+    fill_constant_accel_noise(q, idx::CZ, idx::VCZ, q_xyz.z(), dt);
+    fill_constant_accel_noise(q, idx::YAW, idx::VYAW, q_yaw, dt);
+    q(idx::R, idx::R) = cfg.q_r;
+    q(idx::L, idx::L) = q_l;
+    q(idx::H, idx::H) = q_h;
     return q;
 }
 
@@ -367,23 +367,8 @@ int ArmorTarget::update(
 
         last_match_id = id;
         used_id[id] = true;
-        if (armor.color_classifier) {
-            const auto& colors = armor.color_classifier->light_colors;
-            //网络可能看到单个灯条，不过对另一个预测挺准的这里看感觉选下面两个逻辑
-            // if (colors[Armor::ColorClassifierCtx::LEFT] != ArmorColor::NONE) {
-            //     add_obs(armor, id, true);
-            // }
-
-            // if (colors[Armor::ColorClassifierCtx::RIGHT] != ArmorColor::NONE) {
-            //     add_obs(armor, id, false);
-            // }
-            add_obs(armor, id, true);
-            add_obs(armor, id, false);
-
-        } else {
-            add_obs(armor, id, true);
-            add_obs(armor, id, false);
-        }
+        add_obs(armor, id, true);
+        add_obs(armor, id, false);
         ++updated;
         ++update_count;
     }
@@ -421,10 +406,9 @@ std::vector<std::pair<int, Armor>> ArmorTarget::match_armor(
     bool all_init =
         (outpost_has_all_and_has_set_ids.has_value() ? outpost_has_all_and_has_set_ids.value().first
                                                      : jumped);
-    const double GATE = (all_init ? cfg.match_gate_at_1m : cfg.match_gate_not_all_init_at_1m);
+    const double GATE = (all_init ? cfg.match_gate_armor : cfg.match_gate_not_all_init_armor);
 
-    const double max_cost = 1e9;
-    std::vector<std::vector<double>> cost(n_obs, std::vector<double>(armors_num, max_cost + 1));
+    std::vector<std::vector<double>> cost(n_obs, std::vector<double>(armors_num, MAX_COST + 1));
 
     std::vector<YPDVecZ> meas_list(n_obs
     ); //纯图像点匹配只能纯位置误差，要不就是和match_light基于逻辑，不如随便pnp一下ypda匹配
@@ -476,7 +460,7 @@ std::vector<std::pair<int, Armor>> ArmorTarget::match_armor(
     std::vector<bool> used_id(armors_num, false);
 
     while (true) {
-        double best = max_cost;
+        double best = MAX_COST;
         int best_j = -1;
         int best_id = -1;
 
@@ -519,7 +503,6 @@ std::vector<std::tuple<int, bool, Light>> ArmorTarget::match_light(
 
     const int armors_num = armor_num();
     const int armor_id = matched_armors.front().first;
-    constexpr double max_cost = 1e9;
     auto predict_light = [&](int id, bool is_left) -> std::pair<cv::Point2f, cv::Point2f> {
         UVMeasure::Ctx ctx { .armor_num = armors_num,
                              .id = id,
@@ -548,7 +531,7 @@ std::vector<std::tuple<int, bool, Light>> ArmorTarget::match_light(
     const int n_obs = static_cast<int>(lights.size());
     std::vector<std::array<double, visible_lights.size()>> cost(
         n_obs,
-        { max_cost + 1, max_cost + 1 }
+        { MAX_COST + 1, MAX_COST + 1 }
     );
 
     auto calc_cost = [&](const Light& light,
@@ -557,13 +540,13 @@ std::vector<std::tuple<int, bool, Light>> ArmorTarget::match_light(
             || matched_armors[0].second.key_points.bounding_box().contains(light.bottom)
             || matched_armors[0].second.key_points.bounding_box().contains(light.center))
         {
-            return max_cost + 1;
+            return MAX_COST + 1;
         }
         double pred_len = cv::norm(pred.first - pred.second);
         double len_err = std::abs(light.length - pred_len);
         if (len_err > pred_len * cfg.light_match_length_ratio_gate) {
             // AWAKENING_WARN("match out of gate: light length err: {}", len_err);
-            return max_cost + 1;
+            return MAX_COST + 1;
         }
 
         double pred_angle = std::atan2(pred.first.x - pred.second.x, pred.first.y - pred.second.y);
@@ -571,20 +554,20 @@ std::vector<std::tuple<int, bool, Light>> ArmorTarget::match_light(
         double angle_err = std::abs(angles::normalize_angle(light_angle - pred_angle));
         if (angle_err > cfg.light_match_angle_gate) {
             // AWAKENING_WARN("match out of gate: light angle err: {}", angle_err);
-            return max_cost + 1;
+            return MAX_COST + 1;
         }
 
         double pos_err = cv::norm(light.top - pred.first) + cv::norm(light.bottom - pred.second);
         if (pos_err > pred_len * cfg.light_match_pos_gate_by_length_ratio) {
             // AWAKENING_WARN("match out of gate: light position err: {}", pos_err);
-            return max_cost + 1;
+            return MAX_COST + 1;
         }
 
         return pos_err;
     };
 
     for (int j = 0; j < n_obs; ++j) {
-        for (int i = 0; i < visible_lights.size(); ++i) {
+        for (std::size_t i = 0; i < visible_lights.size(); ++i) {
             cost[j][i] = calc_cost(lights[j], visible_lights[i]);
         }
     }
@@ -592,7 +575,7 @@ std::vector<std::tuple<int, bool, Light>> ArmorTarget::match_light(
     std::vector<bool> used_obs(n_obs, false);
     std::array<bool, visible_mapping.size()> used_id { false, false }; // 只匹配左可见/右可见
     while (true) {
-        double best = max_cost;
+        double best = MAX_COST;
         int best_j = -1, best_id = -1;
 
         for (int j = 0; j < n_obs; ++j) {
@@ -631,7 +614,7 @@ std::vector<std::tuple<int, bool, Light>> ArmorTarget::match_light(
     const double dt = std::chrono::duration<double>(timestamp - last_update).count();
 
     if (!is_inited || dt > cfg.lost_time_thres) {
-        return cv::Rect2f(0, 0, image_size.width, image_size.height);
+        return full_image_rect(image_size);
     }
 
     cv::Rect2f rect = expanded(timestamp, camera_cv_in_odom, camera_info, image_size);
@@ -640,42 +623,13 @@ std::vector<std::tuple<int, bool, Light>> ArmorTarget::match_light(
     rect.y -= rect.height * expansion_ratio;
     rect.width *= (1.0 + 2.0 * expansion_ratio);
     rect.height *= (1.0 + 2.0 * expansion_ratio);
-    const cv::Rect2f img_rect(0, 0, image_size.width, image_size.height);
+    const cv::Rect2f img_rect = full_image_rect(image_size);
 
     if ((rect & img_rect).area() <= 0) {
-        return cv::Rect2f(0, 0, image_size.width, image_size.height);
+        return full_image_rect(image_size);
     }
 
-    const double lost_dt = cfg.lost_time_thres;
-
-    double alpha = std::clamp(dt / lost_dt, 0.0, 1.0);
-    alpha = 0.0;
-    double x1 = rect.x;
-    double y1 = rect.y;
-    double x2 = rect.x + rect.width;
-    double y2 = rect.y + rect.height;
-
-    const double img_x1 = 0.0;
-    const double img_y1 = 0.0;
-    const double img_x2 = image_size.width;
-    const double img_y2 = image_size.height;
-
-    x1 = std::clamp(x1, img_x1, img_x2);
-    x2 = std::clamp(x2, img_x1, img_x2);
-    y1 = std::clamp(y1, img_y1, img_y2);
-    y2 = std::clamp(y2, img_y1, img_y2);
-
-    x1 = x1 + (img_x1 - x1) * alpha;
-    y1 = y1 + (img_y1 - y1) * alpha;
-    x2 = x2 + (img_x2 - x2) * alpha;
-    y2 = y2 + (img_y2 - y2) * alpha;
-
-    cv::Rect2f expanded_rect(
-        static_cast<int>(x1),
-        static_cast<int>(y1),
-        static_cast<int>(x2 - x1),
-        static_cast<int>(y2 - y1)
-    );
+    cv::Rect2f expanded_rect = rect & img_rect;
 
     const double rect_w = std::max<double>(expanded_rect.width, 1.0);
     const double rect_h = std::max<double>(expanded_rect.height, 1.0);
@@ -719,27 +673,26 @@ std::vector<std::tuple<int, bool, Light>> ArmorTarget::match_light(
             .camera_cv_in_odom = camera_cv_in_odom,
             .camera_info = camera_info,
             .armor_number = target_number,
-
         };
         UVMeasure measure { .ctx = tmp_ctx };
         UVVecZ z_pred;
         {
             measure.ctx.is_left = true;
-            measure.h(target_state.x, z_pred);
+            measure.h(tmp_target_state.x, z_pred);
             pts.push_back(cv::Point2f(z_pred[idx::TOP_X], z_pred[idx::TOP_Y]));
             pts.push_back(cv::Point2f(z_pred[idx::BOTTOM_X], z_pred[idx::BOTTOM_Y]));
         }
         {
             measure.ctx.is_left = false;
-            measure.h(target_state.x, z_pred);
+            measure.h(tmp_target_state.x, z_pred);
             pts.push_back(cv::Point2f(z_pred[idx::TOP_X], z_pred[idx::TOP_Y]));
             pts.push_back(cv::Point2f(z_pred[idx::BOTTOM_X], z_pred[idx::BOTTOM_Y]));
         }
     }
     cv::Rect2f rect = cv::boundingRect(pts);
-    const cv::Rect2f img_rect(0, 0, image_size.width, image_size.height);
+    const cv::Rect2f img_rect = full_image_rect(image_size);
     if ((rect & img_rect).area() <= 0) {
-        return cv::Rect2f(0, 0, image_size.width, image_size.height);
+        return full_image_rect(image_size);
     }
     return rect;
 }
