@@ -187,15 +187,10 @@ int main(int argc, char** argv) {
         static std::mutex mutex;
         std::lock_guard<std::mutex> lock(mutex);
         static int current_id = 0;
-        int x = 0;
-        int y = 0;
-        int w = f.src_img.cols;
-        int h = f.src_img.rows;
         CommonFrame frame {
             .img_frame = std::move(f),
             .id = current_id++,
             .frame_id = 0,
-            .expanded = cv::Rect2f(x, y, w, h),
         };
         log_ctx.image_count++;
         if (video_saver) {
@@ -220,12 +215,14 @@ int main(int argc, char** argv) {
             if (got) {
                 log_ctx.detect_count++;
                 auto start = Clock::now();
-                cars.cars = detector.detect(frame);
+                cars.cars = detector.detect(
+                    frame,
+                    cv::Rect(0, 0, frame.img_frame.src_img.cols, frame.img_frame.src_img.rows)
+                );
                 utils::dt_once(
                     [&]() {
                         CommonFrame f = frame;
-                        f.expanded = outpost_bbox;
-                        outpost_armors = detector.detect_armors(f);
+                        outpost_armors = detector.detect_armors(f, outpost_bbox);
                         enemy_outpost_active = false;
                         for (const auto& o: outpost_armors) {
                             if (o.number == radar_detect::ArmorClass::OUTPOST) {

@@ -117,7 +117,7 @@ auto_aim_fsm:
   whole_pair_down: 9.5 #1s内至少换2次板子  2pi  否则轨迹规划无意义
   pair_center_up: 16.5
   pair_center_down: 15.0
-  transfer_thresh: 50
+  transfer_time: 0.5
 
 very_aimer:
   base_yaw_offset: -2.0

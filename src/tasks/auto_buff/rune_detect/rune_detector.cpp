@@ -304,9 +304,10 @@ struct RuneDetector::Impl {
         }
         return results;
     }
-    RuneDetection detect(const CommonFrame& frame, EnemyColor enemy_color) const noexcept {
+    RuneDetection
+    detect(const CommonFrame& frame, const cv::Rect& focus, EnemyColor enemy_color) const noexcept {
         RuneDetection result;
-        cv::Mat roi = frame.img_frame.src_img(frame.expanded);
+        cv::Mat roi = frame.img_frame.src_img(focus);
         auto bin = preprocess(roi, frame.img_frame.format);
         std::vector<std::vector<cv::Point>> contours;
         std::vector<cv::Vec4i> hierarchy;
@@ -316,7 +317,7 @@ struct RuneDetector::Impl {
         color_filter(roi, frame.img_frame.format, contours, used_flags, enemy_color);
         result.pans = get_rune_pans(contours, hierarchy, used_flags);
         result.r_tags = get_rune_rs(contours, hierarchy, used_flags);
-        result.add_offset(frame.expanded.tl());
+        result.add_offset(focus.tl());
 
         return result;
     }
@@ -327,7 +328,8 @@ RuneDetector::RuneDetector(const YAML::Node& config) {
 RuneDetector::~RuneDetector() noexcept {
     _impl.reset();
 }
-RuneDetection RuneDetector::detect(const CommonFrame& frame, EnemyColor enemy_color) {
-    return _impl->detect(frame, enemy_color);
+RuneDetection
+RuneDetector::detect(const CommonFrame& frame, const cv::Rect& focus, EnemyColor enemy_color) {
+    return _impl->detect(frame, focus, enemy_color);
 }
 } // namespace awakening::auto_buff

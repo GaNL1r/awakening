@@ -320,5 +320,16 @@ inline ISO3 solve_pnp(
     pose.translation() = t_eigen;
     return pose;
 }
+template<class Mat>
+inline void
+fill_constant_accel_noise(Mat& q, int pos_idx, int vel_idx, double noise, double dt) noexcept {
+    const double dt2 = dt * dt;
+    const double dt3 = dt2 * dt;
+    const double dt4 = dt2 * dt2;
 
+    q(pos_idx, pos_idx) = dt4 * 0.25 * noise;
+    q(pos_idx, vel_idx) = dt3 * 0.5 * noise;
+    q(vel_idx, pos_idx) = q(pos_idx, vel_idx);
+    q(vel_idx, vel_idx) = dt2 * noise;
+}
 } // namespace awakening::utils

@@ -265,8 +265,7 @@ int main(int argc, char** argv) {
             .img_frame = std::move(f),
             .id = current_id++,
             .frame_id = std::to_underlying(SentryFrame::CAMERA_CV),
-            .expanded =
-                cv::Rect2f(0, 0, frame.img_frame.src_img.cols, frame.img_frame.src_img.rows),
+
         };
 
         return std::make_tuple(std::optional<CommonFrameIo::second_type>(std::move(frame)));
@@ -384,9 +383,11 @@ int main(int argc, char** argv) {
             detector_sem =
                 std::make_unique<std::counting_semaphore<>>(config["max_infer_num"].as<int>());
         }
-        std::optional<cv::Rect2f> detect_light = std::nullopt;
+        std::optional<cv::Rect> detect_light = std::nullopt;
         auto target = armor_target.read();
-        if (target.check()) {
+        cv::Rect net_focus =
+            cv::Rect(0, 0, frame.img_frame.src_img.cols, frame.img_frame.src_img.rows);
+        if (target.need_focus()) {
             auto camera_cv_in_old = tf->pose_a_in_b(
                 SentryFrame(frame.frame_id),
                 SentryFrame(target.get_target_state().frame_id),
@@ -395,16 +396,15 @@ int main(int argc, char** argv) {
             target.set_target_state([&](auto_aim::armor_point_motion_model::State& state) {
                 state.predict(frame.img_frame.timestamp, target.target_number);
             });
-            frame.expanded = target.get_net_focus_roi(
+            net_focus = target.get_net_focus_roi(
                 frame.img_frame.timestamp,
                 camera_cv_in_old,
                 camera_info,
                 frame.img_frame.src_img.size(),
                 armor_detector.get_net_wh_ratio()
             );
-
             if (target.need_detect_lights()) {
-                detect_light = target.expanded(
+                detect_light = target.expanded( // 送给传统越小越好
                     frame.img_frame.timestamp,
                     camera_cv_in_old,
                     camera_info,
@@ -415,12 +415,10 @@ int main(int argc, char** argv) {
                 detect_light->width *= 1.6;
                 detect_light->height *= 1.6;
                 detect_light.value() &=
-                    cv::Rect2f(0, 0, frame.img_frame.src_img.cols, frame.img_frame.src_img.rows);
-                if (detect_light->area() > frame.expanded.area()) {
-                    detect_light = frame.expanded;
-                }
+                    cv::Rect(0, 0, frame.img_frame.src_img.cols, frame.img_frame.src_img.rows);
             }
         }
+
         auto_aim::Armors armors { .timestamp = frame.img_frame.timestamp,
                                   .id = frame.id,
                                   .frame_id = frame.frame_id };
@@ -428,7 +426,7 @@ int main(int argc, char** argv) {
             bool got = detector_sem->try_acquire();
             utils::SemaphoreGuard guard(*detector_sem, got);
             if (got) {
-                auto [ls, as] = armor_detector.detect(frame, detect_light);
+                auto [ls, as] = armor_detector.detect(frame, net_focus, detect_light);
                 armors.armors = as;
                 armors.lights = ls;
                 log_ctx.detect_count++;
@@ -437,7 +435,7 @@ int main(int argc, char** argv) {
         armors_queue.enqueue(armors);
         auto batch_armors = armors_queue.dequeue_batch();
         if (auto_aim_dbg && is_web_running()) {
-            auto_aim_dbg->expanded.set(frame.expanded);
+            auto_aim_dbg->expanded.set(net_focus);
             auto_aim_dbg->img_frame.set(std::move(frame.img_frame.clone()));
         }
 
@@ -474,7 +472,8 @@ int main(int argc, char** argv) {
                 armor_tracker.track(armors, camera_info, camera_cv_in_odom, armors.frame_id);
             auto_aim_fsm_controller.update(
                 __armor_target.get_target_state().vyaw(),
-                __armor_target.jumped
+                __armor_target.jumped,
+                __armor_target.get_target_state().timestamp
             );
             auto target_in_big_yaw = __armor_target;
             auto old_in_big_yaw = tf->pose_a_in_b(
@@ -548,11 +547,24 @@ int main(int argc, char** argv) {
             .appear = false,
         };
         if (target.check()) {
+            auto shoot_in_gimbal_odom =
+                tf->pose_a_in_b(SentryFrame::SHOOT, SentryFrame::GIMBAL_ODOM, Clock::now());
+            auto gimbal_in_gimbal_odom =
+                tf->pose_a_in_b(SentryFrame::GIMBAL, SentryFrame::GIMBAL_ODOM, Clock::now());
+            cmd = very_aimer.very_aim(
+                target,
+                bullet_speed,
+                auto_aim_fsm_controller.get_state(),
+                shoot_in_gimbal_odom,
+                gimbal_in_gimbal_odom
+            );
             cmd = very_aimer.very_aim(
                 target,
                 (!is_omni ? bullet_speed : 100.0),
                 (!is_omni ? auto_aim_fsm_controller.get_state()
-                          : auto_aim::AutoAimFsm::AIM_SINGLE_ARMOR)
+                          : auto_aim::AutoAimFsm::AIM_SINGLE_ARMOR),
+                shoot_in_gimbal_odom,
+                gimbal_in_gimbal_odom
             );
         }
 
@@ -594,7 +606,6 @@ int main(int argc, char** argv) {
         }
 
         CommonFrame common_frame;
-        common_frame.expanded = cv::Rect2f(0, 0, img_frame.src_img.cols, img_frame.src_img.rows);
         common_frame.img_frame = std::move(img_frame);
         common_frame.frame_id = one.cv_frame_id;
         common_frame.id = one.order_id++;
@@ -614,8 +625,10 @@ int main(int argc, char** argv) {
                     bool got = detector_sem->try_acquire();
                     utils::SemaphoreGuard guard(*detector_sem, got);
                     if (got) {
-                        auto [tmp_lights, tmp_armors] =
-                            armor_omni.detector_->detect(f, std::nullopt);
+                        auto [tmp_lights, tmp_armors] = armor_omni.detector_->detect(
+                            f,
+                            cv::Rect(0, 0, f.img_frame.src_img.cols, f.img_frame.src_img.rows)
+                        );
                         armors.lights = tmp_lights;
                         armors.armors = tmp_armors;
                         for (auto& a: tmp_armors) {

@@ -311,8 +311,6 @@ int main(int argc, char** argv) {
             .img_frame = std::move(f),
             .id = current_id++,
             .frame_id = std::to_underlying(SimpleFrame::CAMERA_CV),
-            .expanded =
-                cv::Rect2f(0, 0, frame.img_frame.src_img.cols, frame.img_frame.src_img.rows),
         };
 
         return std::make_tuple(std::optional<CommonFrameIo::second_type>(std::move(frame)));
@@ -415,9 +413,11 @@ int main(int argc, char** argv) {
             detector_sem =
                 std::make_unique<std::counting_semaphore<>>(config["max_infer_num"].as<int>());
         }
-        std::optional<cv::Rect2f> detect_light = std::nullopt;
+        std::optional<cv::Rect> detect_light = std::nullopt;
         auto target = armor_target.read();
-        if (target.check()) {
+        cv::Rect net_focus =
+            cv::Rect(0, 0, frame.img_frame.src_img.cols, frame.img_frame.src_img.rows);
+        if (target.need_focus()) {
             auto camera_cv_in_old = tf->pose_a_in_b(
                 SimpleFrame(frame.frame_id),
                 SimpleFrame(target.get_target_state().frame_id),
@@ -426,7 +426,7 @@ int main(int argc, char** argv) {
             target.set_target_state([&](auto_aim::armor_point_motion_model::State& state) {
                 state.predict(frame.img_frame.timestamp, target.target_number);
             });
-            frame.expanded = target.get_net_focus_roi(
+            net_focus = target.get_net_focus_roi(
                 frame.img_frame.timestamp,
                 camera_cv_in_old,
                 camera_info,
@@ -445,10 +445,7 @@ int main(int argc, char** argv) {
                 detect_light->width *= 1.6;
                 detect_light->height *= 1.6;
                 detect_light.value() &=
-                    cv::Rect2f(0, 0, frame.img_frame.src_img.cols, frame.img_frame.src_img.rows);
-                if (detect_light->area() > frame.expanded.area()) {
-                    detect_light = frame.expanded;
-                }
+                    cv::Rect(0, 0, frame.img_frame.src_img.cols, frame.img_frame.src_img.rows);
             }
         }
 
@@ -460,7 +457,7 @@ int main(int argc, char** argv) {
             utils::SemaphoreGuard guard(*detector_sem, got); //并发控制
             if (got) {
                 auto start = Clock::now();
-                auto [ls, as] = armor_detector.detect(frame, detect_light);
+                auto [ls, as] = armor_detector.detect(frame, net_focus, detect_light);
                 armors.armors = as;
                 armors.lights = ls;
                 log_ctx.detect_count++;
@@ -469,7 +466,7 @@ int main(int argc, char** argv) {
         armors_queue.enqueue(armors);
         auto batch_armors = armors_queue.dequeue_batch(); // 根据id有序输出
         if (auto_aim_dbg && is_web_running()) {
-            auto_aim_dbg->expanded.set(frame.expanded);
+            auto_aim_dbg->expanded.set(net_focus);
             auto_aim_dbg->img_frame.set(std::move(frame.img_frame));
         }
 
@@ -503,7 +500,8 @@ int main(int argc, char** argv) {
                 armor_tracker.track(armors, camera_info, camera_cv_in_odom, armors.frame_id);
             auto_aim_fsm_controller.update(
                 __armor_target.get_target_state().vyaw(),
-                __armor_target.jumped
+                __armor_target.jumped,
+                __armor_target.get_target_state().timestamp
             );
             armor_target.write(__armor_target);
             auto latency_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -552,7 +550,17 @@ int main(int argc, char** argv) {
         };
         if (target.check()) {
             very_aimer.set_operator_offset(operator_offset);
-            cmd = very_aimer.very_aim(target, bullet_speed, auto_aim_fsm_controller.get_state());
+            auto shoot_in_gimbal_odom =
+                tf->pose_a_in_b(SimpleFrame::SHOOT, SimpleFrame::GIMBAL_ODOM, Clock::now());
+            auto gimbal_in_gimbal_odom =
+                tf->pose_a_in_b(SimpleFrame::GIMBAL, SimpleFrame::GIMBAL_ODOM, Clock::now());
+            cmd = very_aimer.very_aim(
+                target,
+                bullet_speed,
+                auto_aim_fsm_controller.get_state(),
+                shoot_in_gimbal_odom,
+                gimbal_in_gimbal_odom
+            );
         }
 
         if (serial) {
@@ -578,11 +586,11 @@ int main(int argc, char** argv) {
                 -cmd.pitch,
                 cmd.appear ? 1.0 : -1.0,
                 (std::abs(
-                     angles::shortest_angular_distance_degrees(angles::to_degrees(rpy[2]), cmd.yaw)
+                     angles::shortest_angular_distance_degrees(angles::to_degrees(rpy[2]), cmd.target_yaw)
                  ) < cmd.enable_yaw_diff
                  && std::abs(angles::shortest_angular_distance_degrees(
                         angles::to_degrees(-rpy[1]),
-                        cmd.pitch
+                        cmd.target_pitch
                     ))
                      < cmd.enable_pitch_diff)
             );

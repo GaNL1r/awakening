@@ -13,6 +13,7 @@
 #include <cstdint>
 #include <memory>
 #include <mutex>
+#include <opencv2/core/types.hpp>
 #include <opencv2/highgui.hpp>
 #include <optional>
 #include <string>
@@ -281,8 +282,6 @@ int main(int argc, char** argv) {
             .img_frame = std::move(f),
             .id = current_id++,
             .frame_id = std::to_underlying(SimpleFrame::CAMERA_CV),
-            .expanded =
-                cv::Rect2f(0, 0, frame.img_frame.src_img.cols, frame.img_frame.src_img.rows),
         };
 
         return std::make_tuple(std::optional<CommonFrameIo::second_type>(std::move(frame)));
@@ -385,7 +384,11 @@ int main(int argc, char** argv) {
             detector_sem =
                 std::make_unique<std::counting_semaphore<>>(config["max_infer_num"].as<int>());
         }
-        auto rune_detection = rune_detector.detect(frame, enemy_color);
+        auto rune_detection = rune_detector.detect(
+            frame,
+            cv::Rect(0, 0, frame.img_frame.src_img.cols, frame.img_frame.src_img.rows),
+            enemy_color
+        );
         auto& img = frame.img_frame.src_img;
         rune_detection.draw(img);
         cv::imshow("Rune Detection", img);

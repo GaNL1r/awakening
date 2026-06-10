@@ -9,7 +9,7 @@ struct CommonFrame {
     ImageFrame img_frame;
     int id;
     int frame_id;
-    cv::Rect2f expanded;
+    // cv::Rect2f expanded;
 };
 enum class EnemyColor : bool {
     RED = 0,

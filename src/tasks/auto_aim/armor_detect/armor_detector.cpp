@@ -499,7 +499,7 @@ struct ArmorDetector::Impl {
         light.corrected->second = find_corner(-1, light.bottom);
     }
     std::vector<Light>
-    detect_lights(const cv::Mat& src, PixelFormat format, cv::Rect2f bbox) const noexcept {
+    detect_lights(const cv::Mat& src, PixelFormat format, cv::Rect bbox) const noexcept {
         const auto detect_roi = src(bbox);
         cv::Mat gray, bin;
         cv::cvtColor(detect_roi, gray, cv::COLOR_BGR2GRAY);
@@ -546,10 +546,13 @@ struct ArmorDetector::Impl {
         }
         return lights;
     }
-    std::tuple<std::vector<Light>, std::vector<Armor>>
-    detect_net(const CommonFrame& frame, const std::optional<cv::Rect2f>& detect_light) const {
+    std::tuple<std::vector<Light>, std::vector<Armor>> detect_net(
+        const CommonFrame& frame,
+        const cv::Rect& net_focus,
+        const std::optional<cv::Rect>& detect_light
+    ) const {
         const auto& src_img = frame.img_frame.src_img;
-        const auto roi = src_img(frame.expanded);
+        const auto roi = src_img(net_focus);
         utils::NetDetectorBase::OutPut net_output;
         std::vector<Light> lights;
         std::vector<Armor> result;
@@ -575,7 +578,7 @@ struct ArmorDetector::Impl {
                 }
                 armor.tidy();
                 armor.transform(net_output.transform_matrix);
-                armor.add_offset(frame.expanded.tl());
+                armor.add_offset(net_focus.tl());
             }
         }
 
@@ -597,9 +600,11 @@ struct ArmorDetector::Impl {
     }
 
     std::tuple<std::vector<Light>, std::vector<Armor>>
-    detect_cv(const CommonFrame& frame, const std::optional<cv::Rect2f>& detect_light) const {
+    detect_cv(const CommonFrame& frame, const std::optional<cv::Rect>& detect_light) const {
         const auto& src_img = frame.img_frame.src_img;
-        auto bbox = detect_light ? detect_light.value() : frame.expanded;
+        auto bbox = detect_light
+            ? detect_light.value()
+            : cv::Rect(0, 0, frame.img_frame.src_img.cols, frame.img_frame.src_img.rows);
 
         std::vector<Light> lights;
         std::vector<Armor> result;
@@ -646,10 +651,13 @@ struct ArmorDetector::Impl {
         }
         return { std::move(lights), std::move(result) };
     }
-    std::tuple<std::vector<Light>, std::vector<Armor>>
-    detect(const CommonFrame& frame, const std::optional<cv::Rect2f>& detect_light) const {
+    std::tuple<std::vector<Light>, std::vector<Armor>> detect(
+        const CommonFrame& frame,
+        const cv::Rect& net_focus,
+        const std::optional<cv::Rect>& detect_light = std::nullopt
+    ) const {
         if (net_detector_) {
-            return detect_net(frame, detect_light);
+            return detect_net(frame, net_focus, detect_light);
         } else {
             return detect_cv(frame, detect_light);
         }
@@ -670,9 +678,12 @@ ArmorDetector::ArmorDetector(const YAML::Node& config) {
 ArmorDetector::~ArmorDetector() noexcept {
     _impl.reset();
 }
-std::tuple<std::vector<Light>, std::vector<Armor>>
-ArmorDetector::detect(const CommonFrame& frame, const std::optional<cv::Rect2f>& detect_light) {
-    return _impl->detect(frame, detect_light);
+std::tuple<std::vector<Light>, std::vector<Armor>> ArmorDetector::detect(
+    const CommonFrame& frame,
+    const cv::Rect& net_focus,
+    const std::optional<cv::Rect>& detect_light
+) {
+    return _impl->detect(frame, net_focus, detect_light);
 }
 double ArmorDetector::get_net_wh_ratio() const noexcept {
     return _impl->get_net_wh_ratio();

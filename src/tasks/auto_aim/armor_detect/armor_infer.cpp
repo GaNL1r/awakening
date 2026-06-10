@@ -1,4 +1,5 @@
 #include "armor_infer.hpp"
+#include "tasks/auto_aim/type.hpp"
 #include <cstddef>
 #include <memory>
 
@@ -247,7 +248,7 @@ struct ArmorInfer::Impl {
             case Mode::TUP:
                 return post_processTUP_impl(output_buffer);
             case Mode::RP:
-                return {};
+                return postProcessRP_impl(output_buffer);
             case Mode::AT1:
                 return post_processAT_impl(output_buffer);
             case Mode::AT2:
@@ -333,6 +334,55 @@ struct ArmorInfer::Impl {
         }
         return topk_and_nms(out_objs);
     }
+    std::vector<Armor> postProcessRP_impl(const cv::Mat& out) const {
+        std::vector<Armor> out_objs;
+        const int rows = out.rows;
+        const int color_offset = 9;
+        const int num_colors = ModelTraits<Mode::RP>::NUM_COLORS;
+        const int num_classes = ModelTraits<Mode::RP>::NUM_CLASSES;
+        using I = ArmorKeyPointsIndex;
+        for (int r = 0; r < rows; ++r) {
+            float conf_raw = out.at<float>(r, 8);
+            const float confidence = static_cast<float>(sigmoid(conf_raw));
+            if (confidence < params_.conf_threshold)
+                continue;
+            cv::Mat color_scores = out.row(r).colRange(color_offset, color_offset + num_colors);
+            cv::Mat class_scores = out.row(r).colRange(
+                color_offset + num_colors,
+                color_offset + num_colors + num_classes
+            );
+
+            double max_color_score, max_class_score;
+            cv::Point color_id, class_id;
+            cv::minMaxLoc(color_scores, nullptr, &max_color_score, nullptr, &color_id);
+            cv::minMaxLoc(class_scores, nullptr, &max_class_score, nullptr, &class_id);
+            const float x1 = out.at<float>(r, 0);
+            const float y1 = out.at<float>(r, 1);
+            const float x2 = out.at<float>(r, 2);
+            const float y2 = out.at<float>(r, 3);
+            const float x3 = out.at<float>(r, 4);
+            const float y3 = out.at<float>(r, 5);
+            const float x4 = out.at<float>(r, 6);
+            const float y4 = out.at<float>(r, 7);
+            Armor obj;
+            auto& net = obj.net;
+            net = Armor::NetCtx();
+            net->color = ModelTraits<Mode::RP>::COLORS[color_id.x];
+
+            net->number = ModelTraits<Mode::RP>::CLASSES[class_id.x];
+
+            auto& key_points = net->key_points;
+            key_points.points[std::to_underlying(I::LEFT_TOP)] = cv::Point2f(x1, y1);
+            key_points.points[std::to_underlying(I::LEFT_BOTTOM)] = cv::Point2f(x2, y2);
+            key_points.points[std::to_underlying(I::RIGHT_BOTTOM)] = cv::Point2f(x3, y3);
+            key_points.points[std::to_underlying(I::RIGHT_TOP)] = cv::Point2f(x4, y4);
+            net->confidence = confidence;
+
+            out_objs.push_back(std::move(obj));
+        }
+
+        return topk_and_nms(out_objs);
+    }
     std::vector<Armor> post_processAT_impl(const cv::Mat& out) const {
         std::vector<Armor> out_objs;
 
@@ -385,11 +435,28 @@ struct ArmorInfer::Impl {
                 return cv::Point2f(kx, ky);
             };
             auto& key_points = net->key_points;
-            key_points.points[std::to_underlying(I::LEFT_TOP)] = getKeyPoints(0);
-            key_points.points[std::to_underlying(I::LEFT_BOTTOM)] = getKeyPoints(1);
-            key_points.points[std::to_underlying(I::RIGHT_BOTTOM)] = getKeyPoints(2);
-            key_points.points[std::to_underlying(I::RIGHT_TOP)] = getKeyPoints(3);
+            // key_points.points[std::to_underlying(I::LEFT_TOP)] = getKeyPoints(0);
+            // key_points.points[std::to_underlying(I::LEFT_BOTTOM)] = getKeyPoints(1);
+            // key_points.points[std::to_underlying(I::RIGHT_BOTTOM)] = getKeyPoints(2);
+            // key_points.points[std::to_underlying(I::RIGHT_TOP)] = getKeyPoints(3);
+            std::vector<cv::Point2f> pts;
+            for (int k = 0; k < nkpt; ++k)
+                pts.push_back(getKeyPoints(k));
+            std::sort(pts.begin(), pts.end(), [](const cv::Point2f& a, const cv::Point2f& b) {
+                return a.y < b.y;
+            });
+            std::vector<cv::Point2f> top_pts = std::vector<cv::Point2f> { pts[0], pts[1] };
+            std::vector<cv::Point2f> bottom_pts = std::vector<cv::Point2f> { pts[2], pts[3] };
 
+            if (top_pts[0].x > top_pts[1].x)
+                std::swap(top_pts[0], top_pts[1]);
+            if (bottom_pts[0].x > bottom_pts[1].x)
+                std::swap(bottom_pts[0], bottom_pts[1]);
+
+            key_points.points[std::to_underlying(I::LEFT_TOP)] = top_pts[0];
+            key_points.points[std::to_underlying(I::RIGHT_TOP)] = top_pts[1];
+            key_points.points[std::to_underlying(I::LEFT_BOTTOM)] = bottom_pts[0];
+            key_points.points[std::to_underlying(I::RIGHT_BOTTOM)] = bottom_pts[1];
             out_objs.emplace_back(std::move(obj));
         }
 

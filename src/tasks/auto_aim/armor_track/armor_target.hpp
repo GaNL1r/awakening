@@ -95,14 +95,14 @@ public:
         const CameraInfo& camera_info,
         const ISO3& camera_cv_in_odom
     );
-    [[nodiscard]] cv::Rect2f get_net_focus_roi(
+    [[nodiscard]] cv::Rect get_net_focus_roi(
         const TimePoint& timestamp,
         const ISO3& camera_cv_in_odom,
         const CameraInfo& camera_info,
         const cv::Size& image_size,
         double target_wh_ratio = 1.0
     ) const noexcept;
-    [[nodiscard]] cv::Rect2f expanded(
+    [[nodiscard]] cv::Rect expanded(
         const TimePoint& timestamp,
         const ISO3& camera_cv_in_odom,
         const CameraInfo& camera_info,
@@ -186,6 +186,11 @@ public:
             && std::chrono::duration<double>(Clock::now() - last_update).count()
                 < cfg.lost_time_thres;
         return v;
+    }
+    [[nodiscard]] inline bool need_focus() const noexcept {
+        return is_inited
+            && std::chrono::duration<double>(Clock::now() - last_update).count()
+            < cfg.lost_time_thres;
     }
     [[nodiscard]] inline bool need_detect_lights() const noexcept {
         return check() && cfg.enable_lights_measure;

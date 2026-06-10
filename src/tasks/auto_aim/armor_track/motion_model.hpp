@@ -70,13 +70,13 @@ struct Predict {
     inline void operator()(const T x0[X_N], T x1[X_N]) const {
         std::copy(x0, x0 + X_N, x1);
 
-        if (armor_number != auto_aim::ArmorClass::BASE) {
+        // if (armor_number != auto_aim::ArmorClass::BASE) {
             x1[idx::CX] += x0[idx::VCX] * T(dt);
             x1[idx::CY] += x0[idx::VCY] * T(dt);
             x1[idx::CZ] += x0[idx::VCZ] * T(dt);
-        } else {
-            x1[idx::VCX] = x1[idx::VCY] = x1[idx::VCZ] = T(0);
-        }
+        // } else {
+        //     x1[idx::VCX] = x1[idx::VCY] = x1[idx::VCZ] = T(0);
+        // }
 
         if (armor_number != auto_aim::ArmorClass::BASE) {
             x1[idx::YAW] += x0[idx::VYAW] * T(dt);

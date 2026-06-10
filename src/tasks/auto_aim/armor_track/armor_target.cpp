@@ -7,11 +7,11 @@
 #include <array>
 #include <cmath>
 #include <cstdlib>
+#include <limits>
 #include <opencv2/calib3d.hpp>
 #include <opencv2/core.hpp>
 #include <opencv2/core/mat.hpp>
 #include <opencv2/core/types.hpp>
-#include <limits>
 #include <optional>
 #include <stdexcept>
 #include <tuple>
@@ -19,31 +19,6 @@
 #include <vector>
 namespace awakening::auto_aim {
 using namespace armor_point_motion_model;
-
-namespace {
-constexpr double MAX_COST = 1e9;
-
-[[nodiscard]] cv::Rect2f full_image_rect(const cv::Size& image_size) noexcept {
-    return cv::Rect2f(0, 0, image_size.width, image_size.height);
-}
-
-void fill_constant_accel_noise(
-    Eigen::Matrix<double, X_N, X_N>& q,
-    int pos_idx,
-    int vel_idx,
-    double noise,
-    double dt
-) noexcept {
-    const double dt2 = dt * dt;
-    const double dt3 = dt2 * dt;
-    const double dt4 = dt2 * dt2;
-
-    q(pos_idx, pos_idx) = dt4 * 0.25 * noise;
-    q(pos_idx, vel_idx) = dt3 * 0.5 * noise;
-    q(vel_idx, pos_idx) = q(pos_idx, vel_idx);
-    q(vel_idx, vel_idx) = dt2 * noise;
-}
-} // namespace
 
 void ArmorTarget::reset(
     Armor& a,
@@ -292,10 +267,10 @@ Eigen::Matrix<double, X_N, X_N> ArmorTarget::process_noise(double dt) const noex
     }
 
     q.setZero();
-    fill_constant_accel_noise(q, idx::CX, idx::VCX, q_xyz.x(), dt);
-    fill_constant_accel_noise(q, idx::CY, idx::VCY, q_xyz.y(), dt);
-    fill_constant_accel_noise(q, idx::CZ, idx::VCZ, q_xyz.z(), dt);
-    fill_constant_accel_noise(q, idx::YAW, idx::VYAW, q_yaw, dt);
+    utils::fill_constant_accel_noise(q, idx::CX, idx::VCX, q_xyz.x(), dt);
+    utils::fill_constant_accel_noise(q, idx::CY, idx::VCY, q_xyz.y(), dt);
+    utils::fill_constant_accel_noise(q, idx::CZ, idx::VCZ, q_xyz.z(), dt);
+    utils::fill_constant_accel_noise(q, idx::YAW, idx::VYAW, q_yaw, dt);
     q(idx::R, idx::R) = cfg.q_r;
     q(idx::L, idx::L) = q_l;
     q(idx::H, idx::H) = q_h;
@@ -400,6 +375,7 @@ std::vector<std::pair<int, Armor>> ArmorTarget::match_armor(
     const CameraInfo& camera_info,
     const ISO3& camera_cv_in_odom
 ) const noexcept {
+    constexpr double MAX_COST = 1e9;
     std::vector<std::pair<int, Armor>> result;
     const int n_obs = static_cast<int>(armors.size());
     const int armors_num = armor_num();
@@ -494,6 +470,7 @@ std::vector<std::tuple<int, bool, Light>> ArmorTarget::match_light(
     const CameraInfo& camera_info,
     const ISO3& camera_cv_in_odom
 ) const noexcept {
+    constexpr double MAX_COST = 1e9;
     //可见灯条逻辑判断不优雅，不过这比较个稳定可观
     std::vector<std::tuple<int, bool, Light>> result;
 
@@ -604,32 +581,30 @@ std::vector<std::tuple<int, bool, Light>> ArmorTarget::match_light(
 
     return result;
 }
-[[nodiscard]] cv::Rect2f ArmorTarget::get_net_focus_roi(
+[[nodiscard]] cv::Rect ArmorTarget::get_net_focus_roi(
     const TimePoint& timestamp,
     const ISO3& camera_cv_in_odom,
     const CameraInfo& camera_info,
     const cv::Size& image_size,
     double target_wh_ratio
 ) const noexcept {
-    const double dt = std::chrono::duration<double>(timestamp - last_update).count();
-
-    if (!is_inited || dt > cfg.lost_time_thres) {
-        return full_image_rect(image_size);
+    if (!need_focus()) {
+        return cv::Rect(0, 0, image_size.width, image_size.height);
     }
 
-    cv::Rect2f rect = expanded(timestamp, camera_cv_in_odom, camera_info, image_size);
+    cv::Rect rect = expanded(timestamp, camera_cv_in_odom, camera_info, image_size);
     constexpr double expansion_ratio = 0.2;
     rect.x -= rect.width * expansion_ratio;
     rect.y -= rect.height * expansion_ratio;
     rect.width *= (1.0 + 2.0 * expansion_ratio);
     rect.height *= (1.0 + 2.0 * expansion_ratio);
-    const cv::Rect2f img_rect = full_image_rect(image_size);
+    const cv::Rect img_rect = cv::Rect(0, 0, image_size.width, image_size.height);
 
     if ((rect & img_rect).area() <= 0) {
-        return full_image_rect(image_size);
+        return img_rect;
     }
 
-    cv::Rect2f expanded_rect = rect & img_rect;
+    cv::Rect expanded_rect = rect & img_rect;
 
     const double rect_w = std::max<double>(expanded_rect.width, 1.0);
     const double rect_h = std::max<double>(expanded_rect.height, 1.0);
@@ -645,18 +620,19 @@ std::vector<std::tuple<int, bool, Light>> ArmorTarget::match_light(
     }
     const double cx = expanded_rect.x + expanded_rect.width / 2.0;
     const double cy = expanded_rect.y + expanded_rect.height / 2.0;
-    cv::Rect2f ratio_rect(
-        static_cast<float>(cx - target_w / 2.0),
-        static_cast<float>(cy - target_h / 2.0),
-        static_cast<float>(target_w),
-        static_cast<float>(target_h)
+    cv::Rect ratio_rect(
+        static_cast<int>(cx - target_w / 2.0),
+        static_cast<int>(cy - target_h / 2.0),
+        static_cast<int>(target_w),
+        static_cast<int>(target_h)
     );
-
     ratio_rect &= img_rect;
-
+    if ((rect & img_rect).area() <= 0) {
+        return img_rect;
+    }
     return ratio_rect;
 }
-[[nodiscard]] cv::Rect2f ArmorTarget::expanded(
+[[nodiscard]] cv::Rect ArmorTarget::expanded(
     const TimePoint& timestamp,
     const ISO3& camera_cv_in_odom,
     const CameraInfo& camera_info,
@@ -689,10 +665,10 @@ std::vector<std::tuple<int, bool, Light>> ArmorTarget::match_light(
             pts.push_back(cv::Point2f(z_pred[idx::BOTTOM_X], z_pred[idx::BOTTOM_Y]));
         }
     }
-    cv::Rect2f rect = cv::boundingRect(pts);
-    const cv::Rect2f img_rect = full_image_rect(image_size);
+    cv::Rect rect = cv::boundingRect(pts);
+    const cv::Rect img_rect = cv::Rect(0, 0, image_size.width, image_size.height);
     if ((rect & img_rect).area() <= 0) {
-        return full_image_rect(image_size);
+        return img_rect;
     }
     return rect;
 }

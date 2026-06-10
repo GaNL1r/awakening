@@ -114,15 +114,15 @@ struct Detector::Impl {
         }
         return result;
     }
-    std::vector<Armor> detect_armors(const CommonFrame& frame) {
+    std::vector<Armor> detect_armors(const CommonFrame& frame, const cv::Rect& focus) {
         std::vector<Armor> armors;
         if (frame.img_frame.src_img.empty()) {
             return armors;
         }
         const auto& src_img = frame.img_frame.src_img;
 
-        cv::Rect2f src_rect(0, 0, src_img.cols, src_img.rows);
-        cv::Rect2f safe_expanded = frame.expanded & src_rect;
+        cv::Rect src_rect(0, 0, src_img.cols, src_img.rows);
+        cv::Rect safe_expanded = focus & src_rect;
         if (safe_expanded.area() <= 0) {
             return armors;
         }
@@ -138,12 +138,12 @@ struct Detector::Impl {
                 params_.armor_color_diff_threshold,
                 frame.img_frame.format
             );
-            armor.bbox += frame.expanded.tl();
+            armor.bbox += cv::Point2f(focus.x, focus.y);
         }
         // Implementation for detecting armors
         return armors;
     }
-    std::vector<Car> detect(const CommonFrame& frame) {
+    std::vector<Car> detect(const CommonFrame& frame, const cv::Rect& focus) {
         std::vector<Car> cars;
         if (frame.img_frame.src_img.empty()) {
             return cars;
@@ -151,8 +151,8 @@ struct Detector::Impl {
 
         const auto& src_img = frame.img_frame.src_img;
 
-        cv::Rect2f src_rect(0, 0, src_img.cols, src_img.rows);
-        cv::Rect2f safe_expanded = frame.expanded & src_rect;
+        cv::Rect src_rect(0, 0, src_img.cols, src_img.rows);
+        cv::Rect safe_expanded = focus & src_rect;
         if (safe_expanded.area() <= 0) {
             return cars;
         }
@@ -258,9 +258,9 @@ struct Detector::Impl {
         }
 
         for (auto& car: cars) {
-            car.bbox += frame.expanded.tl();
+            car.bbox += cv::Point2f(focus.x, focus.y);
             for (auto& armor: car.armors) {
-                armor.bbox += frame.expanded.tl();
+                armor.bbox += cv::Point2f(focus.x, focus.y);
             }
             car.tidy();
         }
@@ -276,10 +276,10 @@ Detector::Detector(const YAML::Node& config) {
 Detector::~Detector() noexcept {
     _impl.reset();
 }
-std::vector<Car> Detector::detect(const CommonFrame& frame) {
-    return _impl->detect(frame);
+std::vector<Car> Detector::detect(const CommonFrame& frame, const cv::Rect& focus) {
+    return _impl->detect(frame, focus);
 }
-std::vector<Armor> Detector::detect_armors(const CommonFrame& frame) {
-    return _impl->detect_armors(frame);
+std::vector<Armor> Detector::detect_armors(const CommonFrame& frame, const cv::Rect& focus) {
+    return _impl->detect_armors(frame, focus);
 }
 } // namespace awakening::radar_detect

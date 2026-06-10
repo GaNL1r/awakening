@@ -1,5 +1,6 @@
 #include "armor_tracker.hpp"
 #include "angles.h"
+#include <algorithm>
 #include <array>
 #include <iostream>
 #include <mutex>
@@ -18,25 +19,14 @@ struct ArmorTracker::Impl {
         const ISO3& camera_cv_in_odom,
         int frame_id
     ) {
-        static TimePoint last_track = Clock::now();
         auto& cur = target_buf_[cur_target_idx_];
         auto& pre = target_buf_[pre_target_idx_];
-        double dt = std::chrono::duration<double>(armors.timestamp - last_track).count();
-        dt = std::clamp(dt, 1e-3, 0.1);
-        last_track = armors.timestamp;
-        lost_thres_ = std::abs(
-            static_cast<int>(
-                (cur.target_number == ArmorClass::OUTPOST) ? cfg_.lost_time_thres_outpost
-                                                           : cfg_.lost_time_thres
-            )
-            / dt
-        );
         auto process = [&](int idx) {
             auto& t = target_buf_[idx];
             bool found = (t.track_state.tracker_state == ArmorTarget::TrackState::LOST)
                 ? init_target(t, armors, frame_id, camera_info, camera_cv_in_odom)
                 : update_target(t, armors, camera_info, camera_cv_in_odom);
-            update_fsm(found, idx);
+            update_fsm(found, idx, armors.timestamp);
             if (found) {
                 found_count_++;
             }
@@ -136,8 +126,9 @@ struct ArmorTracker::Impl {
         );
         return updated > 0;
     }
-    void update_fsm(bool found, size_t i) noexcept {
-        auto& s = target_buf_[i].track_state;
+    void update_fsm(bool found, size_t i, const TimePoint& now) noexcept {
+        auto& target = target_buf_[i];
+        auto& s = target.track_state;
 
         switch (s.tracker_state) {
             case ArmorTarget::TrackState::DETECTING:
@@ -155,18 +146,15 @@ struct ArmorTracker::Impl {
             case ArmorTarget::TrackState::TRACKING:
                 if (!found) {
                     s.tracker_state = ArmorTarget::TrackState::TEMP_LOST;
-                    s.lost_count = 1;
                 }
                 return;
 
             case ArmorTarget::TrackState::TEMP_LOST:
                 if (found) {
-                    s.lost_count = 0;
                     s.tracker_state = ArmorTarget::TrackState::TRACKING;
                     return;
                 }
-                if (++s.lost_count > lost_thres_) {
-                    s.lost_count = 0;
+                if (lost_time(target, now) > lost_time_thres(target)) {
                     s.tracker_state = ArmorTarget::TrackState::LOST;
                 }
                 return;
@@ -178,11 +166,17 @@ struct ArmorTracker::Impl {
         if (found)
             ++found_count_;
     }
+    double lost_time(const ArmorTarget& target, const TimePoint& now) const noexcept {
+        return std::max(0.0, std::chrono::duration<double>(now - target.last_update).count());
+    }
+    double lost_time_thres(const ArmorTarget& target) const noexcept {
+        return (target.target_number == ArmorClass::OUTPOST) ? cfg_.lost_time_thres_outpost
+                                                             : cfg_.lost_time_thres;
+    }
     void set_sentry(bool is_sentry) {
         iam_sentry = is_sentry;
     }
 
-    int lost_thres_;
     int is_none_purple_count_ = 0;
     int found_count_ = 0;
 
