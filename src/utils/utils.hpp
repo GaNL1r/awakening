@@ -332,4 +332,16 @@ fill_constant_accel_noise(Mat& q, int pos_idx, int vel_idx, double noise, double
     q(vel_idx, pos_idx) = q(pos_idx, vel_idx);
     q(vel_idx, vel_idx) = dt2 * noise;
 }
+[[nodiscard]] inline double sigmoid(double x) noexcept {
+    return x >= 0 ? 1.0 / (1.0 + std::exp(-x)) : std::exp(x) / (1.0 + std::exp(x));
+}
+
+[[nodiscard]] inline float rect_ioU(const cv::Rect2f& a, const cv::Rect2f& b) noexcept {
+    const cv::Rect2f inter = a & b;
+    const float inter_area = inter.area();
+    const float union_area = a.area() + b.area() - inter_area;
+    if (union_area <= 0.f || std::isnan(union_area))
+        return 0.f;
+    return inter_area / union_area;
+}
 } // namespace awakening::utils

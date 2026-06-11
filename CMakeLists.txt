@@ -14,7 +14,6 @@ message(STATUS "--------------------CMAKE_BUILD_TYPE: ${CMAKE_BUILD_TYPE}-------
 option(BUILD_WITH_TRT      "Enable TensorRT backend"   ON)
 option(BUILD_WITH_OPENVINO "Enable OpenVINO backend"   ON)
 option(BUILD_SENTRY "Enable Sentry"   ON)
-option(BUILD_HERO "Enable Hero"   ON)
 option(BUILD_RADAR "Enable Radar"   ON)
 option(BUILD_RUNTIME_TESTS "Build runtime test executables by default" OFF)
 option(BUILD_WITH_PCH "Enable precompiled headers for C++ targets" ON)
@@ -113,48 +112,12 @@ awakening_enable_pch(${PROJECT_NAME}_auto_buff)
 target_link_libraries(${PROJECT_NAME}_auto_buff
      ${PROJECT_NAME}_utils
 )
-if(BUILD_HERO)
-find_package(PkgConfig REQUIRED)
-pkg_check_modules(GSTREAMER REQUIRED 
-  gstreamer-1.0>=1.4 
-  gstreamer-app-1.0>=1.4
+add_library(${PROJECT_NAME}_web SHARED src/tasks/base/web.cpp)
+awakening_enable_pch(${PROJECT_NAME}_web)
+target_link_libraries(${PROJECT_NAME}_web
+    ${PROJECT_NAME}_auto_aim
+    ${PROJECT_NAME}_auto_buff
 )
-pkg_check_modules(AVUTIL REQUIRED libavutil)
-pkg_check_modules(AVCODEC REQUIRED libavcodec)
-pkg_check_modules(SWSCALE REQUIRED libswscale)
-find_package(Protobuf REQUIRED)
-set(PROTO_DIR "${CMAKE_CURRENT_SOURCE_DIR}/src/tasks/eyes_of_blind/proto")
-set(PROTO_FILES "${PROTO_DIR}/video_stream.proto")
-set(PROTO_BINARY_DIR "${CMAKE_BINARY_DIR}/proto_generated")
-file(MAKE_DIRECTORY ${PROTO_BINARY_DIR})
-protobuf_generate_cpp(PROTO_SRCS PROTO_HDRS ${PROTO_FILES})
-include_directories(${CMAKE_BINARY_DIR})
-find_library(PAHO_MQTTPP_LIB NAMES paho-mqttpp3)
-find_library(PAHO_MQTT_C_LIB NAMES paho-mqtt3a paho-mqtt3c)
-if(PAHO_MQTTPP_LIB AND PAHO_MQTT_C_LIB)
-    message(STATUS "Paho MQTT C++ found: ${PAHO_MQTTPP_LIB}")
-else()
-    message(FATAL_ERROR "Paho MQTT C++ not found")
-endif()
-
-# file(GLOB_RECURSE BLIND_SOURCES  src/tasks/eyes_of_blind/*.cpp)
-# list(APPEND BLIND_SOURCES ${PROTO_SRCS})
-# add_library(${PROJECT_NAME}_eyes_of_blind SHARED ${BLIND_SOURCES})
-# target_include_directories(${PROJECT_NAME}_eyes_of_blind
-#     PUBLIC
-#     ${GSTREAMER_INCLUDE_DIRS}
-# )
-# target_link_libraries(${PROJECT_NAME}_eyes_of_blind
-#     ${PROJECT_NAME}_utils
-#     ${GSTREAMER_LIBRARIES}
-#     ${AVUTIL_LIBRARIES}
-#     ${AVCODEC_LIBRARIES}
-#     ${SWSCALE_LIBRARIES}
-#     ${Protobuf_LIBRARIES}
-#     ${PAHO_MQTTPP_LIB}
-#     ${PAHO_MQTT_C_LIB}
-# )
-endif()
 
 set(ROS2_PACKAGES
     ament_cmake
@@ -251,36 +214,21 @@ function(add_tool_executable exe_name src_file)
     target_link_libraries(${exe_name} ${PROJECT_NAME}_utils relink)
 endfunction()
 
-add_common_executable(auto_aim src/runtime/auto_aim.cpp)
-add_common_executable(auto_buff src/runtime/auto_buff.cpp)
+add_common_executable(standard src/runtime/standard.cpp)
 add_tool_executable(control_test src/runtime/test/control_test.cpp)
 add_tool_executable(delay_test src/runtime/test/delay_test.cpp)
-add_tool_executable(uvc_detect_test src/runtime/test/uvc_detect_test.cpp)
 
-target_link_libraries(auto_aim
+
+target_link_libraries(standard
     ${PROJECT_NAME}_auto_aim
-)
-target_link_libraries(auto_buff
     ${PROJECT_NAME}_auto_buff
+    ${PROJECT_NAME}_web
 )
 target_link_libraries(control_test
     ${PROJECT_NAME}_auto_aim
 )
-target_link_libraries(uvc_detect_test
-    ${PROJECT_NAME}_auto_aim
-)
-if(BUILD_HERO)
-# add_common_executable(blind_test src/runtime/test/blind_test.cpp)
-# target_link_libraries(blind_test
-#     ${PROJECT_NAME}_eyes_of_blind
-# )
-# add_common_executable(hero src/runtime/hero.cpp)
-# target_link_libraries(hero
-#     ${PROJECT_NAME}_eyes_of_blind
-#     ${PROJECT_NAME}_utils
-#     ${PROJECT_NAME}_auto_aim
-# )
-endif()
+
+
 if(BUILD_RADAR)
 add_tool_executable(radar_detect src/runtime/radar_detect.cpp)
 target_link_libraries(radar_detect
@@ -301,15 +249,10 @@ add_tool_executable(camera_to_ros2 src/runtime/test/camera_to_ros2.cpp)
 target_link_libraries(camera_to_ros2
     ${PROJECT_NAME}_rcl
 )
-target_link_libraries(auto_aim
+target_link_libraries(standard
     ${PROJECT_NAME}_rcl
 )
-if(BUILD_HERO)
 
-# target_link_libraries(hero
-#     ${PROJECT_NAME}_rcl
-# )
-endif()
 if(BUILD_SENTRY)
 add_tool_executable(nav src/runtime/nav.cpp)
 add_tool_executable(sentry src/runtime/sentry.cpp)

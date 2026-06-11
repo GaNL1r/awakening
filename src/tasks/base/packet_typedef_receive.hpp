@@ -44,30 +44,29 @@ struct ReceiveRobotData {
     }
 
     void update_log(uint32_t delay) {
-        using namespace web;
-        write_log("robo", [&](auto& j) {
-            j["delay"] = val(delay);
-            j["timestamp_pc"] = val(time_stamp_pc);
-            j["timestamp_receive_micro"] = val(time_stamp_receive_micro);
-            j["timestamp_send_micro"] = val(time_stamp_send_micro);
+        Web::write_log("robo", [&](auto& j) {
+            j["delay"] = Web::val(delay);
+            j["timestamp_pc"] = Web::val(time_stamp_pc);
+            j["timestamp_receive_micro"] = Web::val(time_stamp_receive_micro);
+            j["timestamp_send_micro"] = Web::val(time_stamp_send_micro);
 
-            j["yaw"] = val(yaw);
-            j["pitch"] = val(pitch);
-            j["roll"] = val(roll);
+            j["yaw"] = Web::val(yaw);
+            j["pitch"] = Web::val(pitch);
+            j["roll"] = Web::val(roll);
 
-            j["yaw_vel"] = val(yaw_vel);
-            j["pitch_vel"] = val(pitch_vel);
-            j["roll_vel"] = val(roll_vel);
+            j["yaw_vel"] = Web::val(yaw_vel);
+            j["pitch_vel"] = Web::val(pitch_vel);
+            j["roll_vel"] = Web::val(roll_vel);
 
-            j["v_x"] = val(v_x);
-            j["v_y"] = val(v_y);
-            j["v_z"] = val(v_z);
+            j["v_x"] = Web::val(v_x);
+            j["v_y"] = Web::val(v_y);
+            j["v_z"] = Web::val(v_z);
 
-            j["bullet_speed"] = val(bullet_speed);
+            j["bullet_speed"] = Web::val(bullet_speed);
             j["detect_color"] = (detect_color == 0 ? "Red" : "Blue");
-            j["bullet_count"] = val(bullet_count);
-            j["operator_yaw_offset"] = val(operator_yaw_offset);
-            j["operator_pitch_offset"] = val(operator_pitch_offset);
+            j["bullet_count"] = Web::val(bullet_count);
+            j["operator_yaw_offset"] = Web::val(operator_yaw_offset);
+            j["operator_pitch_offset"] = Web::val(operator_pitch_offset);
         });
     }
 
@@ -88,10 +87,9 @@ struct SentryJointState {
         return out;
     }
     void update_log() {
-        using namespace web;
-        write_log("joint", [&](auto& j) {
-            j["big_yaw_in_world"] = val(big_yaw_in_world);
-            j["turtle_state"] = val(turtle_state);
+        Web::write_log("joint", [&](auto& j) {
+            j["big_yaw_in_world"] = Web::val(big_yaw_in_world);
+            j["turtle_state"] = Web::val(turtle_state);
         });
     }
 } __attribute__((packed));
@@ -133,33 +131,32 @@ struct SentryRefereeReceive {
         return out;
     }
     void update_log() {
-        using namespace web;
-        write_log("referee", [&](auto& j) {
-            j["robo_id"] = val(robo_id);
-            j["current_hp"] = val(current_hp);
-            j["max_hp"] = val(max_hp);
-            j["allowance_bullets"] = val(allowance_bullets);
-            j["fort_allowance_bullets"] = val(fort_allowance_bullets);
-            j["current_pose"] = val(current_pose);
-            j["game_time"] = val(game_time);
-            j["ally_outpost_hp"] = val(ally_outpost_hp);
-            j["ally_base_hp"] = val(ally_base_hp);
-            j["ally_outpost_occ_state"] = val(ally_outpost_occ_state);
-            j["ally_fort_occ_state"] = val(ally_fort_occ_state);
-            j["enemy_outpost_active"] = val(enemy_outpost_active);
+        Web::write_log("referee", [&](auto& j) {
+            j["robo_id"] = Web::val(robo_id);
+            j["current_hp"] = Web::val(current_hp);
+            j["max_hp"] = Web::val(max_hp);
+            j["allowance_bullets"] = Web::val(allowance_bullets);
+            j["fort_allowance_bullets"] = Web::val(fort_allowance_bullets);
+            j["current_pose"] = Web::val(current_pose);
+            j["game_time"] = Web::val(game_time);
+            j["ally_outpost_hp"] = Web::val(ally_outpost_hp);
+            j["ally_base_hp"] = Web::val(ally_base_hp);
+            j["ally_outpost_occ_state"] = Web::val(ally_outpost_occ_state);
+            j["ally_fort_occ_state"] = Web::val(ally_fort_occ_state);
+            j["enemy_outpost_active"] = Web::val(enemy_outpost_active);
 
-            j["opponent_hero_position_x"] = val(opponent_hero_position_x);
-            j["opponent_hero_position_y"] = val(opponent_hero_position_y);
-            j["opponent_engineer_position_x"] = val(opponent_engineer_position_x);
-            j["opponent_engineer_position_y"] = val(opponent_engineer_position_y);
-            j["opponent_infantry_3_position_x"] = val(opponent_infantry_3_position_x);
-            j["opponent_infantry_3_position_y"] = val(opponent_infantry_3_position_y);
-            j["opponent_infantry_4_position_x"] = val(opponent_infantry_4_position_x);
-            j["opponent_infantry_4_position_y"] = val(opponent_infantry_4_position_y);
-            j["opponent_aerial_position_x"] = val(opponent_aerial_position_x);
-            j["opponent_aerial_position_y"] = val(opponent_aerial_position_y);
-            j["opponent_sentry_position_x"] = val(opponent_sentry_position_x);
-            j["opponent_sentry_position_y"] = val(opponent_sentry_position_y);
+            j["opponent_hero_position_x"] = Web::val(opponent_hero_position_x);
+            j["opponent_hero_position_y"] = Web::val(opponent_hero_position_y);
+            j["opponent_engineer_position_x"] = Web::val(opponent_engineer_position_x);
+            j["opponent_engineer_position_y"] = Web::val(opponent_engineer_position_y);
+            j["opponent_infantry_3_position_x"] = Web::val(opponent_infantry_3_position_x);
+            j["opponent_infantry_3_position_y"] = Web::val(opponent_infantry_3_position_y);
+            j["opponent_infantry_4_position_x"] = Web::val(opponent_infantry_4_position_x);
+            j["opponent_infantry_4_position_y"] = Web::val(opponent_infantry_4_position_y);
+            j["opponent_aerial_position_x"] = Web::val(opponent_aerial_position_x);
+            j["opponent_aerial_position_y"] = Web::val(opponent_aerial_position_y);
+            j["opponent_sentry_position_x"] = Web::val(opponent_sentry_position_x);
+            j["opponent_sentry_position_y"] = Web::val(opponent_sentry_position_y);
         });
     }
 } __attribute__((packed));

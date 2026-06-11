@@ -2,6 +2,7 @@
 #include "angles.h"
 #include "tasks/base/ballistic_trajectory.hpp"
 #include "utils/common/type_common.hpp"
+#include "utils/logger.hpp"
 #include "utils/utils.hpp"
 #include <cmath>
 #include <cstdlib>

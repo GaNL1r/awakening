@@ -98,18 +98,7 @@ struct ModelTraits<Mode::AT2> {
     static constexpr std::array CLASSES = ModelTraits_AT::CLASSES;
     static constexpr std::array COLORS = ModelTraits_AT::COLORS;
 };
-[[nodiscard]] inline double sigmoid(double x) noexcept {
-    return x >= 0 ? 1.0 / (1.0 + std::exp(-x)) : std::exp(x) / (1.0 + std::exp(x));
-}
 
-[[nodiscard]] inline float rect_ioU(const cv::Rect2f& a, const cv::Rect2f& b) noexcept {
-    const cv::Rect2f inter = a & b;
-    const float inter_area = inter.area();
-    const float union_area = a.area() + b.area() - inter_area;
-    if (union_area <= 0.f || std::isnan(union_area))
-        return 0.f;
-    return inter_area / union_area;
-}
 inline void nms_merge_sorted_bboxes(
     std::vector<Armor>& objs,
     std::vector<int>& out_indices,
@@ -124,7 +113,7 @@ inline void nms_merge_sorted_bboxes(
         for (int idx: out_indices) {
             Armor& b = objs[idx];
             const float iou =
-                rect_ioU(a.net->key_points.bounding_box(), b.net->key_points.bounding_box());
+                utils::rect_ioU(a.net->key_points.bounding_box(), b.net->key_points.bounding_box());
             if (std::isnan(iou) || iou > nms_threshold) {
                 keep = false;
                 if (a.number == b.number && a.color == b.color && iou > MERGE_MIN_IOU
@@ -343,7 +332,7 @@ struct ArmorInfer::Impl {
         using I = ArmorKeyPointsIndex;
         for (int r = 0; r < rows; ++r) {
             float conf_raw = out.at<float>(r, 8);
-            const float confidence = static_cast<float>(sigmoid(conf_raw));
+            const float confidence = static_cast<float>(utils::sigmoid(conf_raw));
             if (confidence < params_.conf_threshold)
                 continue;
             cv::Mat color_scores = out.row(r).colRange(color_offset, color_offset + num_colors);

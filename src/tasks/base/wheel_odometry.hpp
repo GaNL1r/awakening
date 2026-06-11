@@ -221,17 +221,17 @@ public:
         }
     }
     inline void write_log() {
-        web::write_log("wheel_odometry", [&](auto& j) {
+        Web::write_log("wheel_odometry", [&](auto& j) {
             j["timestamp"] = static_cast<int>(
                 std::chrono::duration<double>(last_update.time_since_epoch()).count()
             );
 
-            j["x"] = web::val(state.pos().x());
-            j["y"] = web::val(state.pos().y());
-            j["z"] = web::val(state.pos().z());
-            j["vx"] = web::val(state.vel().x());
-            j["vy"] = web::val(state.vel().y());
-            j["vz"] = web::val(state.vel().z());
+            j["x"] = Web::val(state.pos().x());
+            j["y"] = Web::val(state.pos().y());
+            j["z"] = Web::val(state.pos().z());
+            j["vx"] = Web::val(state.vel().x());
+            j["vy"] = Web::val(state.vel().y());
+            j["vz"] = Web::val(state.vel().z());
         });
     }
     TimePoint last_update;

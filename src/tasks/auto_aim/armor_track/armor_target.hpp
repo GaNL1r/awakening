@@ -2,7 +2,6 @@
 #include "angles.h"
 #include "motion_model.hpp"
 #include "tasks/auto_aim/type.hpp"
-#include "tasks/base/web.hpp"
 #include "utils/common/type_common.hpp"
 #include <chrono>
 #include <optional>
@@ -198,27 +197,7 @@ public:
     [[nodiscard]] inline int armor_num() const noexcept {
         return uvmeasure_ctx.armor_num;
     }
-    inline void write_log() {
-        web::write_log("armor_target", [&](auto& j) {
-            j["timestamp"] = static_cast<int>(
-                std::chrono::duration<double>(last_update.time_since_epoch()).count()
-            );
-            j["target_number"] = string_by_armor_class(target_number);
-            j["track_state"] = TrackState::string_by_state(track_state.tracker_state);
-            auto& j_target_state = j["target_state"];
-            j_target_state["cx"] = web::val(target_state.pos().x());
-            j_target_state["cy"] = web::val(target_state.pos().y());
-            j_target_state["cz"] = web::val(target_state.pos().z());
-            j_target_state["vx"] = web::val(target_state.vel().x());
-            j_target_state["vy"] = web::val(target_state.vel().y());
-            j_target_state["vz"] = web::val(target_state.vel().z());
-            j_target_state["yaw"] = web::val(target_state.yaw());
-            j_target_state["vyaw"] = web::val(target_state.vyaw());
-            j_target_state["r"] = web::val(target_state.r());
-            j_target_state["l"] = web::val(target_state.l());
-            j_target_state["h"] = web::val(target_state.h());
-        });
-    }
+    void write_log();
 
 private:
     armor_point_motion_model::State target_state;

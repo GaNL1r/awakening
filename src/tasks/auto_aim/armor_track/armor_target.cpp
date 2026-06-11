@@ -1,6 +1,7 @@
 #include "armor_target.hpp"
 #include "angles.h"
 #include "tasks/auto_aim/type.hpp"
+#include "tasks/base/web.hpp"
 #include "utils/utils.hpp"
 #include <Eigen/src/Core/Matrix.h>
 #include <algorithm>
@@ -19,6 +20,27 @@
 #include <vector>
 namespace awakening::auto_aim {
 using namespace armor_point_motion_model;
+
+void ArmorTarget::write_log() {
+    Web::write_log("armor_target", [&](auto& j) {
+        j["timestamp"] =
+            static_cast<int>(std::chrono::duration<double>(last_update.time_since_epoch()).count());
+        j["target_number"] = string_by_armor_class(target_number);
+        j["track_state"] = TrackState::string_by_state(track_state.tracker_state);
+        auto& j_target_state = j["target_state"];
+        j_target_state["cx"] = Web::val(target_state.pos().x());
+        j_target_state["cy"] = Web::val(target_state.pos().y());
+        j_target_state["cz"] = Web::val(target_state.pos().z());
+        j_target_state["vx"] = Web::val(target_state.vel().x());
+        j_target_state["vy"] = Web::val(target_state.vel().y());
+        j_target_state["vz"] = Web::val(target_state.vel().z());
+        j_target_state["yaw"] = Web::val(target_state.yaw());
+        j_target_state["vyaw"] = Web::val(target_state.vyaw());
+        j_target_state["r"] = Web::val(target_state.r());
+        j_target_state["l"] = Web::val(target_state.l());
+        j_target_state["h"] = Web::val(target_state.h());
+    });
+}
 
 void ArmorTarget::reset(
     Armor& a,

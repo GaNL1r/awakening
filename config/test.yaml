@@ -1,3 +1,4 @@
+mode: auto_buff
 enemy_color: blue
 max_infer_num: 5
 bullet_speed: 11.5
@@ -140,6 +141,24 @@ very_aimer:
     resistance: 0.001
 
 rune_detector:
+  rune_infer:
+    model_type: cb
+    conf_threshold: 0.2
+  net_detector:
+    backend: tensorrt
+    openvino:
+      model_path: /home/hy/awakening/model/best.onnx
+      device_name: "CPU"
+      perf_mode: "THROUGHPUT"
+      priority: "HIGH"
+      # scheduling_core_type: "PCORE_ONLY"
+      execution_mode: "PERFORMANCE"
+      infer_request_buffer_num: 10
+    tensorrt:
+      model_path: /home/hy/awakening/model/best.onnx
+      copy_context_num: 3
+      min_free_mem_ratio: 0.1
+      use_cuda_preproces: true
   bin_threshold: 70
   color_diff_thresh: 20
   rune_r_min_area: 10

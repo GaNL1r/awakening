@@ -60,7 +60,6 @@ namespace auto_aim {
         TimePoint last_update_time_ {};
         bool has_last_update_time_ = false;
 
-
         void update(double v_yaw, bool target_jumped, const TimePoint& now) {
             const double dt = get_dt(now);
             if (!target_jumped) {
@@ -90,7 +89,7 @@ namespace auto_aim {
                     if (std::abs(overflow_time_) > params_.transfer_time) {
                         transfer_to(
                             (overflow_time_ > 0.0) ? AutoAimFsm::AIM_WHOLE_CAR_PAIR
-                                                    : AutoAimFsm::AIM_SINGLE_ARMOR
+                                                   : AutoAimFsm::AIM_SINGLE_ARMOR
                         );
                     }
                     break;
@@ -107,7 +106,7 @@ namespace auto_aim {
                     if (std::abs(overflow_time_) > params_.transfer_time) {
                         transfer_to(
                             (overflow_time_ > 0.0) ? AutoAimFsm::AIM_WHOLE_CAR_CENTER
-                                                    : AutoAimFsm::AIM_WHOLE_CAR_ARMOR
+                                                   : AutoAimFsm::AIM_WHOLE_CAR_ARMOR
                         );
                     }
                     break;

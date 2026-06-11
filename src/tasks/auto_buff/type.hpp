@@ -1,5 +1,6 @@
 #pragma once
 #include "utils/common/type_common.hpp"
+#include "utils/utils.hpp"
 #include <array>
 #include <opencv2/core/mat.hpp>
 #include <opencv2/core/types.hpp>
@@ -8,63 +9,71 @@
 #include <vector>
 namespace awakening::auto_buff {
 constexpr double RUNE_PAN_BOX_DIS = 0.15;
+constexpr double RUNE_PAN_R = 0.115;
 constexpr double RUNE_R2PANCENTER = 0.70;
-struct RuneR {
-    cv::RotatedRect rr;
-
-    void add_offset(const cv::Point2f& offset) {
-        rr.center += offset;
-    }
-
-    void draw(cv::Mat& img) const {
-        cv::Point2f vertices[4];
-        rr.points(vertices);
-        for (int i = 0; i < 4; ++i) {
-            cv::line(img, vertices[i], vertices[(i + 1) % 4], cv::Scalar(0, 255, 0), 2);
-        }
-
-        cv::circle(img, rr.center, 3, cv::Scalar(0, 0, 255), cv::FILLED);
+constexpr int FAN_NUM = 5;
+enum class RuneColor : int {
+    RED = 0,
+    BLUE = 1,
+    NONE = -1,
+};
+enum RuneKeyPointsIndex { TOP, LEFT, BOTTOM, RIGHT, CENTER, R, N };
+template<typename PointT>
+struct RuneKeyPoint3D {
+    inline static std::vector<PointT> build() {
+        return {
+            PointT(0, 0, RUNE_R2PANCENTER + RUNE_PAN_R), // 上
+            PointT(0, RUNE_PAN_R, RUNE_R2PANCENTER), // 左
+            PointT(0, 0, RUNE_R2PANCENTER - RUNE_PAN_R), // 下
+            PointT(0, -RUNE_PAN_R, RUNE_R2PANCENTER), // 右
+            PointT(0, 0, RUNE_R2PANCENTER), // 中
+            PointT(0, 0, 0),
+        };
     }
 };
-
-struct RunePan {
-    std::array<cv::Point2f, 4> corners;
-    cv::Point2f center;
-
-    void add_offset(const cv::Point2f& offset) {
-        center += offset;
-        for (auto& corner: corners) {
-            corner += offset;
-        }
-    }
-
+struct RuneFanBladeWithR {
+    std::vector<cv::Point2f> points;
+    std::vector<std::vector<cv::Point2f>> tmp_points;
+    ISO3 pose;
+    cv::Rect2f bbox;
+    RuneColor color = RuneColor::NONE;
+    double confidence = 0;
     void draw(cv::Mat& img) const {
-        for (int i = 0; i < 4; ++i) {
-            cv::line(img, corners[i], corners[(i + 1) % 4], cv::Scalar(255, 0, 0), 2);
+        for (int i = 0; i < points.size(); ++i) {
+            cv::circle(img, points[i], 3, cv::Scalar(0, 255, 0), cv::FILLED);
+            // cv::putText(
+            //     img,
+            //     std::to_string(i),
+            //     points[i],
+            //     cv::FONT_HERSHEY_COMPLEX,
+            //     0.5,
+            //     cv::Scalar(0, 255, 0)
+            // );
         }
-        cv::circle(img, center, 3, cv::Scalar(0, 0, 255), cv::FILLED);
+        // cv::rectangle(img, bbox, cv::Scalar(0, 255, 0), 2);
+    }
+    void add_offset(const cv::Point2f& offset) {
+        for (auto& point: points) {
+            point += offset;
+        }
+        bbox += offset;
+    }
+    void transform(const Eigen::Matrix<float, 3, 3>& transform_matrix) noexcept {
+        for (auto& point: points) {
+            point = utils::transform_point2D(transform_matrix, point);
+        }
+        bbox = utils::transform_rect(transform_matrix, bbox);
     }
 };
 struct RuneDetection {
     TimePoint timestamp;
     int id = -1;
     int frame_id = -1;
-    std::vector<RuneR> r_tags;
-    std::vector<RunePan> pans;
-    void add_offset(const cv::Point2f& offset) {
-        for (auto& r_tag: r_tags) {
-            r_tag.add_offset(offset);
-        }
-        for (auto& pan: pans) {
-            pan.add_offset(offset);
-        }
-    }
+
+    std::vector<RuneFanBladeWithR> fan_blades;
     void draw(cv::Mat& img) const {
-        for (const auto& r_tag: r_tags) {
-            r_tag.draw(img);
-        }
-        for (const auto& pan: pans) {
-            pan.draw(img);
+        for (const auto& fan_blade: fan_blades) {
+            fan_blade.draw(img);
         }
     }
 };

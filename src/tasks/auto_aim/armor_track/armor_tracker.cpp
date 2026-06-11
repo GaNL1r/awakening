@@ -1,5 +1,6 @@
 #include "armor_tracker.hpp"
 #include "angles.h"
+#include "utils/logger.hpp"
 #include <algorithm>
 #include <array>
 #include <iostream>
