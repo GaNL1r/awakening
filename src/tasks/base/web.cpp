@@ -1,5 +1,9 @@
 #include "web.hpp"
+#include "tasks/auto_buff/type.hpp"
+#include "utils/utils.hpp"
 #include <memory>
+#include <opencv2/core/types.hpp>
+#include <opencv2/imgproc.hpp>
 namespace awakening {
 struct Web::Impl {
     void draw(cv::Mat& img, const VisionDebugCtx& ctx) const {
@@ -10,12 +14,122 @@ struct Web::Impl {
             draw_auto_buff(img, ctx);
         }
     }
+    const std::vector<cv::Point3f> FAN_BLOCK = {
+        { -0.05f, -0.20f, -0.15f }, // 0: 左下前
+        { 0.05f, -0.20f, -0.15f }, // 1: 右下前
+        { 0.05f, 0.20f, -0.15f }, // 2: 右上前
+        { -0.05f, 0.20f, -0.15f }, // 3: 左上前
+        { -0.05f, -0.20f, 0.15f }, // 4: 左下后
+        { 0.05f, -0.20f, 0.15f }, // 5: 右下后
+        { 0.05f, 0.20f, 0.15f }, // 6: 右上后
+        { -0.05f, 0.20f, 0.15f } // 7: 左上后
+    };
+    static constexpr std::array<std::pair<int, int>, 12> FAN_BLOCK_EDGES = { { // 前面
+                                                                               { 0, 1 },
+                                                                               { 1, 2 },
+                                                                               { 2, 3 },
+                                                                               { 3, 0 },
+
+                                                                               // 后面
+                                                                               { 4, 5 },
+                                                                               { 5, 6 },
+                                                                               { 6, 7 },
+                                                                               { 7, 4 },
+
+                                                                               // 连接前后
+                                                                               { 0, 4 },
+                                                                               { 1, 5 },
+                                                                               { 2, 6 },
+                                                                               { 3, 7 } } };
     void draw_auto_buff(cv::Mat& img, const VisionDebugCtx& ctx) const {
         if (img.empty()) {
             return;
         }
         auto rune = ctx.rune.get();
         rune.draw(img);
+        auto cmd = ctx.gimbal_cmd.get();
+        auto rune_target = ctx.rune_target.get();
+        auto camera_info = ctx.camera_info();
+        auto odom_in_camera_cv = ctx.odom_in_camera_cv.get();
+        if (rune_target.check()) {
+            auto target_state = rune_target.get_target_state();
+            target_state.predict(ctx.img_frame.get().timestamp);
+            auto fan_target_pose_in_odom = target_state.get_fan_target_pose();
+            for (int i = 0; i < fan_target_pose_in_odom.size(); ++i) {
+                auto& fan_pose_in_camera_cv = odom_in_camera_cv * fan_target_pose_in_odom[i];
+                if (fan_pose_in_camera_cv.translation().z() > 0.1) {
+                    // auto image_points = utils::reprojection(
+                    //     camera_info.camera_matrix,
+                    //     camera_info.distortion_coefficients,
+                    //     auto_buff::RuneKeyPoint3D<cv::Point3f>::build(),
+                    //     fan_pose_in_camera_cv
+                    // );
+                    auto image_points = utils::reprojection(
+                        camera_info.camera_matrix,
+                        camera_info.distortion_coefficients,
+                        FAN_BLOCK,
+                        fan_pose_in_camera_cv
+                    );
+                    // for (auto& p: image_points) {
+                    //     cv::circle(img, p, 2, cv::Scalar(255, 0, 0), -1);
+                    // }
+                    for (auto [u, v]: FAN_BLOCK_EDGES) {
+                        cv::line(
+                            img,
+                            image_points[u],
+                            image_points[v],
+                            cv::Scalar(200, 255, 200),
+                            2,
+                            cv::LINE_AA
+                        );
+                    }
+                }
+            }
+            if (cmd.aim_point.pose.translation().z() > 0.1) {
+                auto aim_point_img_points = utils::reprojection(
+                    camera_info.camera_matrix,
+                    camera_info.distortion_coefficients,
+                    { cv::Point3f(0, 0, 0) },
+                    cmd.aim_point.pose
+                );
+                constexpr double R = 0.02;
+                cv::Point2f center = aim_point_img_points[0];
+                double r = camera_info.camera_matrix.at<double>(0, 0) * R
+                    / cmd.aim_point.pose.translation().z();
+                cv::circle(img, center, r, cv::Scalar(50, 50, 255), 2);
+                // if (cmd.fire_advice) {
+                //     int size = 50;
+                //     cv::line(
+                //         img,
+                //         center + cv::Point2f(-size, -size),
+                //         center + cv::Point2f(size, size),
+                //         cv::Scalar(0, 0, 255),
+                //         2
+                //     );
+                //     cv::line(
+                //         img,
+                //         center + cv::Point2f(-size, size),
+                //         center + cv::Point2f(size, -size),
+                //         cv::Scalar(0, 0, 255),
+                //         2
+                //     );
+                // }
+                const double scale = 10.0;
+
+                const double v_yaw = cmd.v_yaw;
+                const double v_pitch = cmd.v_pitch;
+
+                const double dx = -scale * v_yaw;
+                const double dy = -scale * v_pitch;
+
+                const cv::Point2f start_pt = center;
+                const cv::Point2f end_pt = start_pt + cv::Point2f(dx, dy);
+
+                const cv::Scalar color_x = cv::Scalar(0, 215, 255);
+
+                cv::arrowedLine(img, start_pt, end_pt, color_x, 4, cv::LINE_AA, 0, 0.2);
+            }
+        }
     }
     void draw_auto_aim(cv::Mat& img, const VisionDebugCtx& ctx) const {
         if (img.empty()) {
@@ -397,7 +511,9 @@ struct Web::Impl {
         cmd = cmd.appear ? cmd : last_cmd;
         last_cmd = cmd;
         auto armor_target = ctx.armor_target.get();
-        auto target_state = armor_target.get_target_state();
+        auto armor_target_state = armor_target.get_target_state();
+        auto rune_target = ctx.rune_target.get();
+        auto rune_target_state = rune_target.get_target_state();
         d.time_log.handle_once(t);
         auto un_warp = [&](double _yaw) {
             return last_yaw + angles::shortest_angular_distance_degrees(last_yaw, _yaw);
@@ -418,7 +534,8 @@ struct Web::Impl {
         d.control_a_yaw_log.handle_once(cmd.a_yaw);
         d.control_a_pitch_log.handle_once(cmd.a_pitch);
         d.fly_time_log.handle_once(cmd.fly_time);
-        d.target_v_yaw_log.handle_once(target_state.vyaw());
+        d.target_v_yaw_log.handle_once(armor_target_state.vyaw());
+        d.target_v_roll_log.handle_once(rune_target_state.v_roll());
         d.write();
     }
 
@@ -527,6 +644,7 @@ struct Web::Impl {
     X(double, 100, control_a_pitch) \
     X(double, 100, fly_time) \
     X(double, 100, target_v_yaw) \
+    X(double, 100, target_v_roll) \
     X(double, 100, yaw_diff) \
     X(double, 100, pitch_diff)
 #define GEN_LOG(TYPE, SIZE, NAME) DatasStream<TYPE, SIZE> NAME##_log { #NAME, j, mtx };

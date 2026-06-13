@@ -3,6 +3,7 @@
 #include "tasks/auto_aim/armor_track/armor_target.hpp"
 #include "tasks/auto_aim/auto_aim_fsm.hpp"
 #include "tasks/auto_aim/type.hpp"
+#include "tasks/auto_buff/rune_track/rune_target.hpp"
 #include "tasks/auto_buff/type.hpp"
 #include "tasks/base/common.hpp"
 #include "utils/buffer.hpp"
@@ -33,6 +34,7 @@ struct VisionDebugCtx {
     utils::Locked<auto_aim::AutoAimFsm> auto_aim_fsm_state;
 
     utils::Locked<auto_buff::RuneDetection> rune;
+    utils::Locked<auto_buff::RuneTarget> rune_target;
 
     CameraInfo camera_info() const noexcept {
         return camera_info_;

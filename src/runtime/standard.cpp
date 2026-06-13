@@ -2,7 +2,10 @@
 #include "ascii_banner.hpp"
 #include "daedalus_interface/shm_layout.hpp"
 #include "tasks/auto_aim/armor_track/motion_model.hpp"
+#include "tasks/auto_buff/rune_control/rune_aimer.hpp"
 #include "tasks/auto_buff/rune_detect/rune_detector.hpp"
+#include "tasks/auto_buff/rune_track/rune_target.hpp"
+#include "tasks/auto_buff/rune_track/rune_tracker.hpp"
 #include "tasks/auto_buff/type.hpp"
 #include "tasks/base/ballistic_trajectory.hpp"
 #include "tasks/base/wheel_odometry.hpp"
@@ -207,9 +210,12 @@ int main(int argc, char** argv) {
     auto_aim::AutoAimFsmController auto_aim_fsm_controller(config["auto_aim_fsm"]);
     auto_aim::VeryAimer very_aimer(config["very_aimer"]);
     auto_buff::RuneDetector rune_detector(config["rune_detector"]);
+    auto_buff::RuneTracker rune_tracker(config["rune_tracker"]);
+    auto_buff::RuneAimer rune_aimer(config["rune_aimer"]);
     utils::OrderedQueue<auto_aim::Armors> armors_queue;
     utils::OrderedQueue<auto_buff::RuneDetection> rune_detections_queue;
     utils::SWMR<auto_aim::ArmorTarget> armor_target;
+    utils::SWMR<auto_buff::RuneTarget> rune_target;
     BulletPickUp bullet_pick_up(config["bullet_pick_up"]);
     LogCtx log_ctx;
     std::optional<VisionDebugCtx> dbg;
@@ -443,9 +449,6 @@ int main(int argc, char** argv) {
                     SimpleFrame(target.get_target_state().frame_id),
                     frame.img_frame.timestamp
                 );
-                target.set_target_state([&](auto_aim::armor_point_motion_model::State& state) {
-                    state.predict(frame.img_frame.timestamp, target.target_number);
-                });
                 net_focus = target.get_net_focus_roi(
                     frame.img_frame.timestamp,
                     camera_cv_in_old,
@@ -487,6 +490,21 @@ int main(int argc, char** argv) {
             auto batch_armors = armors_queue.dequeue_batch(); // 根据id有序输出
             r.armors = batch_armors;
         } else {
+            auto target = rune_target.read();
+            if (target.need_focus()) {
+                auto camera_cv_in_old = tf->pose_a_in_b(
+                    SimpleFrame(frame.frame_id),
+                    SimpleFrame(target.get_target_state().frame_id),
+                    frame.img_frame.timestamp
+                );
+                net_focus = target.get_net_focus_roi(
+                    frame.img_frame.timestamp,
+                    camera_cv_in_old,
+                    camera_info,
+                    frame.img_frame.src_img.size(),
+                    armor_detector.get_net_wh_ratio()
+                );
+            }
             auto_buff::RuneDetection rune_detection;
             {
                 bool got = detector_sem->try_acquire();
@@ -569,11 +587,22 @@ int main(int argc, char** argv) {
                 log_ctx.track_count++;
             }
         } else if (io.rune) {
-            for (const auto& rune: io.rune.value()) {
+            for (auto& rune: io.rune.value()) {
+                auto camera_cv_in_odom = tf->pose_a_in_b(
+                    SimpleFrame(rune.frame_id),
+                    SimpleFrame::ODOM,
+                    rune.timestamp
+                ); //转到odom
+                rune.frame_id = std::to_underlying(SimpleFrame::ODOM);
+                auto __rune_target =
+                    rune_tracker.track(rune, camera_info, camera_cv_in_odom, rune.frame_id);
+                rune_target.write(__rune_target);
                 auto latency_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
                                       Clock::now() - rune.timestamp
                 )
                                       .count();
+                log_ctx.found_count += rune_tracker.get_count();
+                rune_tracker.reset_count();
                 log_ctx.latency_ms_total += latency_ms;
                 if (dbg) {
                     dbg->rune.set(rune);
@@ -584,11 +613,11 @@ int main(int argc, char** argv) {
     });
     s.add_rate_source<>("solver", 1000.0, [&]() {
         log_ctx.solve_count++;
-        auto target = armor_target.read(); //需要转为相对gimbal_odom
-        int old_this_id = target.this_id;
+        auto a_target = armor_target.read(); //需要转为相对gimbal_odom
+        int old_this_id = a_target.this_id;
         auto gimbal_odom_state_in_odom = wheel_odometry.state;
         gimbal_odom_state_in_odom.predict(Clock::now());
-        target.set_target_state([&](auto& s) {
+        a_target.set_target_state([&](auto& s) {
             namespace idx = auto_aim::armor_point_motion_model::idx;
             s.frame_id = std::to_underlying(SimpleFrame::GIMBAL_ODOM);
             const auto pos = gimbal_odom_state_in_odom.pos();
@@ -600,23 +629,39 @@ int main(int argc, char** argv) {
             s.x[idx::VCY] -= vel.y();
             s.x[idx::VCZ] -= vel.z();
         });
-        target.this_id = old_this_id;
+        a_target.this_id = old_this_id;
+        auto r_target = rune_target.read();
+        old_this_id = r_target.this_id;
+        r_target.set_target_state([&](auto& s) {
+            namespace idx = auto_buff::motion_model::idx;
+            s.frame_id = std::to_underlying(SimpleFrame::GIMBAL_ODOM);
+            const auto pos = gimbal_odom_state_in_odom.pos();
+            const auto vel = gimbal_odom_state_in_odom.vel();
+            s.x[idx::CX] -= pos.x();
+            s.x[idx::CY] -= pos.y();
+            s.x[idx::CZ] -= pos.z();
+        });
+        r_target.this_id = old_this_id;
         GimbalCmd cmd {
             .appear = false,
         };
-        if (target.check()) {
+        auto shoot_in_gimbal_odom =
+            tf->pose_a_in_b(SimpleFrame::SHOOT, SimpleFrame::GIMBAL_ODOM, Clock::now());
+        auto gimbal_in_gimbal_odom =
+            tf->pose_a_in_b(SimpleFrame::GIMBAL, SimpleFrame::GIMBAL_ODOM, Clock::now());
+        if (a_target.check()) {
             very_aimer.set_operator_offset(operator_offset);
-            auto shoot_in_gimbal_odom =
-                tf->pose_a_in_b(SimpleFrame::SHOOT, SimpleFrame::GIMBAL_ODOM, Clock::now());
-            auto gimbal_in_gimbal_odom =
-                tf->pose_a_in_b(SimpleFrame::GIMBAL, SimpleFrame::GIMBAL_ODOM, Clock::now());
             cmd = very_aimer.very_aim(
-                target,
+                a_target,
                 bullet_speed,
                 auto_aim_fsm_controller.get_state(),
                 shoot_in_gimbal_odom,
                 gimbal_in_gimbal_odom
             );
+        } else if (r_target.check()) {
+            rune_aimer.set_operator_offset(operator_offset);
+            cmd =
+                rune_aimer.aim(r_target, bullet_speed, shoot_in_gimbal_odom, gimbal_in_gimbal_odom);
         }
 
         if (serial) {
@@ -689,11 +734,14 @@ int main(int argc, char** argv) {
             static Web web;
             dbg->type =
                 (mode == Mode::AutoAim) ? VisionDebugCtx::AUTO_AIM : VisionDebugCtx::AUTO_BUFF;
-            auto target = armor_target.read();
-            target.write_log();
+            auto __armor_target = armor_target.read();
+            auto __rune_target = rune_target.read();
+            __armor_target.write_log();
+            __rune_target.write_log();
             wheel_odometry.write_log();
             auto img_now = dbg->img_frame.get().timestamp;
-            dbg->armor_target.set(target);
+            dbg->armor_target.set(__armor_target);
+            dbg->rune_target.set(__rune_target);
             dbg->auto_aim_fsm_state.set(auto_aim_fsm_controller.get_state());
             auto gimbal_in_gimbal_odom =
                 tf->pose_a_in_b(SimpleFrame::GIMBAL, SimpleFrame::GIMBAL_ODOM, Clock::now());

@@ -134,12 +134,14 @@ public:
     );
     std::vector<std::pair<int, Armor>> match_armor(
         std::vector<Armor>& armors,
+        const TimePoint& timestamp,
         const CameraInfo& camera_info,
         const ISO3& camera_cv_in_odom
     ) const noexcept;
     std::vector<std::tuple<int, bool, Light>> match_light(
         std::vector<Light>& lights,
         std::vector<std::pair<int, Armor>>& matched_armors,
+        const TimePoint& timestamp,
         const CameraInfo& camera_info,
         const ISO3& camera_cv_in_odom
     ) const noexcept;

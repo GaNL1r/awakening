@@ -1,12 +1,35 @@
 #include "rune_target.hpp"
 #include "tasks/auto_buff/rune_track/motion_model.hpp"
 #include "tasks/auto_buff/type.hpp"
+#include "tasks/base/web.hpp"
+#include "utils/common/type_common.hpp"
 #include "utils/logger.hpp"
 #include "utils/utils.hpp"
 #include <Eigen/src/Core/Matrix.h>
+#include <cmath>
+#include <cstdlib>
+#include <limits>
+#include <numeric>
+#include <opencv2/core/types.hpp>
+#include <optional>
 #include <vector>
 namespace awakening::auto_buff {
 using namespace motion_model;
+void RuneTarget::write_log() {
+    Web::write_log("rune_target", [&](auto& j) {
+        j["timestamp"] =
+            static_cast<int>(std::chrono::duration<double>(last_update.time_since_epoch()).count());
+        j["track_state"] = TrackState::string_by_state(track_state.tracker_state);
+        auto& j_target_state = j["target_state"];
+        j_target_state["cx"] = Web::val(target_state.pos().x());
+        j_target_state["cy"] = Web::val(target_state.pos().y());
+        j_target_state["cz"] = Web::val(target_state.pos().z());
+        j_target_state["yaw"] = Web::val(target_state.yaw());
+        j_target_state["roll"] = Web::val(target_state.roll());
+        j_target_state["v_roll"] = Web::val(target_state.v_roll());
+        j_target_state["visible"] = visable_fan_ids;
+    });
+}
 void RuneTarget::reset(
     RuneFanBladeWithR& f,
     const RuneTrackerCfg& c,
@@ -60,6 +83,7 @@ void RuneTarget::reset(
     is_inited = true;
     track_state.reset();
     this_id = GOBAL_ID++;
+    visable_fan_ids = { 0 };
 }
 void RuneTarget::fan_pnp(
     RuneFanBladeWithR& r,
@@ -135,20 +159,119 @@ void RuneTarget::predict_ekf(const TimePoint& timestamp) {
     target_state.timestamp = timestamp;
     this_id = GOBAL_ID++; //全局状态标记，下游控制对同一id的不重复构建轨迹
 }
-int RuneTarget::update(
+std::optional<cv::Point2f> RuneTarget::match_r(
     std::vector<std::pair<int, RuneFanBladeWithR>>& matched_fans,
+    std::vector<RuneR>& rs,
     const TimePoint& timestamp,
     const CameraInfo& camera_info,
     const ISO3& camera_cv_in_odom
 ) {
+    std::optional<cv::Point2f> best = std::nullopt;
+    if (rs.empty()) {
+        return best;
+    }
+    auto pred_state = target_state;
+    pred_state.predict(timestamp);
+    RVecZ _r_z_pred;
+    auto _r_ctx = r_ctx;
+    _r_ctx.camera_cv_in_odom = camera_cv_in_odom;
+    RMeasure _r_measure { .ctx = _r_ctx };
+    _r_measure.h(pred_state.x, _r_z_pred);
+    FanBladeVecZ _fan_z_pred;
+    auto _fan_ctx = fan_ctx;
+    _fan_ctx.camera_cv_in_odom = camera_cv_in_odom;
+    _fan_ctx.id = 0;
+    FanBladeMeasure _fan_measure { .ctx = _fan_ctx };
+    _fan_measure.h(pred_state.x, _fan_z_pred);
+    std::vector<cv::Point2f> r_vec;
+    std::vector<double> fan_hand_length_vec;
+    for (const auto& [id, fan]: matched_fans) {
+        r_vec.push_back(fan.points[RuneKeyPointsIndex::R]);
+        fan_hand_length_vec.push_back(
+            cv::norm(fan.points[RuneKeyPointsIndex::BOTTOM] - fan.points[RuneKeyPointsIndex::R])
+        );
+    }
+    r_vec.emplace_back(_r_z_pred[idx::R_X], _r_z_pred[idx::R_Y]);
+    fan_hand_length_vec.push_back(cv::norm(
+        cv::Point2f(_fan_z_pred[idx::BOTTOM_X], _fan_z_pred[idx::BOTTOM_Y])
+        - cv::Point2f(_r_z_pred[idx::R_X], _r_z_pred[idx::R_Y])
+    ));
+
+    auto avg_r = std::accumulate(
+        r_vec.begin(),
+        r_vec.end(),
+        cv::Point2f(0, 0),
+        [](const cv::Point2f& a, const cv::Point2f& b) { return cv::Point2f(a.x + b.x, a.y + b.y); }
+    );
+    avg_r.x /= r_vec.size();
+    avg_r.y /= r_vec.size();
+    auto avg_hand_length =
+        std::accumulate(fan_hand_length_vec.begin(), fan_hand_length_vec.end(), 0.0)
+        / fan_hand_length_vec.size();
+    int best_id = -1;
+    double min_cost = std::numeric_limits<double>::max();
+    for (size_t i = 0; i < rs.size(); ++i) {
+        double error = cv::norm(rs[i].rr.center - avg_r);
+        if (error > avg_hand_length * 0.2) {
+            continue;
+        }
+        if (error < min_cost) {
+            min_cost = error;
+            best_id = i;
+        }
+    }
+    if (best_id != -1) {
+        best = rs[best_id].rr.center;
+        rs[best_id].laji = false;
+    } else if (!matched_fans.empty() && r_vec.size() > 1) {
+        avg_r = std::accumulate(
+            r_vec.begin(),
+            r_vec.end() - 1,
+            cv::Point2f(0, 0),
+            [](const cv::Point2f& a, const cv::Point2f& b) {
+                return cv::Point2f(a.x + b.x, a.y + b.y);
+            }
+        );
+        best = avg_r;
+    }
+
+    return best;
+}
+int RuneTarget::update(
+    std::vector<std::pair<int, RuneFanBladeWithR>>& matched_fans,
+    std::optional<cv::Point2f>& r,
+    const TimePoint& timestamp,
+    const CameraInfo& camera_info,
+    const ISO3& camera_cv_in_odom
+) {
+    std::vector<std::shared_ptr<ESEKF::ObsBase>> obs;
     if (matched_fans.empty()) {
         return 0;
     }
-    std::vector<std::shared_ptr<ESEKF::ObsBase>> obs;
+    if (r) {
+        RVecZ z;
+        auto ctx = r_ctx;
+        ctx.camera_cv_in_odom = camera_cv_in_odom;
+        RMeasure measure { .ctx = ctx };
+        const auto r_u_r = [&](const Eigen::Matrix<double, RZ_N, 1>& z) {
+            Eigen::Matrix<double, RZ_N, RZ_N> r;
+            r.setZero();
+            r.diagonal().setConstant(cfg.r_uv_cv);
+            return r;
+        };
+        const auto r_cal_residual = [](const Eigen::Matrix<double, RZ_N, 1>& z_pred,
+                                       const Eigen::Matrix<double, RZ_N, 1>& z) {
+            return z - z_pred;
+        };
+        z[idx::R_X] = r.value().x;
+        z[idx::R_Y] = r.value().y;
+        obs.push_back(esekf.value().make_obs(z, measure, r_u_r, r_cal_residual));
+    }
+
     const auto fan_u_r = [&](const Eigen::Matrix<double, FanBladeZ_N, 1>& z) {
         Eigen::Matrix<double, FanBladeZ_N, FanBladeZ_N> r;
         r.setZero();
-        r.diagonal().setConstant(70.0);
+        r.diagonal().setConstant(cfg.r_uv_net);
         return r;
     };
 
@@ -156,8 +279,10 @@ int RuneTarget::update(
                                      const Eigen::Matrix<double, FanBladeZ_N, 1>& z) {
         return z - z_pred;
     };
-    std::vector<cv::Point2f> r;
+    visable_fan_ids.clear();
+
     for (const auto& [id, fan]: matched_fans) {
+        visable_fan_ids.push_back(id);
         FanBladeVecZ z;
         z[idx::TOP_X] = fan.points[RuneKeyPointsIndex::TOP].x;
         z[idx::TOP_Y] = fan.points[RuneKeyPointsIndex::TOP].y;
@@ -167,35 +292,13 @@ int RuneTarget::update(
         z[idx::RIGHT_Y] = fan.points[RuneKeyPointsIndex::RIGHT].y;
         z[idx::BOTTOM_X] = fan.points[RuneKeyPointsIndex::BOTTOM].x;
         z[idx::BOTTOM_Y] = fan.points[RuneKeyPointsIndex::BOTTOM].y;
-        z[idx::CENTER_X] = fan.points[RuneKeyPointsIndex::CENTER].x;
-        z[idx::CENTER_Y] = fan.points[RuneKeyPointsIndex::CENTER].y;
-        r.push_back(fan.points[RuneKeyPointsIndex::R]);
         auto ctx = fan_ctx;
         ctx.id = id;
         ctx.camera_cv_in_odom = camera_cv_in_odom;
         FanBladeMeasure measure { .ctx = ctx };
         obs.push_back(esekf.value().make_obs(z, measure, fan_u_r, fan_cal_residual));
     }
-    if (!r.empty()) {
-        auto avg_r = std::accumulate(r.begin(), r.end(), cv::Point2f(0.f, 0.f)) * (1.0 / r.size());
-        RVecZ z;
-        z[idx::R_X] = avg_r.x;
-        z[idx::R_Y] = avg_r.y;
-        auto ctx = r_ctx;
-        RMeasure measure { .ctx = ctx };
-        const auto r_u_r = [&](const Eigen::Matrix<double, RZ_N, 1>& z) {
-            Eigen::Matrix<double, RZ_N, RZ_N> r;
-            r.setZero();
-            r.diagonal().setConstant(70.0);
-            return r;
-        };
 
-        const auto r_cal_residual = [](const Eigen::Matrix<double, RZ_N, 1>& z_pred,
-                                       const Eigen::Matrix<double, RZ_N, 1>& z) {
-            return z - z_pred;
-        };
-        obs.push_back(esekf.value().make_obs(z, measure, r_u_r, r_cal_residual));
-    }
     target_state.x = esekf.value().update_multi(obs);
     target_state.timestamp = timestamp;
     last_update = timestamp;
@@ -204,6 +307,7 @@ int RuneTarget::update(
 }
 std::vector<std::pair<int, RuneFanBladeWithR>> RuneTarget::match_fan(
     std::vector<RuneFanBladeWithR>& fans,
+    const TimePoint& timestamp,
     const CameraInfo& camera_info,
     const ISO3& camera_cv_in_odom
 ) const noexcept {
@@ -211,7 +315,7 @@ std::vector<std::pair<int, RuneFanBladeWithR>> RuneTarget::match_fan(
     std::vector<std::pair<int, RuneFanBladeWithR>> result;
     const int n_obs = static_cast<int>(fans.size());
 
-    const double GATE = 10.0;
+    const double GATE = cfg.match_gate;
 
     std::vector<std::vector<double>> cost(n_obs, std::vector<double>(FAN_NUM, MAX_COST + 1));
 
@@ -221,7 +325,8 @@ std::vector<std::pair<int, RuneFanBladeWithR>> RuneTarget::match_fan(
         fan_pnp(fans[j], camera_info, camera_cv_in_odom);
         meas_list[j] = get_ypdmeasurement(fans[j]);
     }
-
+    auto pred_state = target_state;
+    pred_state.predict(timestamp);
     for (int j = 0; j < n_obs; ++j) {
         bool in_gate = false;
         double min_d2 = std::numeric_limits<double>::max();
@@ -232,7 +337,7 @@ std::vector<std::pair<int, RuneFanBladeWithR>> RuneTarget::match_fan(
             };
             YPDMeasure measure { .ctx = tmp_ctx };
             YPDVecZ z_pred;
-            measure.h(target_state.x, z_pred);
+            measure.h(pred_state.x, z_pred);
 
             YPDVecZ nu = meas_list[j] - z_pred;
             nu[idx::YPD_Y] = angles::normalize_angle(nu[idx::YPD_Y]);
@@ -285,5 +390,92 @@ std::vector<std::pair<int, RuneFanBladeWithR>> RuneTarget::match_fan(
         result.push_back(std::make_pair(best_id, fans[best_j]));
     }
     return result;
+}
+
+[[nodiscard]] cv::Rect RuneTarget::get_net_focus_roi(
+    const TimePoint& timestamp,
+    const ISO3& camera_cv_in_odom,
+    const CameraInfo& camera_info,
+    const cv::Size& image_size,
+    double target_wh_ratio
+) const noexcept {
+    if (!need_focus()) {
+        return cv::Rect(0, 0, image_size.width, image_size.height);
+    }
+
+    // 1. 预测目标状态
+    auto tmp_target_state = target_state;
+    tmp_target_state.predict(timestamp);
+
+    // 2. CAR_BOX 定义
+    static std::vector<cv::Point3f> CAR_BOX;
+    constexpr float car_box_half = 1.0f;
+    CAR_BOX = { { 0, car_box_half, -car_box_half },
+                { 0, -car_box_half, -car_box_half },
+                { 0, -car_box_half, car_box_half },
+                { 0, car_box_half, car_box_half } };
+
+    // 3. 目标位姿
+    auto pos = tmp_target_state.pos();
+    ISO3 pose_in_odom;
+    pose_in_odom.translation() = pos;
+    pose_in_odom.linear() = utils::rpy2matrix(Vec3(0, 0, std::atan2(pos.x(), pos.y())));
+    auto pose_in_camera_cv = camera_cv_in_odom.inverse() * pose_in_odom;
+
+    // 4. 投影到图像
+    auto pts = utils::reprojection(
+        camera_info.camera_matrix,
+        camera_info.distortion_coefficients,
+        CAR_BOX,
+        pose_in_camera_cv
+    );
+    cv::Rect rect = cv::boundingRect(pts);
+    cv::Rect img_rect(0, 0, image_size.width, image_size.height);
+
+    if ((rect & img_rect).area() <= 0) {
+        return img_rect;
+    }
+    rect &= img_rect;
+
+    // 5. 目标宽高比
+    double rect_w = std::max<double>(rect.width, 1.0);
+    double rect_h = std::max<double>(rect.height, 1.0);
+    double ratio =
+        (std::isfinite(target_wh_ratio) && target_wh_ratio > 0.0) ? target_wh_ratio : 1.0;
+
+    double target_w = rect_w;
+    double target_h = rect_h;
+    if (target_w / target_h < ratio) {
+        target_w = target_h * ratio;
+    } else {
+        target_h = target_w / ratio;
+    }
+
+    double cx = rect.x + rect.width / 2.0;
+    double cy = rect.y + rect.height / 2.0;
+    cv::Rect ratio_rect(
+        static_cast<int>(cx - target_w / 2.0),
+        static_cast<int>(cy - target_h / 2.0),
+        static_cast<int>(target_w),
+        static_cast<int>(target_h)
+    );
+    ratio_rect &= img_rect;
+
+    double dt = std::chrono::duration<double>(timestamp - last_update).count();
+    double lost_dt = cfg.lost_time_thres;
+    double dt_clamped = std::max(0.0, std::min(dt, lost_dt));
+
+    int base_side = std::max(ratio_rect.width, ratio_rect.height);
+    int max_side = std::max(image_size.width, image_size.height);
+    int side = static_cast<int>(base_side + (max_side - base_side) * (dt_clamped / lost_dt));
+    if (dt >= lost_dt)
+        side = max_side;
+
+    int square_cx = ratio_rect.x + ratio_rect.width / 2;
+    int square_cy = ratio_rect.y + ratio_rect.height / 2;
+    cv::Rect square(square_cx - side / 2, square_cy - side / 2, side, side);
+    square &= img_rect;
+
+    return square;
 }
 } // namespace awakening::auto_buff

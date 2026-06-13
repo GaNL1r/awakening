@@ -394,6 +394,7 @@ int ArmorTarget::update(
 }
 std::vector<std::pair<int, Armor>> ArmorTarget::match_armor(
     std::vector<Armor>& armors,
+    const TimePoint& timestamp,
     const CameraInfo& camera_info,
     const ISO3& camera_cv_in_odom
 ) const noexcept {
@@ -414,7 +415,8 @@ std::vector<std::pair<int, Armor>> ArmorTarget::match_armor(
         armor_pnp(armors[j], camera_info, camera_cv_in_odom);
         meas_list[j] = get_ypdmeasurement(armors[j]);
     }
-
+    auto pred_state = target_state;
+    pred_state.predict(timestamp, target_number);
     for (int j = 0; j < n_obs; ++j) {
         if (armors[j].number == ArmorClass::OUTPOST) {
             auto rpy = utils::matrix2rpy(armors[j].pose.linear());
@@ -433,7 +435,7 @@ std::vector<std::pair<int, Armor>> ArmorTarget::match_armor(
             };
             YPDMeasure measure { .ctx = tmp_ctx };
             YPDVecZ z_pred;
-            measure.h(target_state.x, z_pred);
+            measure.h(pred_state.x, z_pred);
 
             YPDVecZ nu = meas_list[j] - z_pred;
             nu[idx::YPD_Y] = angles::normalize_angle(nu[idx::YPD_Y]);
@@ -489,6 +491,7 @@ std::vector<std::pair<int, Armor>> ArmorTarget::match_armor(
 std::vector<std::tuple<int, bool, Light>> ArmorTarget::match_light(
     std::vector<Light>& lights,
     std::vector<std::pair<int, Armor>>& matched_armors,
+    const TimePoint& timestamp,
     const CameraInfo& camera_info,
     const ISO3& camera_cv_in_odom
 ) const noexcept {
@@ -499,7 +502,8 @@ std::vector<std::tuple<int, bool, Light>> ArmorTarget::match_light(
     if (target_number == ArmorClass::BASE || matched_armors.size() != 1) {
         return result;
     }
-
+    auto pred_state = target_state;
+    pred_state.predict(timestamp, target_number);
     const int armors_num = armor_num();
     const int armor_id = matched_armors.front().first;
     auto predict_light = [&](int id, bool is_left) -> std::pair<cv::Point2f, cv::Point2f> {
@@ -511,7 +515,7 @@ std::vector<std::tuple<int, bool, Light>> ArmorTarget::match_light(
                              .is_left = is_left };
         UVMeasure measure { .ctx = ctx };
         UVVecZ z;
-        measure.h(target_state.x, z);
+        measure.h(pred_state.x, z);
 
         return {
             cv::Point2f(z[std::to_underlying(idx::TOP_X)], z[std::to_underlying(idx::TOP_Y)]),

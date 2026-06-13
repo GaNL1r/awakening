@@ -20,19 +20,8 @@ namespace awakening::auto_buff::motion_model {
 namespace idx {
     enum { CX, CY, CZ, YAW, ROLL, V_ROLL, X_N };
     enum { R_X, R_Y, _R_Z_N };
-    enum {
-        TOP_X,
-        TOP_Y,
-        LEFT_X,
-        LEFT_Y,
-        BOTTOM_X,
-        BOTTOM_Y,
-        RIGHT_X,
-        RIGHT_Y,
-        CENTER_X,
-        CENTER_Y,
-        _FanBlade_Z_N
-    };
+    enum { TOP_X, TOP_Y, LEFT_X, LEFT_Y, BOTTOM_X, BOTTOM_Y, RIGHT_X, RIGHT_Y, _FanBlade_Z_N };
+
     enum { YPD_Y, YPD_P, YPD_D, ROT_YAW, ROT_ROLL, _YPD_Z_N };
 } // namespace idx
 constexpr int X_N = idx::X_N;
@@ -88,7 +77,7 @@ struct RMeasure {
         auto pose_in_camera_cv = camera_cv_in_odom_jet.inverse() * pose_in_odom;
         std::vector<Eigen::Matrix<T, 2, 1>> img_pts_jet;
         utils::project_points_jets(
-            { cv::Point3f(0, 0, 0) },
+            { cv::Point3f(0.1, 0, 0) },
             pose_in_camera_cv,
             ctx.camera_info.camera_matrix,
             ctx.camera_info.distortion_coefficients,
@@ -132,38 +121,52 @@ struct FanBladeMeasure {
         z[idx::BOTTOM_Y] = img_pts_jet[RuneKeyPointsIndex::BOTTOM].y();
         z[idx::RIGHT_X] = img_pts_jet[RuneKeyPointsIndex::RIGHT].x();
         z[idx::RIGHT_Y] = img_pts_jet[RuneKeyPointsIndex::RIGHT].y();
-        z[idx::CENTER_X] = img_pts_jet[RuneKeyPointsIndex::CENTER].x();
-        z[idx::CENTER_Y] = img_pts_jet[RuneKeyPointsIndex::CENTER].y();
     }
     template<typename T>
     inline Eigen::Transform<T, 3, Eigen::Isometry> fan_pose(const T x[X_N]) const {
         auto roll = normalize_angle(x[idx::ROLL] + T(ctx.id) * T(2.0 * M_PI / FAN_NUM));
 
-        Eigen::Transform<T, 3, Eigen::Isometry> pose_in_rune;
-        pose_in_rune.translation() << 0, 0, 0;
-
-        Eigen::Quaternion<T> q_yaw_in_rune(
-            Eigen::AngleAxis<T>(x[idx::YAW], Eigen::Vector3<T>::UnitZ())
-        );
-        Eigen::Quaternion<T> q_pitch_in_rune(Eigen::AngleAxis<T>(0, Eigen::Vector3<T>::UnitY()));
-        Eigen::Quaternion<T> q_roll_in_rune(Eigen::AngleAxis<T>(roll, Eigen::Vector3<T>::UnitX()));
-        pose_in_rune.linear() =
-            (q_yaw_in_rune * q_pitch_in_rune * q_roll_in_rune).toRotationMatrix();
         Eigen::Transform<T, 3, Eigen::Isometry> rune_in_odom =
             Eigen::Transform<T, 3, Eigen::Isometry>::Identity();
         rune_in_odom.translation() << x[idx::CX], x[idx::CY], x[idx::CZ];
-        Eigen::Quaternion<T> q_yaw_rune_in_odom(
-            Eigen::AngleAxis<T>(T(0.0), Eigen::Vector3<T>::UnitZ())
+        auto yaw = ceres::atan2(x[idx::CY], x[idx::CX]);
+        // auto yaw = x[idx::YAW];
+        Eigen::Quaternion<T> q_yaw_rune_in_odom(Eigen::AngleAxis<T>(yaw, Eigen::Vector3<T>::UnitZ())
         );
         Eigen::Quaternion<T> q_pitch_rune_in_odom(
             Eigen::AngleAxis<T>(T(0.0), Eigen::Vector3<T>::UnitY())
         );
         Eigen::Quaternion<T> q_roll_rune_in_odom(
-            Eigen::AngleAxis<T>(T(0.0), Eigen::Vector3<T>::UnitX())
+            Eigen::AngleAxis<T>(roll, Eigen::Vector3<T>::UnitX())
         );
         rune_in_odom.linear() =
             (q_yaw_rune_in_odom * q_pitch_rune_in_odom * q_roll_rune_in_odom).toRotationMatrix();
-        Eigen::Transform<T, 3, Eigen::Isometry> pose_in_odom = rune_in_odom * pose_in_rune;
+        Eigen::Transform<T, 3, Eigen::Isometry> pose_in_odom = rune_in_odom;
+        return pose_in_odom;
+    }
+    template<typename T>
+    inline Eigen::Transform<T, 3, Eigen::Isometry> fan_target_pose(const T x[X_N]) const {
+        auto roll = normalize_angle(x[idx::ROLL] + T(ctx.id) * T(2.0 * M_PI / FAN_NUM));
+
+        Eigen::Transform<T, 3, Eigen::Isometry> fan_target_in_rune =
+            Eigen::Transform<T, 3, Eigen::Isometry>::Identity();
+        fan_target_in_rune.translation() << T(0), T(0), T(RUNE_R2_FAN_TARGET_CENTER);
+        Eigen::Transform<T, 3, Eigen::Isometry> rune_in_odom =
+            Eigen::Transform<T, 3, Eigen::Isometry>::Identity();
+        rune_in_odom.translation() << x[idx::CX], x[idx::CY], x[idx::CZ];
+        auto yaw = ceres::atan2(x[idx::CY], x[idx::CX]);
+        // auto yaw = x[idx::YAW];
+        Eigen::Quaternion<T> q_yaw_rune_in_odom(Eigen::AngleAxis<T>(yaw, Eigen::Vector3<T>::UnitZ())
+        );
+        Eigen::Quaternion<T> q_pitch_rune_in_odom(
+            Eigen::AngleAxis<T>(T(0.0), Eigen::Vector3<T>::UnitY())
+        );
+        Eigen::Quaternion<T> q_roll_rune_in_odom(
+            Eigen::AngleAxis<T>(roll, Eigen::Vector3<T>::UnitX())
+        );
+        rune_in_odom.linear() =
+            (q_yaw_rune_in_odom * q_pitch_rune_in_odom * q_roll_rune_in_odom).toRotationMatrix();
+        Eigen::Transform<T, 3, Eigen::Isometry> pose_in_odom = rune_in_odom * fan_target_in_rune;
         return pose_in_odom;
     }
 
@@ -202,6 +205,60 @@ struct State {
     VecX x;
     TimePoint timestamp;
     int frame_id = 0;
+    inline std::vector<ISO3> get_fan_target_pose() const {
+        std::vector<ISO3> r;
+        for (int i = 0; i < FAN_NUM; ++i) {
+            FanBladeMeasure::Ctx ctx;
+            ctx.id = i;
+            FanBladeMeasure m {
+                .ctx = ctx,
+            };
+            ISO3 pose = m.fan_target_pose(x.data());
+
+            r.push_back(pose);
+        }
+
+        return r;
+    }
+    inline std::vector<ISO3> get_fan_pose() const {
+        std::vector<ISO3> r;
+        for (int i = 0; i < FAN_NUM; ++i) {
+            FanBladeMeasure::Ctx ctx;
+            ctx.id = i;
+            FanBladeMeasure m {
+                .ctx = ctx,
+            };
+            ISO3 pose = m.fan_pose(x.data());
+
+            r.push_back(pose);
+        }
+
+        return r;
+    }
+    inline void predict(const TimePoint& t) {
+        auto dt = std::chrono::duration<double>(t - timestamp).count();
+        predict(dt);
+    }
+    inline void predict(double dt) {
+        Predict p {
+            .dt = dt,
+        };
+        p.f(x, x);
+        timestamp +=
+            std::chrono::duration_cast<TimePoint::duration>(std::chrono::duration<double>(dt));
+    }
+    Vec3 pos() const {
+        return Vec3(x[idx::CX], x[idx::CY], x[idx::CZ]);
+    }
+    double yaw() const {
+        return x[idx::YAW];
+    }
+    double roll() const {
+        return x[idx::ROLL];
+    }
+    double v_roll() const {
+        return x[idx::V_ROLL];
+    }
 };
 
 // using RobotStateEKF = kalman_hybird_lib::ExtendedKalmanFilter<X_N, Z_N, Predict, Measure>;

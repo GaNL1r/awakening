@@ -15,6 +15,7 @@ const chartMap = {
   control_a_pitch: { label: "Control A Pitch", color: "#c9a7ff" },
   fly_time: { label: "Fly Time", color: "#8bd3dd" },
   target_v_yaw: { label: "Target V Yaw", color: "#f58ac2" },
+  target_v_roll: { label: "Target V Roll", color: "#a7d46f" },
   yaw_diff: { label: "Yaw Diff", color: "#a7d46f" },
   pitch_diff: { label: "Pitch Diff", color: "#ffcf8a" },
 };

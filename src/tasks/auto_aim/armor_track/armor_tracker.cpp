@@ -28,9 +28,6 @@ struct ArmorTracker::Impl {
                 ? init_target(t, armors, frame_id, camera_info, camera_cv_in_odom)
                 : update_target(t, armors, camera_info, camera_cv_in_odom);
             update_fsm(found, idx, armors.timestamp);
-            if (found) {
-                found_count_++;
-            }
             return found;
         };
         //双缓冲，方便异常丢失恢复，方便操作手换目标
@@ -100,7 +97,6 @@ struct ArmorTracker::Impl {
     ) noexcept {
         if (armors.armors.empty())
             return false;
-        target.predict_ekf(armors.timestamp);
         std::vector<Armor> candidates;
         candidates.reserve(armors.armors.size());
         for (const auto& a: armors.armors) {
@@ -111,13 +107,19 @@ struct ArmorTracker::Impl {
                 candidates.emplace_back(a);
             }
         }
-
         if (candidates.empty())
             return false;
+        target.predict_ekf(armors.timestamp);
         std::vector<Light> lights;
-        auto matched_armors = target.match_armor(candidates, camera_info, camera_cv_in_odom);
-        auto matched_lights =
-            target.match_light(armors.lights, matched_armors, camera_info, camera_cv_in_odom);
+        auto matched_armors =
+            target.match_armor(candidates, armors.timestamp, camera_info, camera_cv_in_odom);
+        auto matched_lights = target.match_light(
+            armors.lights,
+            matched_armors,
+            armors.timestamp,
+            camera_info,
+            camera_cv_in_odom
+        );
         int updated = target.update(
             matched_armors,
             matched_lights,
@@ -130,7 +132,8 @@ struct ArmorTracker::Impl {
     void update_fsm(bool found, size_t i, const TimePoint& now) noexcept {
         auto& target = target_buf_[i];
         auto& s = target.track_state;
-
+        if (found)
+            ++found_count_;
         switch (s.tracker_state) {
             case ArmorTarget::TrackState::DETECTING:
                 if (!found) {
@@ -163,9 +166,6 @@ struct ArmorTracker::Impl {
             default:
                 return;
         }
-
-        if (found)
-            ++found_count_;
     }
     double lost_time(const ArmorTarget& target, const TimePoint& now) const noexcept {
         return std::max(0.0, std::chrono::duration<double>(now - target.last_update).count());

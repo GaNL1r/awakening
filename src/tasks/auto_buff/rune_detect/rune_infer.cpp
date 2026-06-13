@@ -203,6 +203,7 @@ struct RuneInfer::Impl {
                 );
             }
             rune.points = remap_keypoints(raw);
+            // rune.points = raw;
             results.push_back(rune);
         }
         return topk_and_nms(results);
