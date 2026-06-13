@@ -29,7 +29,7 @@ struct RuneAimer::Impl {
         bool valid;
     };
     int get_select_id(const RuneTarget& target) const noexcept {
-        return target.get_visable_fan_ids().empty() ? 0 : target.get_visable_fan_ids().front();
+        return target.fan_wc.get_min_visable_fan_id();
     }
     [[nodiscard]] ControlPoint select_and_get_control_point(
         const RuneTarget& target,
@@ -108,7 +108,7 @@ struct RuneAimer::Impl {
         for (int iter = 0; iter < 10; ++iter) {
             auto i_target = hit_time_target;
             i_target.set_target_state([&](motion_model::State& state) {
-                state.predict(prev_fly_time);
+                state.predict(prev_fly_time, i_target.voter);
             });
             const auto iter_fan_target_pose = i_target.get_target_state().get_fan_target_pose();
             auto iter_pitch_and_fly_time_opt = ballistic_trajectory_->solve_pitch_and_flytime(
@@ -127,7 +127,9 @@ struct RuneAimer::Impl {
             prev_fly_time = iter_pitch_and_fly_time_opt.value().second;
         }
         const double predict_time = prev_fly_time + params_.prediction_delay;
-        hit_time_target.set_target_state([&](auto& state) { state.predict(predict_time); });
+        hit_time_target.set_target_state([&](auto& state) {
+            state.predict(predict_time, hit_time_target.voter);
+        });
         return HitCtx {
             .hit_time_target = hit_time_target,
             .fly_time = prev_fly_time,
@@ -141,7 +143,9 @@ struct RuneAimer::Impl {
         GimbalCmd cmd;
         cmd.appear = false;
         auto target = _target;
-        target.set_target_state([&](motion_model::State& state) { state.predict(Clock::now()); });
+        target.set_target_state([&](motion_model::State& state) {
+            state.predict(Clock::now(), target.voter);
+        });
         auto hit_ctx = get_hit(target, bullet_speed, shoot_in_gimbal_odom);
         if (!hit_ctx) {
             return cmd;

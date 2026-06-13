@@ -1,5 +1,6 @@
 #include "web.hpp"
 #include "tasks/auto_buff/type.hpp"
+#include "utils/common/type_common.hpp"
 #include "utils/utils.hpp"
 #include <memory>
 #include <opencv2/core/types.hpp>
@@ -15,14 +16,14 @@ struct Web::Impl {
         }
     }
     const std::vector<cv::Point3f> FAN_BLOCK = {
-        { -0.05f, -0.20f, -0.15f }, // 0: 左下前
-        { 0.05f, -0.20f, -0.15f }, // 1: 右下前
-        { 0.05f, 0.20f, -0.15f }, // 2: 右上前
-        { -0.05f, 0.20f, -0.15f }, // 3: 左上前
-        { -0.05f, -0.20f, 0.15f }, // 4: 左下后
-        { 0.05f, -0.20f, 0.15f }, // 5: 右下后
-        { 0.05f, 0.20f, 0.15f }, // 6: 右上后
-        { -0.05f, 0.20f, 0.15f } // 7: 左上后
+        { 0, 0.20, -0.15 }, //左下前
+        { 0, 0.20, 0.15 }, //左上前
+        { 0, -0.20, 0.15 }, //右上前
+        { 0, -0.20, -0.15 }, //右下前
+        { 0.1, 0.20, -0.15 }, //左下后
+        { 0.1, 0.20, 0.15 }, //左上后
+        { 0.1, -0.20, 0.15 }, //右上后
+        { 0.1, -0.20, -0.15 }, //右下后
     };
     static constexpr std::array<std::pair<int, int>, 12> FAN_BLOCK_EDGES = { { // 前面
                                                                                { 0, 1 },
@@ -53,35 +54,32 @@ struct Web::Impl {
         auto odom_in_camera_cv = ctx.odom_in_camera_cv.get();
         if (rune_target.check()) {
             auto target_state = rune_target.get_target_state();
-            target_state.predict(ctx.img_frame.get().timestamp);
+            target_state.predict(ctx.img_frame.get().timestamp, rune_target.voter);
             auto fan_target_pose_in_odom = target_state.get_fan_target_pose();
             for (int i = 0; i < fan_target_pose_in_odom.size(); ++i) {
                 auto& fan_pose_in_camera_cv = odom_in_camera_cv * fan_target_pose_in_odom[i];
                 if (fan_pose_in_camera_cv.translation().z() > 0.1) {
-                    // auto image_points = utils::reprojection(
-                    //     camera_info.camera_matrix,
-                    //     camera_info.distortion_coefficients,
-                    //     auto_buff::RuneKeyPoint3D<cv::Point3f>::build(),
-                    //     fan_pose_in_camera_cv
-                    // );
                     auto image_points = utils::reprojection(
                         camera_info.camera_matrix,
                         camera_info.distortion_coefficients,
                         FAN_BLOCK,
                         fan_pose_in_camera_cv
                     );
-                    // for (auto& p: image_points) {
-                    //     cv::circle(img, p, 2, cv::Scalar(255, 0, 0), -1);
-                    // }
-                    for (auto [u, v]: FAN_BLOCK_EDGES) {
-                        cv::line(
-                            img,
-                            image_points[u],
-                            image_points[v],
-                            cv::Scalar(200, 255, 200),
-                            2,
-                            cv::LINE_AA
-                        );
+                    for (int i = 0; i < FAN_BLOCK_EDGES.size(); ++i) {
+                        auto [u, v] = FAN_BLOCK_EDGES[i];
+
+                        cv::Scalar color;
+
+                        if (i < 4) {
+                            color = cv::Scalar(0, 255, 0);
+                        } else if (i < 8) {
+                            color = cv::Scalar(0, 255, 255);
+                            continue;
+                        } else {
+                            color = cv::Scalar(200, 200, 200);
+                        }
+
+                        cv::line(img, image_points[u], image_points[v], color, 2, cv::LINE_AA);
                     }
                 }
             }
@@ -129,6 +127,25 @@ struct Web::Impl {
 
                 cv::arrowedLine(img, start_pt, end_pt, color_x, 4, cv::LINE_AA, 0, 0.2);
             }
+        }
+        {
+            std::string state_str = rune_target.voter.to_str();
+            int baseline = 0;
+            cv::Size text_size =
+                cv::getTextSize(state_str, cv::FONT_HERSHEY_SIMPLEX, 2.5, 2, &baseline);
+            const int x =
+                std::clamp(img.cols - text_size.width - 10, 0, img.cols - text_size.width);
+            const int y = std::clamp(text_size.height + 10, text_size.height, img.rows - 1);
+
+            cv::putText(
+                img,
+                state_str,
+                { x, y },
+                cv::FONT_HERSHEY_SIMPLEX,
+                2.5,
+                cv::Scalar(0, 0, 255),
+                2
+            );
         }
     }
     void draw_auto_aim(cv::Mat& img, const VisionDebugCtx& ctx) const {
@@ -512,8 +529,10 @@ struct Web::Impl {
         last_cmd = cmd;
         auto armor_target = ctx.armor_target.get();
         auto armor_target_state = armor_target.get_target_state();
+        armor_target_state.predict(Clock::now(), armor_target.target_number);
         auto rune_target = ctx.rune_target.get();
         auto rune_target_state = rune_target.get_target_state();
+        rune_target_state.predict(Clock::now(), rune_target.voter);
         d.time_log.handle_once(t);
         auto un_warp = [&](double _yaw) {
             return last_yaw + angles::shortest_angular_distance_degrees(last_yaw, _yaw);
@@ -535,7 +554,7 @@ struct Web::Impl {
         d.control_a_pitch_log.handle_once(cmd.a_pitch);
         d.fly_time_log.handle_once(cmd.fly_time);
         d.target_v_yaw_log.handle_once(armor_target_state.vyaw());
-        d.target_v_roll_log.handle_once(rune_target_state.v_roll());
+        d.target_v_roll_log.handle_once(rune_target_state.v_roll(rune_target.voter));
         d.write();
     }
 

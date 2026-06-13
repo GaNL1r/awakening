@@ -3,7 +3,10 @@
 #include "motion_model.hpp"
 #include "tasks/auto_buff/type.hpp"
 #include "utils/common/type_common.hpp"
+#include <array>
+#include <opencv2/core/types.hpp>
 #include <optional>
+#include <string>
 #include <vector>
 namespace awakening::auto_buff {
 struct RuneTrackerCfg {
@@ -13,9 +16,15 @@ struct RuneTrackerCfg {
     Vec3 q_xyz;
     double q_yaw;
     double q_roll;
+    double q_a;
+    double q_w;
+    double q_tau;
     double r_uv_cv;
     double r_uv_net;
     double match_gate;
+    int voter_state_need_count;
+    int voter_mode_need_count;
+    double big_args_continue_time;
     void load(const YAML::Node& config) {
         esekf_iter_num = config["esekf_iter_num"].as<int>();
         lost_time_thres = config["lost_time_thres"].as<double>();
@@ -24,12 +33,41 @@ struct RuneTrackerCfg {
         q_xyz = Vec3(q_xyz_vec[0], q_xyz_vec[1], q_xyz_vec[2]);
         q_yaw = config["q_yaw"].as<double>();
         q_roll = config["q_roll"].as<double>();
+        q_a = config["q_a"].as<double>();
+        q_w = config["q_w"].as<double>();
+        q_tau = config["q_tau"].as<double>();
         r_uv_cv = config["r_uv_cv"].as<double>();
         r_uv_net = config["r_uv_net"].as<double>();
         match_gate = config["match_gate"].as<double>();
+        voter_state_need_count = config["voter_state_need_count"].as<int>();
+        voter_mode_need_count = config["voter_mode_need_count"].as<int>();
+        big_args_continue_time = config["big_args_continue_time"].as<double>();
     }
 };
 static inline int GOBAL_ID = 0; //全局状态标记，下游控制对同一id的不重复构建轨迹
+struct FanWC {
+    std::array<bool, FAN_NUM> is_visable { false, false, false, false, false };
+    void reset() {
+        is_visable.fill(false);
+    }
+    int get_min_visable_fan_id() const {
+        for (int i = 0; i < FAN_NUM; ++i) {
+            if (is_visable[i]) {
+                return i;
+            }
+        }
+        return 0;
+    }
+    std::string to_str() const {
+        std::string str;
+        for (int i = 0; i < FAN_NUM; ++i) {
+            if (is_visable[i]) {
+                str += std::to_string(i) + " ";
+            }
+        }
+        return str;
+    }
+};
 class RuneTarget {
 public:
     struct TrackState {
@@ -69,13 +107,19 @@ public:
         const CameraInfo& camera_info,
         const ISO3& camera_cv_in_odom
     ) noexcept;
+    static void fan_target_pnp(
+        RuneFanTarget& a,
+        const cv::Point2f& r,
+        const CameraInfo& camera_info,
+        const ISO3& camera_cv_in_odom
+    ) noexcept;
     [[nodiscard]] Eigen::Matrix<double, motion_model::X_N, motion_model::X_N>
-    process_noise(double dt) const noexcept;
+    process_noise(double dt, const motion_model::Voter& v) const noexcept;
     [[nodiscard]] Eigen::Matrix<double, motion_model::YPDZ_N, motion_model::YPDZ_N>
     ypdmeasurement_covariance(const Eigen::Matrix<double, motion_model::YPDZ_N, 1>& z
     ) const noexcept;
-    [[nodiscard]] Eigen::Matrix<double, motion_model::YPDZ_N, 1>
-    get_ypdmeasurement(RuneFanBladeWithR& fan) const noexcept;
+    [[nodiscard]] Eigen::Matrix<double, motion_model::YPDZ_N, 1> get_ypdmeasurement(const ISO3& pose
+    ) const noexcept;
     void predict_ekf(const TimePoint& timestamp);
     std::vector<std::pair<int, RuneFanBladeWithR>> match_fan(
         std::vector<RuneFanBladeWithR>& fans,
@@ -83,16 +127,24 @@ public:
         const CameraInfo& camera_info,
         const ISO3& camera_cv_in_odom
     ) const noexcept;
-    std::optional<cv::Point2f> match_r(
+    std::optional<std::pair<bool, cv::Point2f>> match_r(
         std::vector<std::pair<int, RuneFanBladeWithR>>& matched_fans,
         std::vector<RuneR>& rs,
         const TimePoint& timestamp,
         const CameraInfo& camera_info,
         const ISO3& camera_cv_in_odom
     );
+    std::vector<std::pair<int, RuneFanTarget>> match_fan_target(
+        std::vector<RuneFanTarget>& fans,
+        std::optional<std::pair<bool, cv::Point2f>>& r,
+        const TimePoint& timestamp,
+        const CameraInfo& camera_info,
+        const ISO3& camera_cv_in_odom
+    ) const noexcept;
     int update(
         std::vector<std::pair<int, RuneFanBladeWithR>>& f,
-        std::optional<cv::Point2f>& r,
+        std::vector<std::pair<int, RuneFanTarget>>& a,
+        std::optional<std::pair<bool, cv::Point2f>>& r,
         const TimePoint& timestamp,
         const CameraInfo& camera_info,
         const ISO3& camera_cv_in_odom
@@ -121,7 +173,8 @@ public:
         target.track_state = this->track_state;
         target.is_inited = this->is_inited;
         target.this_id = this->this_id;
-        target.visable_fan_ids = this->visable_fan_ids;
+        target.fan_wc = this->fan_wc;
+        target.voter = this->voter;
         return target;
     }
     [[nodiscard]] inline bool check() const noexcept {
@@ -135,14 +188,16 @@ public:
             && std::chrono::duration<double>(Clock::now() - last_update).count()
             < cfg.lost_time_thres;
     }
-    std::vector<int> get_visable_fan_ids() const noexcept {
-        return visable_fan_ids;
+    FanWC get_fan_wc() const noexcept {
+        return fan_wc;
     }
     void write_log();
     std::optional<motion_model::ESEKF> esekf;
     motion_model::RMeasure::Ctx r_ctx;
     motion_model::FanBladeMeasure::Ctx fan_ctx;
+    motion_model::FanTargetMeasure::Ctx fan_target_ctx;
     motion_model::YPDMeasure::Ctx ypd_ctx;
+    motion_model::Voter voter;
     RuneTrackerCfg cfg;
     TimePoint last_update;
     TrackState track_state;
@@ -150,7 +205,7 @@ public:
     bool is_inited = false;
     mutable double last_rot_yaw = 0;
     mutable double last_rot_roll = 0;
-    std::vector<int> visable_fan_ids;
+    FanWC fan_wc;
 
 private:
     motion_model::State target_state;

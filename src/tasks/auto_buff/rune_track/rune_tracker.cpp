@@ -66,8 +66,21 @@ struct RuneTracker::Impl {
             target_.match_fan(r.fan_blades, r.timestamp, camera_info, camera_cv_in_odom);
         auto match_r =
             target_.match_r(matched_fans, r.rune_rs, r.timestamp, camera_info, camera_cv_in_odom);
-        int updated =
-            target_.update(matched_fans, match_r, r.timestamp, camera_info, camera_cv_in_odom);
+        auto matched_fan_targets = target_.match_fan_target(
+            r.fan_targets,
+            match_r,
+            r.timestamp,
+            camera_info,
+            camera_cv_in_odom
+        );
+        int updated = target_.update(
+            matched_fans,
+            matched_fan_targets,
+            match_r,
+            r.timestamp,
+            camera_info,
+            camera_cv_in_odom
+        );
         return updated > 0;
     }
     void update_fsm(bool found, const TimePoint& now) noexcept {
