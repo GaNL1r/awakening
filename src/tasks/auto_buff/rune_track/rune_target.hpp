@@ -47,8 +47,14 @@ struct RuneTrackerCfg {
 static inline int GOBAL_ID = 0; //全局状态标记，下游控制对同一id的不重复构建轨迹
 struct FanWC {
     std::array<bool, FAN_NUM> is_visable { false, false, false, false, false };
+    std::array<TimePoint, FAN_NUM> fan_times;
     void reset() {
         is_visable.fill(false);
+        fan_times.fill(TimePoint());
+    }
+    void update(int i, const TimePoint& timestamp) {
+        is_visable[i] = true;
+        fan_times[i] = timestamp;
     }
     int get_min_visable_fan_id() const {
         for (int i = 0; i < FAN_NUM; ++i) {
@@ -105,13 +111,15 @@ public:
     static void fan_pnp(
         RuneFanBladeWithR& a,
         const CameraInfo& camera_info,
-        const ISO3& camera_cv_in_odom
+        const ISO3& camera_cv_in_odom,
+        bool in_r
     ) noexcept;
     static void fan_target_pnp(
         RuneFanTarget& a,
         const cv::Point2f& r,
         const CameraInfo& camera_info,
-        const ISO3& camera_cv_in_odom
+        const ISO3& camera_cv_in_odom,
+        bool in_r
     ) noexcept;
     [[nodiscard]] Eigen::Matrix<double, motion_model::X_N, motion_model::X_N>
     process_noise(double dt, const motion_model::Voter& v) const noexcept;

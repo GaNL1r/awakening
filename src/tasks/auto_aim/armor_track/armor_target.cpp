@@ -1,6 +1,7 @@
 #include "armor_target.hpp"
 #include "angles.h"
 #include "tasks/auto_aim/type.hpp"
+#include "tasks/base/dta_utils.hpp"
 #include "tasks/base/web.hpp"
 #include "utils/utils.hpp"
 #include <Eigen/src/Core/Matrix.h>
@@ -456,35 +457,8 @@ std::vector<std::pair<int, Armor>> ArmorTarget::match_armor(
         }
     }
 
-    std::vector<bool> used_obs(n_obs, false);
-    std::vector<bool> used_id(armors_num, false);
-
-    while (true) {
-        double best = MAX_COST;
-        int best_j = -1;
-        int best_id = -1;
-
-        for (int j = 0; j < n_obs; ++j) {
-            if (used_obs[j])
-                continue;
-            for (int id = 0; id < armors_num; ++id) {
-                if (used_id[id])
-                    continue;
-                if (cost[j][id] < best) {
-                    best = cost[j][id];
-                    best_j = j;
-                    best_id = id;
-                }
-            }
-        }
-
-        if (best_j < 0 || best_id < 0) {
-            break;
-        }
-
-        used_obs[best_j] = true;
-        used_id[best_id] = true;
-        result.push_back(std::make_pair(best_id, armors[best_j]));
+    for (auto [obs, id]: dta_utils::greedy_match(cost, n_obs, armors_num, MAX_COST)) {
+        result.emplace_back(id, armors[obs]);
     }
     return result;
 }
@@ -575,34 +549,9 @@ std::vector<std::tuple<int, bool, Light>> ArmorTarget::match_light(
         }
     }
 
-    std::vector<bool> used_obs(n_obs, false);
-    std::array<bool, visible_mapping.size()> used_id { false, false }; // 只匹配左可见/右可见
-    while (true) {
-        double best = MAX_COST;
-        int best_j = -1, best_id = -1;
-
-        for (int j = 0; j < n_obs; ++j) {
-            if (used_obs[j])
-                continue;
-            for (int id = 0; id < 2; ++id) {
-                if (used_id[id])
-                    continue;
-                if (cost[j][id] < best) {
-                    best = cost[j][id];
-                    best_j = j;
-                    best_id = id;
-                }
-            }
-        }
-
-        if (best_j < 0 || best_id < 0)
-            break;
-
-        used_obs[best_j] = true;
-        used_id[best_id] = true;
-
-        auto [matched_id, is_left] = visible_mapping[best_id];
-        result.emplace_back(matched_id, is_left, lights[best_j]);
+    for (auto [obs, id]: dta_utils::greedy_match(cost, n_obs, 2, MAX_COST)) {
+        auto [matched_id, is_left] = visible_mapping[id];
+        result.emplace_back(matched_id, is_left, lights[obs]);
     }
 
     return result;

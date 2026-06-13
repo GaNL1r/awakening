@@ -362,7 +362,8 @@ struct State {
     }
     inline void predict(double dt, auto_aim::ArmorClass armor_number) {
         Predict p { .dt = dt, .armor_number = armor_number };
-        p.f(x, x);
+        auto tmp_x=x;
+        p.f(tmp_x, x);
         timestamp +=
             std::chrono::duration_cast<TimePoint::duration>(std::chrono::duration<double>(dt));
     }

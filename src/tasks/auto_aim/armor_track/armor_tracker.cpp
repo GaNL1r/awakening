@@ -1,5 +1,6 @@
 #include "armor_tracker.hpp"
 #include "angles.h"
+#include "tasks/base/dta_utils.hpp"
 #include "utils/logger.hpp"
 #include <algorithm>
 #include <array>
@@ -134,41 +135,13 @@ struct ArmorTracker::Impl {
         auto& s = target.track_state;
         if (found)
             ++found_count_;
-        switch (s.tracker_state) {
-            case ArmorTarget::TrackState::DETECTING:
-                if (!found) {
-                    s.detect_count = 0;
-                    s.tracker_state = ArmorTarget::TrackState::LOST;
-                    return;
-                }
-                if (++s.detect_count > cfg_.tracking_thres) {
-                    s.detect_count = 0;
-                    s.tracker_state = ArmorTarget::TrackState::TRACKING;
-                }
-                return;
-
-            case ArmorTarget::TrackState::TRACKING:
-                if (!found) {
-                    s.tracker_state = ArmorTarget::TrackState::TEMP_LOST;
-                }
-                return;
-
-            case ArmorTarget::TrackState::TEMP_LOST:
-                if (found) {
-                    s.tracker_state = ArmorTarget::TrackState::TRACKING;
-                    return;
-                }
-                if (lost_time(target, now) > lost_time_thres(target)) {
-                    s.tracker_state = ArmorTarget::TrackState::LOST;
-                }
-                return;
-
-            default:
-                return;
-        }
-    }
-    double lost_time(const ArmorTarget& target, const TimePoint& now) const noexcept {
-        return std::max(0.0, std::chrono::duration<double>(now - target.last_update).count());
+        dta_utils::update_fsm(
+            found,
+            s,
+            cfg_.tracking_thres,
+            dta_utils::elapsed_sec(target.last_update, now),
+            lost_time_thres(target)
+        );
     }
     double lost_time_thres(const ArmorTarget& target) const noexcept {
         return (target.target_number == ArmorClass::OUTPOST) ? cfg_.lost_time_thres_outpost

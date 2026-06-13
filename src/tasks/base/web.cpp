@@ -132,7 +132,7 @@ struct Web::Impl {
             std::string state_str = rune_target.voter.to_str();
             int baseline = 0;
             cv::Size text_size =
-                cv::getTextSize(state_str, cv::FONT_HERSHEY_SIMPLEX, 2.5, 2, &baseline);
+                cv::getTextSize(state_str, cv::FONT_HERSHEY_SIMPLEX, 1.5, 2, &baseline);
             const int x =
                 std::clamp(img.cols - text_size.width - 10, 0, img.cols - text_size.width);
             const int y = std::clamp(text_size.height + 10, text_size.height, img.rows - 1);
@@ -142,7 +142,7 @@ struct Web::Impl {
                 state_str,
                 { x, y },
                 cv::FONT_HERSHEY_SIMPLEX,
-                2.5,
+                1.5,
                 cv::Scalar(0, 0, 255),
                 2
             );

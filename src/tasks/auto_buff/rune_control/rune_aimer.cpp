@@ -1,14 +1,33 @@
 #include "rune_aimer.hpp"
+#include "tasks/auto_buff/rune_track/motion_model.hpp"
 #include "tasks/auto_buff/rune_track/rune_target.hpp"
 #include "tasks/base/ballistic_trajectory.hpp"
+#include "tasks/base/dta_utils.hpp"
 #include "utils/common/type_common.hpp"
 #include "utils/logger.hpp"
+#include <ostream>
 namespace awakening::auto_buff {
 struct RuneAimer::Impl {
     struct Params {
+        double sample_total_time;
+        int sample_horizon;
         double prediction_delay;
+        double max_yaw_acc;
+        double max_pitch_acc;
+        double shooting_range_w;
+        double shooting_range_h;
+        double min_enable_pitch_deg;
+        double min_enable_yaw_deg;
         void load(const YAML::Node& config) {
             prediction_delay = config["prediction_delay"].as<double>();
+            shooting_range_w = config["shooting_range_w"].as<double>();
+            shooting_range_h = config["shooting_range_h"].as<double>();
+            max_yaw_acc = config["max_yaw_acc"].as<double>();
+            max_pitch_acc = config["max_pitch_acc"].as<double>();
+            min_enable_pitch_deg = config["min_enable_pitch_deg"].as<double>();
+            min_enable_yaw_deg = config["min_enable_yaw_deg"].as<double>();
+            sample_total_time = config["sample_total_time"].as<double>();
+            sample_horizon = config["sample_horizon"].as<int>();
         }
     } params_;
     Impl(const YAML::Node& config) {
@@ -21,40 +40,33 @@ struct RuneAimer::Impl {
         RuneTarget hit_time_target;
         double fly_time;
     };
-    struct ControlPoint {
-        double yaw;
-        double pitch;
-        int aim_id;
-        AimPoint aim_point;
-        bool valid;
-    };
     int get_select_id(const RuneTarget& target) const noexcept {
         return target.fan_wc.get_min_visable_fan_id();
     }
-    [[nodiscard]] ControlPoint select_and_get_control_point(
+    [[nodiscard]] dta_utils::ControlPoint get_control_point(
         const RuneTarget& target,
+        double bullet_speed,
         const ISO3& shoot_in_gimbal_odom,
         const ISO3& gimbal_in_gimbal_odom,
-        double bullet_speed
+        int aim_id
     ) const noexcept {
-        int id = get_select_id(target);
         auto fan_poses = target.get_target_state().get_fan_target_pose();
         return get_control_point(
-            fan_poses[id],
+            fan_poses[aim_id],
             shoot_in_gimbal_odom,
             gimbal_in_gimbal_odom,
             bullet_speed,
-            id
+            aim_id
         );
     }
-    [[nodiscard]] ControlPoint get_control_point(
+    [[nodiscard]] dta_utils::ControlPoint get_control_point(
         const ISO3& fan_pose,
         const ISO3& shoot_in_gimbal_odom,
         const ISO3& gimbal_in_gimbal_odom,
         double bullet_speed,
         int aim_id
     ) const noexcept {
-        ControlPoint cp;
+        dta_utils::ControlPoint cp;
 
         auto p = fan_pose.translation() - shoot_in_gimbal_odom.translation();
         auto desired_pitch_opt = ballistic_trajectory_->solve_pitch(p, bullet_speed);
@@ -91,7 +103,8 @@ struct RuneAimer::Impl {
     std::optional<HitCtx> get_hit(
         const RuneTarget& target_ready_to_aim,
         double bullet_speed,
-        const ISO3& shoot_in_gimbal_odom
+        const ISO3& shoot_in_gimbal_odom,
+        int aim_id
     ) const noexcept {
         auto hit_time_target = target_ready_to_aim;
         const int roughly_select = get_select_id(target_ready_to_aim);
@@ -135,47 +148,216 @@ struct RuneAimer::Impl {
             .fly_time = prev_fly_time,
         };
     }
+    RuneTarget last_target_;
+    TimePoint last_time_;
+    dta_utils::LimitTrajectory limit_traj_;
+    dta_utils::ControlPoint limit_traj_cp0_;
+    Trajectory<AimPoint, double> aim_traj_;
+    double last_fly_time_;
     GimbalCmd
     aim(const RuneTarget& _target,
         double bullet_speed,
         const ISO3& shoot_in_gimbal_odom,
-        const ISO3& gimbal_in_gimbal_odom) const noexcept {
+        const ISO3& gimbal_in_gimbal_odom) noexcept {
         GimbalCmd cmd;
         cmd.appear = false;
+        bool is_same = _target.this_id == last_target_.this_id;
+        double time_in_traj = 0.0;
+        // if (is_same) { //状态完全未更新，使用第一次构建的轨迹基于时间进行推进减少重复计算
+        //     time_in_traj = std::chrono::duration<double>(Clock::now() - last_time_).count();
+        // } else {
+        is_same = false;
+        last_target_ = _target;
+        last_time_ = Clock::now();
+        // }
         auto target = _target;
         target.set_target_state([&](motion_model::State& state) {
             state.predict(Clock::now(), target.voter);
         });
-        auto hit_ctx = get_hit(target, bullet_speed, shoot_in_gimbal_odom);
-        if (!hit_ctx) {
-            return cmd;
+        auto make_even = [](int x) { return x % 2 == 0 ? x : x + 1; };
+
+        const int horizon = make_even(params_.sample_horizon);
+        const double dt = params_.sample_total_time / horizon;
+        int now_select = get_select_id(target);
+        if (!is_same) {
+            auto hit_ctx_opt = get_hit(
+                target,
+                bullet_speed,
+                shoot_in_gimbal_odom,
+                now_select
+            ); //直接算到击中目标时间
+            if (!hit_ctx_opt) {
+                return cmd;
+            }
+            auto hit_ctx = hit_ctx_opt.value();
+            auto cp0 = get_control_point(
+                hit_ctx.hit_time_target,
+                bullet_speed,
+                shoot_in_gimbal_odom,
+                gimbal_in_gimbal_odom,
+                now_select
+            );
+            if (!cp0.valid) {
+                return cmd;
+            }
+            last_fly_time_ = hit_ctx.fly_time;
+            auto sample_once = [&](double t,
+                                   const RuneTarget& base_target,
+                                   const dta_utils::ControlPoint& _cp0,
+                                   dta_utils::GimbalState& out_gs,
+                                   AimPoint& out_ap) -> bool {
+                auto tmp_target = base_target;
+                tmp_target.set_target_state([&](motion_model::State& state) {
+                    state.predict(t, tmp_target.voter);
+                }); //保证轨迹完全为不同时间对同一状态的瞄准控制点
+                int this_select = now_select;
+                auto hit_opt = get_hit(tmp_target, bullet_speed, shoot_in_gimbal_odom, this_select);
+                if (!hit_opt)
+                    return false;
+
+                auto cp = get_control_point(
+                    hit_opt->hit_time_target,
+                    bullet_speed,
+                    shoot_in_gimbal_odom,
+                    gimbal_in_gimbal_odom,
+                    this_select
+                );
+                if (!cp.valid)
+                    return false;
+
+                out_gs.aim_id = cp.aim_id;
+                out_gs.yaw_state.p = angles::normalize_angle(cp.yaw - _cp0.yaw);
+                out_gs.pitch_state.p = angles::normalize_angle(cp.pitch - _cp0.pitch);
+                out_ap = cp.aim_point;
+
+                return true;
+            };
+            auto push_sample =
+                [&](auto& traj_gs, auto& traj_ap, double t, const dta_utils::ControlPoint& _cp0
+                ) -> bool {
+                dta_utils::GimbalState gs;
+                AimPoint ap;
+                if (!sample_once(t, target, _cp0, gs, ap)) {
+                    return false;
+                }
+                traj_gs.push_back(gs, t);
+                traj_ap.push_back(ap, t);
+                return true;
+            };
+
+            auto build_traj = [&](auto& traj_gs,
+                                  auto& traj_ap,
+                                  const dta_utils::ControlPoint& _cp0,
+
+                                  int horizon,
+                                  double dt) -> bool {
+                int half = horizon / 2;
+                for (int i = half; i >= 1; --i) {
+                    if (!push_sample(traj_gs, traj_ap, -i * dt, _cp0)) {
+                        return false;
+                    }
+                }
+
+                dta_utils::GimbalState gs0;
+                gs0.aim_id = _cp0.aim_id;
+                gs0.yaw_state.p = 0.0;
+                gs0.pitch_state.p = 0.0;
+                traj_gs.push_back(gs0, 0.0);
+                traj_ap.push_back(_cp0.aim_point, 0.0);
+
+                for (int i = 1; i <= half; ++i) {
+                    if (!push_sample(traj_gs, traj_ap, i * dt, _cp0)) {
+                        return false;
+                    }
+                }
+
+                return true;
+            };
+            limit_traj_cp0_ = cp0;
+            limit_traj_.clear();
+            aim_traj_.clear();
+
+            limit_traj_.reserve(horizon + 1);
+            aim_traj_.reserve(horizon + 1);
+
+            if (!build_traj(limit_traj_, aim_traj_, limit_traj_cp0_, horizon, dt)) {
+                return cmd;
+            }
+            limit_traj_.build_limit(params_.max_yaw_acc, params_.max_pitch_acc, time_in_traj);
         }
-        auto hit_time_target = hit_ctx->hit_time_target;
-        auto cp = select_and_get_control_point(
-            hit_time_target,
-            shoot_in_gimbal_odom,
-            gimbal_in_gimbal_odom,
-            bullet_speed
-        );
-        if (!cp.valid) {
-            return cmd;
-        }
+        const dta_utils::ControlPoint& target_traj_cp0 = limit_traj_cp0_;
+        const Trajectory<dta_utils::GimbalState, double>& target_traj =
+            static_cast<const Trajectory<dta_utils::GimbalState, double>&>(limit_traj_);
+        auto target_gimbal_state = target_traj.Trajectory::state_at(time_in_traj);
+        //目标轨迹，一定击中目标
+        auto control = limit_traj_.dta_utils::LimitTrajectory::state_at(time_in_traj);
+        //控制轨迹，轨迹优化后最优控制（并非最优，下位机实际vel acc 可以基于error和上位机规划叠加）
+        double control_yaw = angles::normalize_angle(control.yaw_state.p + limit_traj_cp0_.yaw);
+        double control_pitch =
+            angles::normalize_angle(control.pitch_state.p + limit_traj_cp0_.pitch);
+        double target_yaw =
+            angles::normalize_angle(target_gimbal_state.yaw_state.p + target_traj_cp0.yaw);
+        double target_pitch =
+            angles::normalize_angle(target_gimbal_state.pitch_state.p + target_traj_cp0.pitch);
         cmd.timestamp = Clock::now();
-        cmd.yaw = angles::to_degrees(cp.yaw);
-        cmd.v_yaw = angles::to_degrees(0);
-        cmd.a_yaw = angles::to_degrees(0);
-        cmd.pitch = angles::to_degrees(cp.pitch);
-        cmd.v_pitch = angles::to_degrees(0);
-        cmd.a_pitch = angles::to_degrees(0);
-        cmd.target_yaw = angles::to_degrees(cp.yaw);
-        cmd.target_pitch = angles::to_degrees(cp.pitch);
-        cmd.fly_time = hit_ctx->fly_time;
+        cmd.yaw = angles::to_degrees(control_yaw);
+        cmd.v_yaw = angles::to_degrees(control.yaw_state.v);
+        cmd.a_yaw = angles::to_degrees(control.yaw_state.a);
+        cmd.pitch = angles::to_degrees(control_pitch);
+        cmd.v_pitch = angles::to_degrees(control.pitch_state.v);
+        cmd.a_pitch = angles::to_degrees(control.pitch_state.a);
+        cmd.target_yaw = angles::to_degrees(target_yaw);
+        cmd.target_pitch = angles::to_degrees(target_pitch);
+        cmd.fly_time = last_fly_time_;
         cmd.appear = true;
-        cmd.aim_point = cp.aim_point;
+        cmd.aim_point = aim_traj_.state_at(time_in_traj);
         cmd.aim_point.frame_id = target.get_target_state().frame_id;
-        cmd.enable_pitch_diff = 1.0;
-        cmd.enable_yaw_diff = 1.0;
-        cmd.select_id = 0;
+        cmd.select_id = now_select;
+        auto cal_enbale_diff = [&](double _t) {
+            auto aim_point = aim_traj_.state_at(_t);
+            const double distance = aim_point.pose.translation().norm();
+            double shooting_range_yaw;
+            double half_w = params_.shooting_range_w / 2;
+            auto cos_theta = std::cos(aim_point.d_angle);
+            auto sin_theta = std::sin(aim_point.d_angle);
+
+            auto yaw1 = std::atan2(
+                aim_point.pose.translation().y() + half_w * cos_theta,
+                aim_point.pose.translation().x() - half_w * sin_theta
+            );
+            auto yaw2 = std::atan2(
+                aim_point.pose.translation().y() - half_w * cos_theta,
+                aim_point.pose.translation().x() + half_w * sin_theta
+            );
+            auto aim_yaw =
+                std::atan2(aim_point.pose.translation().y(), aim_point.pose.translation().x());
+            shooting_range_yaw = std::min(
+                std::abs(angles::normalize_angle(yaw1 - aim_yaw)),
+                std::abs(angles::normalize_angle(yaw2 - aim_yaw))
+            ); //直接算两个边缘yaw
+            double shooting_range_pitch =
+                std::abs(std::atan2(params_.shooting_range_h / 2, distance));
+            const double pitch_factor = 1.0; //跟yaw一样逻辑还得多两次解弹道，没必要
+            shooting_range_pitch *= pitch_factor;
+            shooting_range_yaw =
+                std::max(shooting_range_yaw, angles::from_degrees(params_.min_enable_yaw_deg));
+            shooting_range_pitch =
+                std::max(shooting_range_pitch, angles::from_degrees(params_.min_enable_pitch_deg));
+            return std::make_pair(std::abs(shooting_range_yaw), std::abs(shooting_range_pitch));
+        };
+        auto enable_diff = cal_enbale_diff(time_in_traj);
+        cmd.enable_yaw_diff = angles::to_degrees(enable_diff.first);
+        cmd.enable_pitch_diff = angles::to_degrees(enable_diff.second);
+        auto abs_angle_error = [](double from, double to) {
+            return std::abs(angles::shortest_angular_distance(from, to));
+        };
+        cmd.fire_advice =
+            abs_angle_error(angles::from_degrees(cmd.target_yaw), angles::from_degrees(cmd.yaw))
+                < cmd.enable_yaw_diff
+            && abs_angle_error(
+                   angles::from_degrees(cmd.target_pitch),
+                   angles::from_degrees(cmd.pitch)
+               ) < cmd.enable_pitch_diff;
         return cmd;
     }
     void set_operator_offset(std::pair<double, double> offset) {

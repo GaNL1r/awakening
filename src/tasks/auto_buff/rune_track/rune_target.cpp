@@ -1,6 +1,7 @@
 #include "rune_target.hpp"
 #include "tasks/auto_buff/rune_track/motion_model.hpp"
 #include "tasks/auto_buff/type.hpp"
+#include "tasks/base/dta_utils.hpp"
 #include "tasks/base/web.hpp"
 #include "utils/common/type_common.hpp"
 #include "utils/logger.hpp"
@@ -16,6 +17,61 @@
 #include <vector>
 namespace awakening::auto_buff {
 using namespace motion_model;
+
+namespace {
+    template<typename Fan, typename Pnp>
+    std::vector<std::pair<int, Fan>> match_fans_by_ypd(
+        const RuneTarget& target,
+        std::vector<Fan>& fans,
+        const TimePoint& timestamp,
+        Pnp&& pnp
+    ) noexcept {
+        constexpr double MAX_COST = 1e9;
+        std::vector<std::pair<int, Fan>> result;
+        const int n_obs = static_cast<int>(fans.size());
+        std::vector<std::vector<double>> cost(n_obs, std::vector<double>(FAN_NUM, MAX_COST + 1));
+
+        std::vector<YPDVecZ> meas_list(n_obs);
+        for (int obs = 0; obs < n_obs; ++obs) {
+            pnp(fans[obs]);
+            meas_list[obs] = target.get_ypdmeasurement(fans[obs].pose);
+        }
+
+        auto pred_state = target.get_target_state();
+        pred_state.predict(timestamp, target.voter);
+        for (int obs = 0; obs < n_obs; ++obs) {
+            bool in_gate = false;
+            double min_d2 = std::numeric_limits<double>::max();
+            for (int id = 0; id < FAN_NUM; ++id) {
+                YPDMeasure measure { .ctx = { .id = id } };
+                YPDVecZ z_pred;
+                measure.h(pred_state.x, z_pred);
+
+                YPDVecZ nu = meas_list[obs] - z_pred;
+                nu[idx::YPD_Y] = angles::normalize_angle(nu[idx::YPD_Y]);
+                nu[idx::ROT_YAW] = angles::normalize_angle(nu[idx::ROT_YAW]);
+                nu[idx::ROT_ROLL] = angles::normalize_angle(nu[idx::ROT_ROLL]);
+                auto R = target.ypdmeasurement_covariance(z_pred);
+                const double d2 = nu.transpose() * R.ldlt().solve(nu);
+
+                if (std::isfinite(d2) && d2 < target.cfg.match_gate) {
+                    cost[obs][id] = d2;
+                    in_gate = true;
+                }
+                min_d2 = std::min(min_d2, d2);
+            }
+            if (!in_gate) {
+                AWAKENING_WARN("match out of gate min d2: {}", min_d2);
+            }
+        }
+
+        for (auto [obs, id]: dta_utils::greedy_match(cost, n_obs, FAN_NUM, MAX_COST)) {
+            result.emplace_back(id, fans[obs]);
+        }
+        return result;
+    }
+} // namespace
+
 void RuneTarget::write_log() {
     Web::write_log("rune_target", [&](auto& j) {
         j["timestamp"] =
@@ -82,7 +138,7 @@ void RuneTarget::reset(
     esekf = ESEKF(Predict { .dt = 0.005, .voter = voter }, u_q, inject, p0);
 
     esekf.value().set_iteration_num(cfg.esekf_iter_num);
-    fan_pnp(f, camera_info, camera_cv_in_odom);
+    fan_pnp(f, camera_info, camera_cv_in_odom, true);
     auto pos = f.pose.translation();
     auto rpy = utils::matrix2rpy(f.pose.linear());
     double a_guess = (A_LOWER + A_UPPER) / 2.0;
@@ -110,12 +166,14 @@ void RuneTarget::reset(
 void RuneTarget::fan_pnp(
     RuneFanBladeWithR& r,
     const CameraInfo& camera_info,
-    const ISO3& camera_cv_in_odom
+    const ISO3& camera_cv_in_odom,
+    bool in_r
 ) noexcept {
     auto key_points = r.points;
     r.pose = utils::solve_pnp(
         key_points,
-        RuneFanBladeWithR::Point3DTargetCenterZERO<cv::Point3f>::build(),
+        in_r ? RuneFanBladeWithR::Point3DTargetCenterZERO<cv::Point3f>::build()
+             : RuneFanBladeWithR::Point3DRZERO<cv::Point3f>::build(),
         camera_info.camera_matrix,
         camera_info.distortion_coefficients
     );
@@ -125,13 +183,15 @@ void RuneTarget::fan_target_pnp(
     RuneFanTarget& a,
     const cv::Point2f& r,
     const CameraInfo& camera_info,
-    const ISO3& camera_cv_in_odom
+    const ISO3& camera_cv_in_odom,
+    bool in_r
 ) noexcept {
     a.sort_corners(r);
     auto key_points = a.key_points;
     a.pose = utils::solve_pnp(
         key_points,
-        RuneFanTarget::Point3DTargetCenterZERO<cv::Point3f>::build_no_r(),
+        in_r ? RuneFanTarget::Point3DTargetCenterZERO<cv::Point3f>::build_no_r()
+             : RuneFanTarget::Point3DRZERO<cv::Point3f>::build_no_r(),
         camera_info.camera_matrix,
         camera_info.distortion_coefficients
     );
@@ -145,8 +205,6 @@ RuneTarget::process_noise(double dt, const Voter& v) const noexcept {
     q(idx::CY, idx::CY) = cfg.q_xyz.y();
     q(idx::CZ, idx::CZ) = cfg.q_xyz.z();
     q(idx::YAW, idx::YAW) = cfg.q_yaw;
-
-    utils::fill_constant_accel_noise(q, idx::ROLL, idx::V_ROLL, cfg.q_roll, dt);
 
     utils::fill_constant_accel_noise(q, idx::ROLL, idx::V_ROLL, cfg.q_roll, dt);
 
@@ -327,7 +385,7 @@ int RuneTarget::update(
     fan_wc.reset();
 
     for (const auto& [id, fan]: matched_fans) {
-        fan_wc.is_visable[id] = true;
+        fan_wc.update(id, timestamp);
         FanBladeVecZ z;
         z[idx::TOP_X] = fan.points[RuneFanBladeWithR::PointsIndex::TOP].x;
         z[idx::TOP_Y] = fan.points[RuneFanBladeWithR::PointsIndex::TOP].y;
@@ -355,7 +413,7 @@ int RuneTarget::update(
         return z - z_pred;
     };
     for (const auto& [id, fan]: matched_fan_targets) {
-        fan_wc.is_visable[id] = true;
+        fan_wc.update(id, timestamp);
         FanTargetVecZ z;
         z[idx::LT_X] = fan.key_points[RuneFanTarget::PointsIndex::LT].x;
         z[idx::LT_Y] = fan.key_points[RuneFanTarget::PointsIndex::LT].y;
@@ -396,85 +454,9 @@ std::vector<std::pair<int, RuneFanBladeWithR>> RuneTarget::match_fan(
     const CameraInfo& camera_info,
     const ISO3& camera_cv_in_odom
 ) const noexcept {
-    constexpr double MAX_COST = 1e9;
-    std::vector<std::pair<int, RuneFanBladeWithR>> result;
-    const int n_obs = static_cast<int>(fans.size());
-
-    const double GATE = cfg.match_gate;
-
-    std::vector<std::vector<double>> cost(n_obs, std::vector<double>(FAN_NUM, MAX_COST + 1));
-
-    std::vector<YPDVecZ> meas_list(n_obs
-    ); //纯图像点匹配只能纯位置误差，要不就是和match_light基于逻辑，不如随便pnp一下ypda匹配
-    for (int j = 0; j < n_obs; ++j) {
-        fan_pnp(fans[j], camera_info, camera_cv_in_odom);
-        meas_list[j] = get_ypdmeasurement(fans[j].pose);
-    }
-    auto pred_state = target_state;
-    pred_state.predict(timestamp, voter);
-    for (int j = 0; j < n_obs; ++j) {
-        bool in_gate = false;
-        double min_d2 = std::numeric_limits<double>::max();
-        for (int id = 0; id < FAN_NUM; ++id) {
-            YPDMeasure::Ctx tmp_ctx {
-                .id = id,
-
-            };
-            YPDMeasure measure { .ctx = tmp_ctx };
-            YPDVecZ z_pred;
-            measure.h(pred_state.x, z_pred);
-
-            YPDVecZ nu = meas_list[j] - z_pred;
-            nu[idx::YPD_Y] = angles::normalize_angle(nu[idx::YPD_Y]);
-            nu[idx::ROT_YAW] = angles::normalize_angle(nu[idx::ROT_YAW]);
-            nu[idx::ROT_ROLL] = angles::normalize_angle(nu[idx::ROT_ROLL]);
-            auto R = ypdmeasurement_covariance(z_pred);
-            double d2 = nu.transpose() * R.ldlt().solve(nu);
-
-            if (std::isfinite(d2) && d2 < GATE) {
-                cost[j][id] = d2;
-                in_gate = true;
-            }
-            if (d2 < min_d2) {
-                min_d2 = d2;
-            }
-        }
-        if (!in_gate) {
-            AWAKENING_WARN("match out of gate min d2: {}", min_d2);
-        }
-    }
-
-    std::vector<bool> used_obs(n_obs, false);
-    std::vector<bool> used_id(FAN_NUM, false);
-
-    while (true) {
-        double best = MAX_COST;
-        int best_j = -1;
-        int best_id = -1;
-
-        for (int j = 0; j < n_obs; ++j) {
-            if (used_obs[j])
-                continue;
-            for (int id = 0; id < FAN_NUM; ++id) {
-                if (used_id[id])
-                    continue;
-                if (cost[j][id] < best) {
-                    best = cost[j][id];
-                    best_j = j;
-                    best_id = id;
-                }
-            }
-        }
-
-        if (best_j < 0 || best_id < 0) {
-            break;
-        }
-
-        used_obs[best_j] = true;
-        used_id[best_id] = true;
-        result.push_back(std::make_pair(best_id, fans[best_j]));
-    }
-    return result;
+    return match_fans_by_ypd(*this, fans, timestamp, [&](RuneFanBladeWithR& fan) {
+        fan_pnp(fan, camera_info, camera_cv_in_odom, false);
+    });
 }
 std::vector<std::pair<int, RuneFanTarget>> RuneTarget::match_fan_target(
     std::vector<RuneFanTarget>& fans,
@@ -483,88 +465,12 @@ std::vector<std::pair<int, RuneFanTarget>> RuneTarget::match_fan_target(
     const CameraInfo& camera_info,
     const ISO3& camera_cv_in_odom
 ) const noexcept {
-    constexpr double MAX_COST = 1e9;
-    std::vector<std::pair<int, RuneFanTarget>> result;
     if (!r) {
-        return result;
+        return {};
     }
-    const int n_obs = static_cast<int>(fans.size());
-
-    const double GATE = cfg.match_gate;
-
-    std::vector<std::vector<double>> cost(n_obs, std::vector<double>(FAN_NUM, MAX_COST + 1));
-
-    std::vector<YPDVecZ> meas_list(n_obs
-    ); //纯图像点匹配只能纯位置误差，要不就是和match_light基于逻辑，不如随便pnp一下ypda匹配
-    for (int j = 0; j < n_obs; ++j) {
-        fan_target_pnp(fans[j], r.value().second, camera_info, camera_cv_in_odom);
-        meas_list[j] = get_ypdmeasurement(fans[j].pose);
-    }
-    auto pred_state = target_state;
-    pred_state.predict(timestamp, voter);
-    for (int j = 0; j < n_obs; ++j) {
-        bool in_gate = false;
-        double min_d2 = std::numeric_limits<double>::max();
-        for (int id = 0; id < FAN_NUM; ++id) {
-            YPDMeasure::Ctx tmp_ctx {
-                .id = id,
-
-            };
-            YPDMeasure measure { .ctx = tmp_ctx };
-            YPDVecZ z_pred;
-            measure.h(pred_state.x, z_pred);
-
-            YPDVecZ nu = meas_list[j] - z_pred;
-            nu[idx::YPD_Y] = angles::normalize_angle(nu[idx::YPD_Y]);
-            nu[idx::ROT_YAW] = angles::normalize_angle(nu[idx::ROT_YAW]);
-            nu[idx::ROT_ROLL] = angles::normalize_angle(nu[idx::ROT_ROLL]);
-            auto R = ypdmeasurement_covariance(z_pred);
-            double d2 = nu.transpose() * R.ldlt().solve(nu);
-
-            if (std::isfinite(d2) && d2 < GATE) {
-                cost[j][id] = d2;
-                in_gate = true;
-            }
-            if (d2 < min_d2) {
-                min_d2 = d2;
-            }
-        }
-        if (!in_gate) {
-            AWAKENING_WARN("match out of gate min d2: {}", min_d2);
-        }
-    }
-
-    std::vector<bool> used_obs(n_obs, false);
-    std::vector<bool> used_id(FAN_NUM, false);
-
-    while (true) {
-        double best = MAX_COST;
-        int best_j = -1;
-        int best_id = -1;
-
-        for (int j = 0; j < n_obs; ++j) {
-            if (used_obs[j])
-                continue;
-            for (int id = 0; id < FAN_NUM; ++id) {
-                if (used_id[id])
-                    continue;
-                if (cost[j][id] < best) {
-                    best = cost[j][id];
-                    best_j = j;
-                    best_id = id;
-                }
-            }
-        }
-
-        if (best_j < 0 || best_id < 0) {
-            break;
-        }
-
-        used_obs[best_j] = true;
-        used_id[best_id] = true;
-        result.push_back(std::make_pair(best_id, fans[best_j]));
-    }
-    return result;
+    return match_fans_by_ypd(*this, fans, timestamp, [&](RuneFanTarget& fan) {
+        fan_target_pnp(fan, r.value().second, camera_info, camera_cv_in_odom, false);
+    });
 }
 [[nodiscard]] cv::Rect RuneTarget::get_net_focus_roi(
     const TimePoint& timestamp,

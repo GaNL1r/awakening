@@ -1,4 +1,4 @@
-mode: auto_buff
+mode: auto_aim
 enemy_color: blue
 max_infer_num: 5
 bullet_speed: 20.5
@@ -83,7 +83,7 @@ armor_tracker:
   lost_time_thres: 1.5
   lost_time_thres_outpost: 2.0
   tracking_thres: 10
-  match_gate_armor: 15.0
+  match_gate_armor: 30.0
   match_gate_not_all_init_armor: 100.0
   qxyz_common: [30.0, 30.0, 1.0]
   qyaw_common: 100.0
@@ -115,22 +115,14 @@ auto_aim_fsm:
 very_aimer:
   base_yaw_offset: -0.0
   base_pitch_offset: -0.5
-  # base_yaw_offset: -0.0
-  # base_pitch_offset: -0.0
   sample_total_time: 1.0
-  
   sample_horizon: 200
-
   fire_delay_min: 0.00
   fire_delay_max: 0.00
-  
   max_yaw_acc: 40
   max_pitch_acc: 50
-  
-
   prediction_delay: 0.00
   aim_center_more_prediction_time: 0.0
-
   shooting_range_h: 0.12
   shooting_range_w_small: 0.12
   shooting_range_w_large: 0.24
@@ -177,7 +169,7 @@ rune_tracker:
   esekf_iter_num: 5
   q_xyz: [0.0001, 0.0001, 0.0001]
   q_yaw: 0.1
-  q_roll: 1.0
+  q_roll: 10.0
   q_a: 0.00001
   q_w: 0.00001
   q_tau: 0.000001
@@ -191,9 +183,15 @@ rune_tracker:
 rune_aimer:
   base_yaw_offset: -0.0
   base_pitch_offset: -0.5
-
-  prediction_delay: 0.00
-
+  sample_total_time: 0.5
+  sample_horizon: 10
+  prediction_delay: -0.00
+  max_yaw_acc: 40 
+  max_pitch_acc: 50
+  shooting_range_h: 0.12
+  shooting_range_w: 0.12
+  min_enable_pitch_deg: 0.25
+  min_enable_yaw_deg: 0.25
   ballistic_trajectory:
     gravity: 9.8
     resistance: 0.001

@@ -1,6 +1,7 @@
 #include "rune_tracker.hpp"
 #include "tasks/auto_buff/rune_track/rune_target.hpp"
 #include "tasks/auto_buff/type.hpp"
+#include "tasks/base/dta_utils.hpp"
 #include "utils/logger.hpp"
 #include <memory>
 namespace awakening::auto_buff {
@@ -88,44 +89,13 @@ struct RuneTracker::Impl {
         auto& s = target.track_state;
         if (found)
             ++found_count_;
-        switch (s.tracker_state) {
-            case RuneTarget::TrackState::DETECTING:
-                if (!found) {
-                    s.detect_count = 0;
-                    s.tracker_state = RuneTarget::TrackState::LOST;
-                    return;
-                }
-                if (++s.detect_count > cfg_.tracking_thres) {
-                    s.detect_count = 0;
-                    s.tracker_state = RuneTarget::TrackState::TRACKING;
-                }
-                return;
-
-            case RuneTarget::TrackState::TRACKING:
-                if (!found) {
-                    s.tracker_state = RuneTarget::TrackState::TEMP_LOST;
-                }
-                return;
-
-            case RuneTarget::TrackState::TEMP_LOST:
-                if (found) {
-                    s.tracker_state = RuneTarget::TrackState::TRACKING;
-                    return;
-                }
-                if (lost_time(now) > lost_time_thres()) {
-                    s.tracker_state = RuneTarget::TrackState::LOST;
-                }
-                return;
-
-            default:
-                return;
-        }
-    }
-    double lost_time(const TimePoint& now) const noexcept {
-        return std::max(0.0, std::chrono::duration<double>(now - target_.last_update).count());
-    }
-    double lost_time_thres() const noexcept {
-        return cfg_.lost_time_thres;
+        dta_utils::update_fsm(
+            found,
+            s,
+            cfg_.tracking_thres,
+            dta_utils::elapsed_sec(target.last_update, now),
+            cfg_.lost_time_thres
+        );
     }
     RuneTrackerCfg cfg_;
     RuneTarget target_;
