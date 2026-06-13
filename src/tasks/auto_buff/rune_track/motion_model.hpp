@@ -59,13 +59,7 @@ struct Voter {
     } state = Collecting;
     enum { Big, Small } mode = Small;
     void reset(const TimePoint& start_time) {
-        state = Collecting;
-        mode = Small;
-        start_t = start_time;
-        dir_count = 0;
-        clock_wise_count = 0;
-        double_detect_count = 0;
-        last_state_roll = 0;
+        *this = { .start_t = start_time };
     }
     void update(double roll, int need_count) {
         auto diff = angles::normalize_angle(roll - last_state_roll);
@@ -180,7 +174,7 @@ struct RMeasure {
         auto pose_in_camera_cv = camera_cv_in_odom_jet.inverse() * pose_in_odom;
         std::vector<Eigen::Matrix<T, 2, 1>> img_pts_jet;
         utils::project_points_jets(
-            { cv::Point3f(0.0, 0, 0) },
+            { cv::Point3f(0, 0, 0) },
             pose_in_camera_cv,
             ctx.camera_info.camera_matrix,
             ctx.camera_info.distortion_coefficients,
@@ -356,7 +350,7 @@ struct State {
     }
     inline void predict(double dt, const Voter& voter) {
         Predict p { .dt = dt, .voter = voter };
-        auto tmp_x=x;
+        auto tmp_x = x;
         p.f(tmp_x, x);
         timestamp +=
             std::chrono::duration_cast<TimePoint::duration>(std::chrono::duration<double>(dt));

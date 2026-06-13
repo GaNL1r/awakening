@@ -1,7 +1,7 @@
 mode: auto_buff
 enemy_color: blue
 max_infer_num: 5
-bullet_speed: 20.5
+bullet_speed: 11.5
 
 serial:
   enable: false
@@ -154,17 +154,17 @@ rune_detector:
   cv:
     bin_threshold: 70
     color_diff_thresh: 20
-    rune_r_min_area: 10
+    rune_r_min_area: 1
     rune_r_max_area: 999999999
     rune_r_1x1ratio_tol: 0.7
-    rune_r_fill_ratio_min: 0.3
+    rune_r_fill_ratio_min: 0.1
     rune_pan_min_area: 10
     rune_pan_max_area: 99999999
     rune_pan_cluster_radius: 70
     rune_pan_max_square_ratio: 1.3
 
 rune_tracker:
-  lost_time_thres: 3.0
+  lost_time_thres: 2.0
   tracking_thres: 10
   esekf_iter_num: 5
   q_xyz: [0.0001, 0.0001, 0.0001]

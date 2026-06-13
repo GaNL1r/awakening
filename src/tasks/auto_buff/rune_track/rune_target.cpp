@@ -91,8 +91,8 @@ void RuneTarget::write_log() {
         j_target_state["voter"] = voter.to_str();
     });
 }
-void RuneTarget::reset(
-    RuneFanBladeWithR& f,
+bool RuneTarget::reset(
+    RuneDetection& d,
     const RuneTrackerCfg& c,
     const TimePoint& timestamp,
     int frame_id,
@@ -100,6 +100,25 @@ void RuneTarget::reset(
     const ISO3& camera_cv_in_odom
 ) {
     cfg = c;
+    std::optional<ISO3> pose;
+    if (d.fan_blades.size() > 0) {
+        fan_pnp(d.fan_blades.front(), camera_info, camera_cv_in_odom, true);
+        pose = d.fan_blades.front().pose;
+    } else if (!d.fan_targets.empty() && !d.rune_rs.empty()) {
+        cv::Point2f r;
+        double min_area = std::numeric_limits<double>::max();
+        for (const auto& rune_r: d.rune_rs) {
+            if (rune_r.rr.boundingRect2f().area() < min_area) {
+                min_area = rune_r.rr.boundingRect2f().area();
+                r = rune_r.rr.center;
+            }
+        }
+        d.fan_targets.front().sort_corners(r);
+        fan_target_pnp(d.fan_targets.front(), r, camera_info, camera_cv_in_odom, true);
+    }
+    if (!pose) {
+        return false;
+    }
     ypd_ctx = {
         .id = 0,
     };
@@ -138,9 +157,9 @@ void RuneTarget::reset(
     esekf = ESEKF(Predict { .dt = 0.005, .voter = voter }, u_q, inject, p0);
 
     esekf.value().set_iteration_num(cfg.esekf_iter_num);
-    fan_pnp(f, camera_info, camera_cv_in_odom, true);
-    auto pos = f.pose.translation();
-    auto rpy = utils::matrix2rpy(f.pose.linear());
+
+    auto pos = pose.value().translation();
+    auto rpy = utils::matrix2rpy(pose.value().linear());
     double a_guess = (A_LOWER + A_UPPER) / 2.0;
     double w_guess = (W_LOWER + W_UPPER) / 2.0;
     double tau = 0;
@@ -162,6 +181,8 @@ void RuneTarget::reset(
     this_id = GOBAL_ID++;
     fan_wc.reset();
     fan_wc.is_visable[0] = true;
+    return true;
+
 }
 void RuneTarget::fan_pnp(
     RuneFanBladeWithR& r,
@@ -223,7 +244,7 @@ RuneTarget::ypdmeasurement_covariance(const Eigen::Matrix<double, motion_model::
     r(idx::YPD_Y, idx::YPD_Y) = 4e-3;
     r(idx::YPD_P, idx::YPD_P) = 4e-3;
     r(idx::YPD_D, idx::YPD_D) = z[idx::YPD_D] * z[idx::YPD_D] * 0.1;
-    r(idx::ROT_YAW, idx::ROT_YAW) = 0.05;
+    r(idx::ROT_YAW, idx::ROT_YAW) = 0.0;
     r(idx::ROT_ROLL, idx::ROT_ROLL) = 0.05;
     return r;
 }

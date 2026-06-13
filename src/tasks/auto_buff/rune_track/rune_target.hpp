@@ -100,8 +100,8 @@ public:
         }
     };
     RuneTarget() {}
-    void reset(
-        RuneFanBladeWithR& r,
+    bool reset(
+        RuneDetection& d,
         const RuneTrackerCfg& c,
         const TimePoint& timestamp,
         int frame_id,

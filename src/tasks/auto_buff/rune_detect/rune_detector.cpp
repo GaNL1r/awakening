@@ -2,6 +2,7 @@
 #include "rune_infer.hpp"
 #include <memory>
 #include <opencv2/core/mat.hpp>
+#include <opencv2/highgui.hpp>
 #include <vector>
 #if USE_OPENVINO
     #include "utils/net_detector/openvino/net_detector_openvino.hpp"
@@ -179,16 +180,11 @@ struct RuneDetector::Impl {
             float w = rr.size.width;
             float h = rr.size.height;
 
-            if (w < 5 || h < 5)
-                continue;
-
             double ratio = (w > h ? w / h : h / w);
             if (ratio - 1.0 > params_.cv_params.rune_r_1x1ratio_tol)
                 continue;
 
             double rect_area = w * h;
-            if (rect_area <= 1e-5)
-                continue;
 
             double fill_ratio = area / rect_area;
             if (fill_ratio < params_.cv_params.rune_r_fill_ratio_min)

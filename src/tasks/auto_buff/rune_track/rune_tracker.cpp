@@ -21,6 +21,10 @@ struct RuneTracker::Impl {
         } else {
             found = update_target(detection, camera_info, camera_cv_in_odom);
         }
+        if (target_.get_target_state().pos().norm() > 15.0) {
+            target_.track_state.tracker_state = RuneTarget::TrackState::LOST;
+            AWAKENING_WARN("TOO FAR");
+        }
         update_fsm(found, detection.timestamp);
         detection.rune_rs.erase(
             std::remove_if(
@@ -42,14 +46,9 @@ struct RuneTracker::Impl {
             return false;
         }
         AWAKENING_INFO("init rune target");
-        target_.reset(
-            r.fan_blades.front(),
-            cfg_,
-            r.timestamp,
-            frame_id,
-            camera_info,
-            camera_cv_in_odom
-        );
+        if (!target_.reset(r, cfg_, r.timestamp, frame_id, camera_info, camera_cv_in_odom)) {
+            return false;
+        }
         target_.track_state.tracker_state = RuneTarget::TrackState::DETECTING;
         return true;
     }
