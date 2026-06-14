@@ -57,11 +57,10 @@ struct RuneTracker::Impl {
         const CameraInfo& camera_info,
         const ISO3& camera_cv_in_odom
     ) noexcept {
-        if (r.fan_blades.empty()) {
+        if (r.fan_blades.empty() && r.rune_rs.empty() && r.fan_targets.empty()) {
             return false;
         }
         target_.predict_ekf(r.timestamp);
-
         auto matched_fans =
             target_.match_fan(r.fan_blades, r.timestamp, camera_info, camera_cv_in_odom);
         auto match_r =
@@ -73,7 +72,7 @@ struct RuneTracker::Impl {
             camera_info,
             camera_cv_in_odom
         );
-        int updated = target_.update(
+        auto [fan_updated, r_updated] = target_.update(
             matched_fans,
             matched_fan_targets,
             match_r,
@@ -81,7 +80,7 @@ struct RuneTracker::Impl {
             camera_info,
             camera_cv_in_odom
         );
-        return updated > 0;
+        return fan_updated > 0;
     }
     void update_fsm(bool found, const TimePoint& now) noexcept {
         auto& target = target_;

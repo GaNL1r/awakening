@@ -94,6 +94,7 @@ struct RuneFanBladeWithR {
 struct RuneR {
     cv::RotatedRect rr;
     bool laji = true;
+    RuneColor color = RuneColor::NONE;
     void add_offset(const cv::Point2f& offset) {
         rr.center += offset;
     }
@@ -110,6 +111,8 @@ struct RuneFanTarget {
     std::array<cv::Point2f, 4> corners;
     std::vector<cv::Point2f> key_points;
     cv::Point2f center;
+    RuneColor color = RuneColor::NONE;
+    cv::RotatedRect rr;
     ISO3 pose;
     enum PointsIndex { LT, LB, RB, RT, CENTER, N };
     template<typename PointT>

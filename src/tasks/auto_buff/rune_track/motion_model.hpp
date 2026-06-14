@@ -308,6 +308,8 @@ struct YPDMeasure {
         T xy_dist = ceres::sqrt(target_x * target_x + target_y * target_y);
         T dist = ceres::sqrt(xy_dist * xy_dist + target_z * target_z);
         // Observation model
+        // auto yaw = x[idx::YAW];
+        auto yaw = ceres::atan2(x[idx::CY], x[idx::CX]);
         z[idx::YPD_Y] = ceres::atan2(target_y, target_x); // yaw
         z[idx::YPD_P] = ceres::atan2(target_z, xy_dist); // pitch
         z[idx::YPD_D] = dist; // distance

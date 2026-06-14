@@ -1,5 +1,8 @@
 #include "rune_detector.hpp"
 #include "rune_infer.hpp"
+#include "tasks/auto_buff/type.hpp"
+#include "utils/common/image.hpp"
+#include <cstdlib>
 #include <memory>
 #include <opencv2/core/mat.hpp>
 #include <opencv2/highgui.hpp>
@@ -97,8 +100,52 @@ struct RuneDetector::Impl {
 
         return bin;
     };
+    RuneColor get_color(const cv::Mat& src, const cv::Rect& rect, PixelFormat format) const {
+        if (rect.area() <= 0) {
+            return RuneColor::NONE;
+        }
+        if (rect.x < 0 || rect.y < 0 || rect.x >= src.cols || rect.y >= src.rows) {
+            return RuneColor::NONE;
+        }
+
+        int x2 = rect.x + rect.width;
+        int y2 = rect.y + rect.height;
+
+        if (x2 <= 0 || y2 <= 0 || x2 > src.cols || y2 > src.rows) {
+            return RuneColor::NONE;
+        }
+        const cv::Mat roi = src(rect);
+        const cv::Scalar avg = cv::mean(roi);
+        double B, G, R;
+        switch (format) {
+            case PixelFormat::BGR:
+                B = avg[0];
+                G = avg[1];
+                R = avg[2];
+                break;
+            case PixelFormat::RGB:
+                R = avg[0];
+                G = avg[1];
+                B = avg[2];
+                break;
+            default:
+                B = avg[0];
+                G = avg[1];
+                R = avg[2];
+                break;
+        }
+
+        // if (std::abs(R - B) < params_.cv_params.color_diff_thresh) {
+        //     return RuneColor::NONE;
+        // }
+        if (R > B) {
+            return RuneColor::RED;
+        } else {
+            return RuneColor::BLUE;
+        }
+    }
     void color_filter(
-        const cv::Mat& color,
+        const cv::Mat& src,
         PixelFormat format,
         const std::vector<std::vector<cv::Point>>& contours,
         std::vector<bool>& used_flags,
@@ -110,50 +157,21 @@ struct RuneDetector::Impl {
             if (r.width < 5 || r.height < 5)
                 continue;
 
-            cv::Rect2f rr = r & cv::Rect2f(0, 0, color.cols, color.rows);
+            cv::Rect2f rr = r & cv::Rect2f(0, 0, src.cols, src.rows);
             if (rr.width < 2 || rr.height < 2)
                 continue;
 
-            const cv::Mat roi = color(rr);
-            const cv::Scalar avg = cv::mean(roi);
-            double B, G, R;
-            switch (format) {
-                case PixelFormat::BGR:
-                    B = avg[0];
-                    G = avg[1];
-                    R = avg[2];
-                    break;
-                case PixelFormat::RGB:
-                    R = avg[0];
-                    G = avg[1];
-                    B = avg[2];
-                    break;
-                default:
-                    B = avg[0];
-                    G = avg[1];
-                    R = avg[2];
-                    break;
-            }
-
-            const double diff_RB = R - B;
-            const double diff_BR = B - R;
-
-            const bool is_red = (diff_RB > params_.cv_params.color_diff_thresh);
-            const bool is_blue = (diff_BR > params_.cv_params.color_diff_thresh);
-
+            auto color = get_color(src, rr, format);
             bool invalid = false;
 
-            if (!need_red) {
-                if (is_red)
-                    invalid = true;
+            if (need_red) {
+                if (color != RuneColor::RED) {
+                    used_flags[i] = true;
+                }
             } else {
-                if (is_blue)
-                    invalid = true;
-            }
-
-            used_flags[i] = !invalid;
-
-            if (!used_flags[i]) {
+                if (color != RuneColor::BLUE) {
+                    used_flags[i] = true;
+                }
             }
         }
     }
@@ -175,7 +193,6 @@ struct RuneDetector::Impl {
             if (area < params_.cv_params.rune_r_min_area
                 || area > params_.cv_params.rune_r_max_area)
                 continue;
-
             cv::RotatedRect rr = cv::minAreaRect(contours[i]);
             float w = rr.size.width;
             float h = rr.size.height;
@@ -225,7 +242,9 @@ struct RuneDetector::Impl {
             cv::Point2f center;
             int parent_top_id;
         };
+
         std::vector<Node> candidates;
+
         for (int i = 0; i < contours.size(); i++) {
             if (used_flags[i])
                 continue;
@@ -243,6 +262,7 @@ struct RuneDetector::Impl {
 
             cv::Point2f center(m.m10 / m.m00, m.m01 / m.m00);
             int top_parent = find_top_parent(i, hierarchy);
+
             candidates.push_back({ i, center, top_parent });
         }
 
@@ -279,8 +299,8 @@ struct RuneDetector::Impl {
                         if (cluster_id[v] != -1)
                             continue;
 
-                        auto& cu = candidates[idx_list[u]].center;
-                        auto& cv = candidates[idx_list[v]].center;
+                        const auto& cu = candidates[idx_list[u]].center;
+                        const auto& cv = candidates[idx_list[v]].center;
 
                         double dx = cu.x - cv.x;
                         double dy = cu.y - cv.y;
@@ -292,6 +312,7 @@ struct RuneDetector::Impl {
                         }
                     }
                 }
+
                 cluster_count++;
             }
 
@@ -303,11 +324,10 @@ struct RuneDetector::Impl {
 
             for (int i = 0; i < M; i++) {
                 int cid = cluster_id[i];
+                if (cid < 0)
+                    continue;
 
                 if (cluster_size[cid] >= 3) {
-                    int contour_index = candidates[idx_list[i]].idx;
-                    used_flags[contour_index] = true;
-                    mark_parent(contour_index, hierarchy, used_flags);
                     cluster_points[cid].push_back(candidates[idx_list[i]].center);
                 }
             }
@@ -317,6 +337,7 @@ struct RuneDetector::Impl {
                     continue;
 
                 cv::RotatedRect rr = cv::minAreaRect(cluster_points[cid]);
+
                 double w = rr.size.width;
                 double h = rr.size.height;
 
@@ -337,19 +358,37 @@ struct RuneDetector::Impl {
                     dist_list.emplace_back(dist, p);
                 }
 
-                std::sort(dist_list.begin(), dist_list.end(), [](auto& a, auto& b) {
+                std::sort(dist_list.begin(), dist_list.end(), [](const auto& a, const auto& b) {
                     return a.first > b.first;
                 });
-                if (dist_list.size() >= 4) {
-                    RuneFanTarget fan_target;
-                    fan_target.center = rr.center;
-                    for (int i = 0; i < 4; i++) {
-                        fan_target.corners[i] = dist_list[i].second;
+
+                if (dist_list.size() < 4)
+                    continue;
+
+                RuneFanTarget fan_target;
+                fan_target.center = rr.center;
+                fan_target.rr = rr;
+
+                for (int i = 0; i < 4; i++) {
+                    fan_target.corners[i] = dist_list[i].second;
+                }
+
+                results.push_back(fan_target);
+
+                for (int i = 0; i < M; i++) {
+                    int cid2 = cluster_id[i];
+                    if (cid2 < 0)
+                        continue;
+
+                    if (cluster_size[cid2] >= 3) {
+                        int contour_index = candidates[idx_list[i]].idx;
+                        used_flags[contour_index] = true;
+                        mark_parent(contour_index, hierarchy, used_flags);
                     }
-                    results.push_back(fan_target);
                 }
             }
         }
+
         return results;
     }
     RuneDetection
@@ -374,9 +413,12 @@ struct RuneDetector::Impl {
         result.fan_targets = get_rune_fan_targets(contours, hierarchy, used_flags);
         result.rune_rs = get_rune_rs(contours, hierarchy, used_flags);
         for (auto& rune_r: result.rune_rs) {
+            rune_r.color = get_color(roi, rune_r.rr.boundingRect2f(), frame.img_frame.format);
             rune_r.add_offset(focus.tl());
         }
         for (auto& fan_target: result.fan_targets) {
+            fan_target.color =
+                get_color(roi, fan_target.rr.boundingRect2f(), frame.img_frame.format);
             fan_target.add_offset(focus.tl());
         }
         return result;

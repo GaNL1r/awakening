@@ -149,7 +149,7 @@ public:
         const CameraInfo& camera_info,
         const ISO3& camera_cv_in_odom
     ) const noexcept;
-    int update(
+    std::tuple<int, int> update(
         std::vector<std::pair<int, RuneFanBladeWithR>>& f,
         std::vector<std::pair<int, RuneFanTarget>>& a,
         std::optional<std::pair<bool, cv::Point2f>>& r,
@@ -206,6 +206,7 @@ public:
     motion_model::FanTargetMeasure::Ctx fan_target_ctx;
     motion_model::YPDMeasure::Ctx ypd_ctx;
     motion_model::Voter voter;
+    // RuneColor target_color = RuneColor::NONE;
     RuneTrackerCfg cfg;
     TimePoint last_update;
     TrackState track_state;

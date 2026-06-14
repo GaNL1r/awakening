@@ -14,6 +14,7 @@
 #include <numeric>
 #include <opencv2/core/types.hpp>
 #include <optional>
+#include <tuple>
 #include <vector>
 namespace awakening::auto_buff {
 using namespace motion_model;
@@ -26,11 +27,18 @@ namespace {
         const TimePoint& timestamp,
         Pnp&& pnp
     ) noexcept {
+        // fans.erase(
+        //     std::remove_if(
+        //         fans.begin(),
+        //         fans.end(),
+        //         [&](const Fan& f) { return (f.color != target.target_color); }
+        //     ),
+        //     fans.end()
+        // );
         constexpr double MAX_COST = 1e9;
         std::vector<std::pair<int, Fan>> result;
         const int n_obs = static_cast<int>(fans.size());
         std::vector<std::vector<double>> cost(n_obs, std::vector<double>(FAN_NUM, MAX_COST + 1));
-
         std::vector<YPDVecZ> meas_list(n_obs);
         for (int obs = 0; obs < n_obs; ++obs) {
             pnp(fans[obs]);
@@ -49,6 +57,7 @@ namespace {
 
                 YPDVecZ nu = meas_list[obs] - z_pred;
                 nu[idx::YPD_Y] = angles::normalize_angle(nu[idx::YPD_Y]);
+                nu[idx::YPD_P] = angles::normalize_angle(nu[idx::YPD_P]);
                 nu[idx::ROT_YAW] = angles::normalize_angle(nu[idx::ROT_YAW]);
                 nu[idx::ROT_ROLL] = angles::normalize_angle(nu[idx::ROT_ROLL]);
                 auto R = target.ypdmeasurement_covariance(z_pred);
@@ -104,6 +113,7 @@ bool RuneTarget::reset(
     if (d.fan_blades.size() > 0) {
         fan_pnp(d.fan_blades.front(), camera_info, camera_cv_in_odom, true);
         pose = d.fan_blades.front().pose;
+        // target_color = d.fan_blades.front().color;
     } else if (!d.fan_targets.empty() && !d.rune_rs.empty()) {
         cv::Point2f r;
         double min_area = std::numeric_limits<double>::max();
@@ -115,6 +125,7 @@ bool RuneTarget::reset(
         }
         d.fan_targets.front().sort_corners(r);
         fan_target_pnp(d.fan_targets.front(), r, camera_info, camera_cv_in_odom, true);
+        // target_color = d.fan_targets.front().color;
     }
     if (!pose) {
         return false;
@@ -182,7 +193,6 @@ bool RuneTarget::reset(
     fan_wc.reset();
     fan_wc.is_visable[0] = true;
     return true;
-
 }
 void RuneTarget::fan_pnp(
     RuneFanBladeWithR& r,
@@ -244,7 +254,7 @@ RuneTarget::ypdmeasurement_covariance(const Eigen::Matrix<double, motion_model::
     r(idx::YPD_Y, idx::YPD_Y) = 4e-3;
     r(idx::YPD_P, idx::YPD_P) = 4e-3;
     r(idx::YPD_D, idx::YPD_D) = z[idx::YPD_D] * z[idx::YPD_D] * 0.1;
-    r(idx::ROT_YAW, idx::ROT_YAW) = 0.0;
+    r(idx::ROT_YAW, idx::ROT_YAW) = 0.1;
     r(idx::ROT_ROLL, idx::ROT_ROLL) = 0.05;
     return r;
 }
@@ -253,21 +263,14 @@ RuneTarget::get_ypdmeasurement(const ISO3& pose) const noexcept {
     Eigen::Matrix<double, YPDZ_N, 1> z;
     double ax = pose.translation().x(), ay = pose.translation().y(), az = pose.translation().z();
     auto ypd_y = std::atan2(ay, ax);
-    static double last_ypd_y = 0;
-    ypd_y = last_ypd_y + angles::shortest_angular_distance(last_ypd_y, ypd_y);
-    last_ypd_y = ypd_y;
     auto ypd_p = std::atan2(az, std::sqrt(ax * ax + ay * ay));
     auto ypd_d = std::sqrt(ax * ax + ay * ay + az * az);
     z[idx::YPD_Y] = ypd_y;
     z[idx::YPD_P] = ypd_p;
     z[idx::YPD_D] = ypd_d;
     auto rpy = utils::matrix2rpy(pose.linear());
-    double yaw = rpy[2];
-    z[idx::ROT_YAW] = last_rot_yaw + angles::shortest_angular_distance(last_rot_yaw, yaw);
-    last_rot_yaw = z[idx::ROT_YAW];
-    double roll = rpy[0];
-    z[idx::ROT_ROLL] = last_rot_roll + angles::shortest_angular_distance(last_rot_roll, roll);
-    last_rot_roll = z[idx::ROT_ROLL];
+    z[idx::ROT_YAW] = rpy[2];
+    z[idx::ROT_ROLL] = rpy[0];
     return z;
 }
 void RuneTarget::predict_ekf(const TimePoint& timestamp) {
@@ -319,7 +322,6 @@ std::optional<std::pair<bool, cv::Point2f>> RuneTarget::match_r(
         cv::Point2f(_fan_z_pred[idx::BOTTOM_X], _fan_z_pred[idx::BOTTOM_Y])
         - cv::Point2f(_r_z_pred[idx::R_X], _r_z_pred[idx::R_Y])
     ));
-
     auto avg_r = std::accumulate(
                      r_vec.begin(),
                      r_vec.end(),
@@ -335,6 +337,9 @@ std::optional<std::pair<bool, cv::Point2f>> RuneTarget::match_r(
     int best_id = -1;
     double min_cost = std::numeric_limits<double>::max();
     for (size_t i = 0; i < rs.size(); ++i) {
+        // if (rs[i].color != target_color) {
+        //     continue;
+        // }
         double error = cv::norm(rs[i].rr.center - avg_r);
         if (error > avg_hand_length * 0.2) {
             continue;
@@ -362,7 +367,7 @@ std::optional<std::pair<bool, cv::Point2f>> RuneTarget::match_r(
 
     return best;
 }
-int RuneTarget::update(
+std::tuple<int, int> RuneTarget::update(
     std::vector<std::pair<int, RuneFanBladeWithR>>& matched_fans,
     std::vector<std::pair<int, RuneFanTarget>>& matched_fan_targets,
     std::optional<std::pair<bool, cv::Point2f>>& r,
@@ -403,8 +408,9 @@ int RuneTarget::update(
                                      const Eigen::Matrix<double, FanBladeZ_N, 1>& z) {
         return z - z_pred;
     };
-    fan_wc.reset();
-
+    if (!matched_fans.empty() || !matched_fan_targets.empty()) {
+        fan_wc.reset();
+    }
     for (const auto& [id, fan]: matched_fans) {
         fan_wc.update(id, timestamp);
         FanBladeVecZ z;
@@ -452,11 +458,12 @@ int RuneTarget::update(
         FanTargetMeasure measure { .ctx = ctx };
         obs.push_back(esekf.value().make_obs(z, measure, fan_target_u_r, fan_target_cal_residual));
     }
-
-    target_state.x = esekf.value().update_multi(obs);
-    target_state.timestamp = timestamp;
-    last_update = timestamp;
-    this_id = GOBAL_ID++; //全局状态标记，下游控制对同一id的不重复构建轨迹]
+    if (obs.size() > 0) {
+        target_state.x = esekf.value().update_multi(obs);
+        target_state.timestamp = timestamp;
+        last_update = timestamp;
+        this_id = GOBAL_ID++; //全局状态标记，下游控制对同一id的不重复构建轨迹]
+    }
     int match_fan_num = matched_fans.size() + matched_fan_targets.size();
     if (match_fan_num > 0) {
         voter.update(target_state.roll(), cfg.voter_state_need_count);
@@ -467,7 +474,7 @@ int RuneTarget::update(
             voter.mode = Voter::Big;
         }
     }
-    return match_fan_num;
+    return std::make_tuple(match_fan_num, (r) ? 1 : 0);
 }
 std::vector<std::pair<int, RuneFanBladeWithR>> RuneTarget::match_fan(
     std::vector<RuneFanBladeWithR>& fans,

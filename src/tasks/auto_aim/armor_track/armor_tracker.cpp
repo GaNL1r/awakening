@@ -96,8 +96,6 @@ struct ArmorTracker::Impl {
         const ISO3& camera_cv_in_odom,
         std::vector<ArmorClass> ignore = {}
     ) noexcept {
-        if (armors.armors.empty())
-            return false;
         std::vector<Armor> candidates;
         candidates.reserve(armors.armors.size());
         for (const auto& a: armors.armors) {
@@ -108,8 +106,6 @@ struct ArmorTracker::Impl {
                 candidates.emplace_back(a);
             }
         }
-        if (candidates.empty())
-            return false;
         target.predict_ekf(armors.timestamp);
         std::vector<Light> lights;
         auto matched_armors =

@@ -258,18 +258,13 @@ ArmorTarget::get_ypdmeasurement(Armor& a) const noexcept {
     double ax = a.pose.translation().x(), ay = a.pose.translation().y(),
            az = a.pose.translation().z();
     auto ypd_y = std::atan2(ay, ax);
-    static double last_ypd_y = 0;
-    ypd_y = last_ypd_y + angles::shortest_angular_distance(last_ypd_y, ypd_y);
-    last_ypd_y = ypd_y;
     auto ypd_p = std::atan2(az, std::sqrt(ax * ax + ay * ay));
     auto ypd_d = std::sqrt(ax * ax + ay * ay + az * az);
     z[idx::YPD_Y] = ypd_y;
     z[idx::YPD_P] = ypd_p;
     z[idx::YPD_D] = ypd_d;
     auto rpy = utils::matrix2rpy(a.pose.linear());
-    double yaw = rpy[2];
-    z[idx::ROT_YAW] = last_rot_yaw + angles::shortest_angular_distance(last_rot_yaw, yaw);
-    last_rot_yaw = z[idx::ROT_YAW];
+    z[idx::ROT_YAW] = rpy[2];
     return z;
 }
 Eigen::Matrix<double, X_N, X_N> ArmorTarget::process_noise(double dt) const noexcept {
@@ -386,11 +381,13 @@ int ArmorTarget::update(
         z[std::to_underlying(idx::BOTTOM_Y)] = light.bottom.y;
         obs.push_back(esekf.value().make_obs(z, measure, u_r, cal_residual));
     }
+    if (obs.size() > 0) {
+        target_state.x = esekf.value().update_multi(obs);
+        target_state.timestamp = timestamp;
+        last_update = timestamp;
+        this_id = GOBAL_ID++; //全局状态标记，下游控制对同一id的不重复构建轨迹
+    }
 
-    target_state.x = esekf.value().update_multi(obs);
-    target_state.timestamp = timestamp;
-    last_update = timestamp;
-    this_id = GOBAL_ID++; //全局状态标记，下游控制对同一id的不重复构建轨迹
     return updated;
 }
 std::vector<std::pair<int, Armor>> ArmorTarget::match_armor(

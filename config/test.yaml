@@ -1,7 +1,7 @@
 mode: auto_buff
 enemy_color: blue
 max_infer_num: 5
-bullet_speed: 11.5
+bullet_speed: 23.5
 
 serial:
   enable: false
@@ -153,7 +153,7 @@ rune_detector:
       use_cuda_preproces: true
   cv:
     bin_threshold: 70
-    color_diff_thresh: 20
+    color_diff_thresh: 10
     rune_r_min_area: 1
     rune_r_max_area: 999999999
     rune_r_1x1ratio_tol: 0.7
