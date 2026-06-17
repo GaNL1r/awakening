@@ -15,7 +15,7 @@ option(BUILD_WITH_TRT      "Enable TensorRT backend"   ON)
 option(BUILD_WITH_OPENVINO "Enable OpenVINO backend"   ON)
 option(BUILD_SENTRY "Enable Sentry"   ON)
 option(BUILD_RADAR "Enable Radar"   ON)
-option(BUILD_RUNTIME_TESTS "Build runtime test executables by default" OFF)
+option(BUILD_RUNTIME_TESTS "Build runtime test executables by default" ON)
 option(BUILD_WITH_PCH "Enable precompiled headers for C++ targets" ON)
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} ${PROJECT_SOURCE_DIR}/cmake)
 
@@ -225,7 +225,7 @@ target_link_libraries(standard
     ${PROJECT_NAME}_web
 )
 target_link_libraries(control_test
-    ${PROJECT_NAME}_auto_aim
+    ${PROJECT_NAME}_web
 )
 
 
@@ -255,7 +255,7 @@ target_link_libraries(standard
 
 if(BUILD_SENTRY)
 add_tool_executable(nav src/runtime/nav.cpp)
-add_tool_executable(sentry src/runtime/sentry.cpp)
+add_common_executable(sentry src/runtime/sentry.cpp)
 add_tool_executable(map_edit src/runtime/map_edit.cpp)
 
 target_link_libraries(nav
@@ -267,6 +267,7 @@ target_link_libraries(sentry
     ${PROJECT_NAME}_utils
     ${PROJECT_NAME}_auto_aim
     ${PROJECT_NAME}_auto_buff
+    ${PROJECT_NAME}_web
     ${PROJECT_NAME}_sentry_brain
 )
 

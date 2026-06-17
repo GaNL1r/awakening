@@ -174,23 +174,23 @@ void ArmorTarget::armor_pnp(
         //     }
         error += cv::norm(
             center(
-                img_points[std::to_underlying(ArmorKeyPointsIndex::LEFT_TOP)],
-                img_points[std::to_underlying(ArmorKeyPointsIndex::RIGHT_TOP)]
+                img_points[ArmorKeyPointsIndex::LEFT_TOP],
+                img_points[ArmorKeyPointsIndex::RIGHT_TOP]
             )
             - center(
-                key_points[std::to_underlying(ArmorKeyPointsIndex::LEFT_TOP)],
-                key_points[std::to_underlying(ArmorKeyPointsIndex::RIGHT_TOP)]
+                key_points[ArmorKeyPointsIndex::LEFT_TOP],
+                key_points[ArmorKeyPointsIndex::RIGHT_TOP]
             )
         );
 
         error += cv::norm(
             center(
-                img_points[std::to_underlying(ArmorKeyPointsIndex::LEFT_BOTTOM)],
-                img_points[std::to_underlying(ArmorKeyPointsIndex::RIGHT_BOTTOM)]
+                img_points[ArmorKeyPointsIndex::LEFT_BOTTOM],
+                img_points[ArmorKeyPointsIndex::RIGHT_BOTTOM]
             )
             - center(
-                key_points[std::to_underlying(ArmorKeyPointsIndex::LEFT_BOTTOM)],
-                key_points[std::to_underlying(ArmorKeyPointsIndex::RIGHT_BOTTOM)]
+                key_points[ArmorKeyPointsIndex::LEFT_BOTTOM],
+                key_points[ArmorKeyPointsIndex::RIGHT_BOTTOM]
             )
         );
 
@@ -217,24 +217,6 @@ ArmorTarget::uvmeasurement_covariance(const Eigen::Matrix<double, UVZ_N, 1>& z) 
     r.setZero();
     r.diagonal().setConstant(u_r);
     return r;
-}
-[[nodiscard]] Eigen::Matrix<double, UVZ_N, 1>
-ArmorTarget::get_uvmeasurement(Armor& a, bool left) const noexcept {
-    Eigen::Matrix<double, UVZ_N, 1> z;
-    auto key_points = a.key_points.landmarks();
-    if (left) {
-        z[idx::TOP_X] = key_points[std::to_underlying(ArmorKeyPointsIndex::LEFT_TOP)].x;
-        z[idx::TOP_Y] = key_points[std::to_underlying(ArmorKeyPointsIndex::LEFT_TOP)].y;
-        z[idx::BOTTOM_X] = key_points[std::to_underlying(ArmorKeyPointsIndex::LEFT_BOTTOM)].x;
-        z[idx::BOTTOM_Y] = key_points[std::to_underlying(ArmorKeyPointsIndex::LEFT_BOTTOM)].y;
-    } else {
-        z[idx::BOTTOM_X] = key_points[std::to_underlying(ArmorKeyPointsIndex::RIGHT_BOTTOM)].x;
-        z[idx::BOTTOM_Y] = key_points[std::to_underlying(ArmorKeyPointsIndex::RIGHT_BOTTOM)].y;
-        z[idx::TOP_X] = key_points[std::to_underlying(ArmorKeyPointsIndex::RIGHT_TOP)].x;
-        z[idx::TOP_Y] = key_points[std::to_underlying(ArmorKeyPointsIndex::RIGHT_TOP)].y;
-    }
-
-    return z;
 }
 
 [[nodiscard]] Eigen::
@@ -336,15 +318,15 @@ int ArmorTarget::update(
         Eigen::Matrix<double, UVZ_N, 1> z;
         auto key_points = armor.key_points.landmarks();
         if (is_left) {
-            z[idx::TOP_X] = key_points[std::to_underlying(ArmorKeyPointsIndex::LEFT_TOP)].x;
-            z[idx::TOP_Y] = key_points[std::to_underlying(ArmorKeyPointsIndex::LEFT_TOP)].y;
-            z[idx::BOTTOM_X] = key_points[std::to_underlying(ArmorKeyPointsIndex::LEFT_BOTTOM)].x;
-            z[idx::BOTTOM_Y] = key_points[std::to_underlying(ArmorKeyPointsIndex::LEFT_BOTTOM)].y;
+            z[idx::TOP_X] = key_points[ArmorKeyPointsIndex::LEFT_TOP].x;
+            z[idx::TOP_Y] = key_points[ArmorKeyPointsIndex::LEFT_TOP].y;
+            z[idx::BOTTOM_X] = key_points[ArmorKeyPointsIndex::LEFT_BOTTOM].x;
+            z[idx::BOTTOM_Y] = key_points[ArmorKeyPointsIndex::LEFT_BOTTOM].y;
         } else {
-            z[idx::BOTTOM_X] = key_points[std::to_underlying(ArmorKeyPointsIndex::RIGHT_BOTTOM)].x;
-            z[idx::BOTTOM_Y] = key_points[std::to_underlying(ArmorKeyPointsIndex::RIGHT_BOTTOM)].y;
-            z[idx::TOP_X] = key_points[std::to_underlying(ArmorKeyPointsIndex::RIGHT_TOP)].x;
-            z[idx::TOP_Y] = key_points[std::to_underlying(ArmorKeyPointsIndex::RIGHT_TOP)].y;
+            z[idx::BOTTOM_X] = key_points[ArmorKeyPointsIndex::RIGHT_BOTTOM].x;
+            z[idx::BOTTOM_Y] = key_points[ArmorKeyPointsIndex::RIGHT_BOTTOM].y;
+            z[idx::TOP_X] = key_points[ArmorKeyPointsIndex::RIGHT_TOP].x;
+            z[idx::TOP_Y] = key_points[ArmorKeyPointsIndex::RIGHT_TOP].y;
         }
         UVMeasure measure { .ctx = ctx };
         obs.push_back(esekf.value().make_obs(z, measure, u_r, cal_residual));

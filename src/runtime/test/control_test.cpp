@@ -1,7 +1,6 @@
 #include "../config.hpp"
 #include "ascii_banner.hpp"
 #include "backward-cpp/backward.hpp"
-#include "tasks/auto_aim/debug.hpp"
 #include "tasks/base/packet_typedef_receive.hpp"
 #include "tasks/base/packet_typedef_send.hpp"
 #include "utils/drivers/serial_driver.hpp"
@@ -65,7 +64,7 @@ int main(int argc, char** argv) {
             utils::load_isometry3(config["tf"]["shoot_in_gimbal"])
         );
     }
-    auto_aim::AutoAimDebugCtx auto_aim_dbg;
+    VisionDebugCtx dbg;
     s.register_task<SerialIO>("receive_serial", [&](SerialIO::second_type&& data) {
         static std::mutex mutex;
         std::lock_guard<std::mutex> lock(mutex);
@@ -143,14 +142,15 @@ int main(int argc, char** argv) {
         send.enable_yaw_diff = cmd.enable_yaw_diff;
         send.enable_pitch_diff = cmd.enable_pitch_diff;
         serial.write(std::move(utils::to_vector(send)));
-        auto_aim_dbg.gimbal_cmd.set(cmd);
+        dbg.gimbal_cmd.set(cmd);
         auto gimbal_in_gimbal_odom =
             tf->pose_a_in_b(SimpleFrame::GIMBAL, SimpleFrame::GIMBAL_ODOM, Clock::now());
         auto rpy = utils::matrix2rpy(gimbal_in_gimbal_odom.linear());
         auto gimbal_yaw_pitch =
             std::make_pair(angles::to_degrees(rpy[2]), -angles::to_degrees(rpy[1]));
-        auto_aim_dbg.gimbal_yaw_pitch.set(gimbal_yaw_pitch);
-        write_debug_data(auto_aim_dbg);
+        dbg.gimbal_yaw_pitch.set(gimbal_yaw_pitch);
+        static Web web;
+        web.write_debug_data(dbg);
     });
     serial.start<SerialTag>("serial");
     s.build();

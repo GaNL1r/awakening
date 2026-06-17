@@ -148,7 +148,7 @@ inline std::vector<Armor> topk_and_nms(std::vector<Armor>& objs) {
         result.push_back(std::move(objs[indices[i]]));
         auto& ro = result.back();
         if (ro.net->tmp_points.size() >= 1) {
-            constexpr size_t N = std::to_underlying(ArmorKeyPointsIndex::N);
+            constexpr size_t N = ArmorKeyPointsIndex::N;
             std::array<cv::Point2f, N> accum {};
             std::array<int, N> count {};
             const auto& base_pts_opt = ro.net->key_points.points;
@@ -166,9 +166,8 @@ inline std::vector<Armor> topk_and_nms(std::vector<Armor>& objs) {
                     }
                 }
             }
-            std::array<std::optional<cv::Point2f>, std::to_underlying(ArmorKeyPointsIndex::N)>
-                final_pts {};
-            for (size_t k = 0; k < std::to_underlying(ArmorKeyPointsIndex::N); ++k) {
+            std::array<std::optional<cv::Point2f>, ArmorKeyPointsIndex::N> final_pts {};
+            for (size_t k = 0; k < ArmorKeyPointsIndex::N; ++k) {
                 if (count[k] > 0) {
                     if (base_pts_opt[k]) {
                         final_pts[k] = accum[k] / static_cast<float>(count[k]);
@@ -361,10 +360,10 @@ struct ArmorInfer::Impl {
             net->number = ModelTraits<Mode::RP>::CLASSES[class_id.x];
 
             auto& key_points = net->key_points;
-            key_points.points[std::to_underlying(I::LEFT_TOP)] = cv::Point2f(x1, y1);
-            key_points.points[std::to_underlying(I::LEFT_BOTTOM)] = cv::Point2f(x2, y2);
-            key_points.points[std::to_underlying(I::RIGHT_BOTTOM)] = cv::Point2f(x3, y3);
-            key_points.points[std::to_underlying(I::RIGHT_TOP)] = cv::Point2f(x4, y4);
+            key_points.points[I::LEFT_TOP] = cv::Point2f(x1, y1);
+            key_points.points[I::LEFT_BOTTOM] = cv::Point2f(x2, y2);
+            key_points.points[I::RIGHT_BOTTOM] = cv::Point2f(x3, y3);
+            key_points.points[I::RIGHT_TOP] = cv::Point2f(x4, y4);
             net->confidence = confidence;
 
             out_objs.push_back(std::move(obj));

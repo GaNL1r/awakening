@@ -438,15 +438,15 @@ int main(int argc, char** argv) {
     }
 
     s.register_task<CommonFrameIo, DetIo>("detector", [&](CommonFrameIo::second_type&& frame) {
-        static std::unique_ptr<std::counting_semaphore<>> detector_sem;
-        if (!detector_sem) {
-            detector_sem =
-                std::make_unique<std::counting_semaphore<>>(config["max_infer_num"].as<int>());
-        }
         Detection r;
         cv::Rect net_focus =
             cv::Rect(0, 0, frame.img_frame.src_img.cols, frame.img_frame.src_img.rows);
         if (mode == Mode::AutoAim) {
+            static std::unique_ptr<std::counting_semaphore<>> detector_sem;
+            if (!detector_sem) {
+                detector_sem =
+                    std::make_unique<std::counting_semaphore<>>(config["armor_detector"]["max_infer_num"].as<int>());
+            }
             std::optional<cv::Rect> detect_light = std::nullopt;
             auto target = armor_target.read();
             if (target.need_focus()) {
@@ -497,6 +497,11 @@ int main(int argc, char** argv) {
             auto batch_armors = armors_queue.dequeue_batch(); // 根据id有序输出
             r.armors = batch_armors;
         } else {
+            static std::unique_ptr<std::counting_semaphore<>> detector_sem;
+            if (!detector_sem) {
+                detector_sem =
+                    std::make_unique<std::counting_semaphore<>>(config["rune_detector"]["max_infer_num"].as<int>());
+            }
             auto target = rune_target.read();
             if (target.need_focus()) {
                 auto camera_cv_in_old = tf->pose_a_in_b(
@@ -767,7 +772,6 @@ int main(int argc, char** argv) {
             auto gimbal_yaw_pitch =
                 std::make_pair(angles::to_degrees(rpy[2]), -angles::to_degrees(rpy[1]));
             dbg->gimbal_yaw_pitch.set(gimbal_yaw_pitch);
-            web.write_debug_data(dbg.value());
             bullet_pick_up.update(
                 Clock::now(),
                 dbg->gimbal_cmd.get().appear ? dbg->gimbal_cmd.get().fly_time : 0.4
@@ -781,6 +785,7 @@ int main(int argc, char** argv) {
             }
             dbg->odom_in_camera_cv.set(odom_in_camera_cv);
             dbg->bullet_positions.set(bullet_poss);
+            web.write_debug_data(dbg.value());
             auto img = dbg->img_frame.get();
             auto debug_img = img.src_img.clone();
             if (img.format == PixelFormat::RGB) {

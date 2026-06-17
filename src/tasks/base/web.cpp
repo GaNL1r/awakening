@@ -176,8 +176,8 @@ struct Web::Impl {
                     auto draw_line = [&](auto _i, auto _j) {
                         cv::line(
                             img,
-                            image_points[std::to_underlying(_i)],
-                            image_points[std::to_underlying(_j)],
+                            image_points[_i],
+                            image_points[_j],
                             (i == cmd.select_id) ? cv::Scalar(255, 0, 255)
                                                  : cv::Scalar(200, 255, 200),
                             2

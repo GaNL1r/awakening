@@ -1,6 +1,10 @@
 #include "angles.h"
 #include "ascii_banner.hpp"
 #include "tasks/auto_aim/armor_omni.hpp"
+#include "tasks/auto_buff/rune_control/rune_aimer.hpp"
+#include "tasks/auto_buff/rune_detect/rune_detector.hpp"
+#include "tasks/auto_buff/rune_track/rune_target.hpp"
+#include "tasks/auto_buff/rune_track/rune_tracker.hpp"
 #include "tasks/base/ballistic_trajectory.hpp"
 #include "tasks/base/wheel_odometry.hpp"
 #include "tasks/sentry_brain/rmuc_2026/mode_factory.hpp"
@@ -24,7 +28,6 @@
 #include "param_deliver.h"
 #include "runtime/config.hpp"
 #include "tasks/auto_aim/armor_control/very_aimer.hpp"
-#include "tasks/auto_aim/debug.hpp"
 #include "utils/drivers/hik_camera.hpp"
 #include "utils/semaphore_guard.hpp"
 #include "utils/signal_guard.hpp"
@@ -32,7 +35,17 @@ namespace backward {
 static backward::SignalHandling sh;
 }
 using namespace awakening;
-
+enum class Mode : int { AutoAim = 0, AutoBuff = 1 };
+Mode str_to_Mode(std::string str) {
+    str = utils::to_upper(str);
+    if (str == "AUTO_AIM") {
+        return Mode::AutoAim;
+    } else if (str == "AUTO_BUFF") {
+        return Mode::AutoBuff;
+    } else {
+        throw std::invalid_argument("Invalid mode string");
+    }
+}
 enum class SentryFrame : int {
     ODOM,
     GIMBAL_ODOM,
@@ -67,7 +80,12 @@ struct FrameTag {};
 using CameraIO = IOPair<CameraTag, ImageFrame>;
 using SerialIO = IOPair<SerialTag, std::vector<uint8_t>>;
 using CommonFrameIo = IOPair<FrameTag, CommonFrame>;
-using DetIo = IOPair<DetectTag, std::vector<auto_aim::Armors>>;
+struct Detection {
+    std::optional<std::vector<auto_aim::Armors>> armors;
+    std::optional<std::vector<auto_buff::RuneDetection>> rune;
+    std::optional<TimePoint> detect_start;
+};
+using DetIo = IOPair<DetectTag, Detection>;
 struct LogCtx {
     int camera_count = 0;
     int detect_count = 0;
@@ -136,6 +154,7 @@ int main(int argc, char** argv) {
     auto config = YAML::LoadFile(config_path);
 
     Scheduler s;
+    Mode mode = str_to_Mode(config["mode"].as<std::string>());
     EnemyColor enemy_color = enemy_color_from_string(config["enemy_color"].as<std::string>());
     double bullet_speed = config["bullet_speed"].as<double>();
 #ifdef USE_ROS2
@@ -176,9 +195,14 @@ int main(int argc, char** argv) {
     auto_aim::AutoAimFsmController auto_aim_fsm_controller(config["auto_aim_fsm"]);
     auto_aim::ArmorOmni armor_omni(config["armor_omni"]);
     auto_aim::VeryAimer very_aimer(config["very_aimer"]);
+    auto_buff::RuneDetector rune_detector(config["rune_detector"]);
+    auto_buff::RuneTracker rune_tracker(config["rune_tracker"]);
+    auto_buff::RuneAimer rune_aimer(config["rune_aimer"]);
     utils::OrderedQueue<auto_aim::Armors> armors_queue;
+    utils::OrderedQueue<auto_buff::RuneDetection> rune_detections_queue;
     utils::SWMR<auto_aim::ArmorTarget> armor_target;
     utils::SWMR<auto_aim::ArmorTarget> omni_armor_target;
+    utils::SWMR<auto_buff::RuneTarget> rune_target;
     auto brain = sentry_brain::create_brain_mode(rcl_node, rcl_tf, config["brain"], serial);
     armor_omni.emplace_one(
         config["armor_omni"]["camera0"],
@@ -192,10 +216,10 @@ int main(int argc, char** argv) {
     );
     BulletPickUp bullet_pick_up(config["bullet_pick_up"]);
     LogCtx log_ctx;
-    std::optional<auto_aim::AutoAimDebugCtx> auto_aim_dbg;
+    std::optional<VisionDebugCtx> dbg;
     if (debug) {
-        auto_aim_dbg.emplace();
-        auto_aim_dbg->camera_info_ = camera_info;
+        dbg.emplace();
+        dbg->camera_info_ = camera_info;
     }
     WheelOdometry wheel_odometry(config["wheel_odometry"], Clock::now());
     auto tf = SimpleRobotTF::create();
@@ -378,162 +402,216 @@ int main(int argc, char** argv) {
     }
 
     s.register_task<CommonFrameIo, DetIo>("detector", [&](CommonFrameIo::second_type&& frame) {
-        static std::unique_ptr<std::counting_semaphore<>> detector_sem;
-        if (!detector_sem) {
-            detector_sem =
-                std::make_unique<std::counting_semaphore<>>(config["max_infer_num"].as<int>());
-        }
-        std::optional<cv::Rect> detect_light = std::nullopt;
-        auto target = armor_target.read();
+        Detection r;
         cv::Rect net_focus =
             cv::Rect(0, 0, frame.img_frame.src_img.cols, frame.img_frame.src_img.rows);
-        if (target.need_focus()) {
-            auto camera_cv_in_old = tf->pose_a_in_b(
-                SentryFrame(frame.frame_id),
-                SentryFrame(target.get_target_state().frame_id),
-                frame.img_frame.timestamp
-            );
-            target.set_target_state([&](auto_aim::armor_point_motion_model::State& state) {
-                state.predict(frame.img_frame.timestamp, target.target_number);
-            });
-            net_focus = target.get_net_focus_roi(
-                frame.img_frame.timestamp,
-                camera_cv_in_old,
-                camera_info,
-                frame.img_frame.src_img.size(),
-                armor_detector.get_net_wh_ratio()
-            );
-            if (target.need_detect_lights()) {
-                detect_light = target.expanded( // 送给传统越小越好
+        if (mode == Mode::AutoAim) {
+            static std::unique_ptr<std::counting_semaphore<>> detector_sem;
+            if (!detector_sem) {
+                detector_sem =
+                    std::make_unique<std::counting_semaphore<>>(config["armor_detector"]["max_infer_num"].as<int>());
+            }
+            std::optional<cv::Rect> detect_light = std::nullopt;
+            auto target = armor_target.read();
+            if (target.need_focus()) {
+                auto camera_cv_in_old = tf->pose_a_in_b(
+                    SentryFrame(frame.frame_id),
+                    SentryFrame(target.get_target_state().frame_id),
+                    frame.img_frame.timestamp
+                );
+                net_focus = target.get_net_focus_roi(
                     frame.img_frame.timestamp,
                     camera_cv_in_old,
                     camera_info,
-                    frame.img_frame.src_img.size()
+                    frame.img_frame.src_img.size(),
+                    armor_detector.get_net_wh_ratio()
                 );
-                detect_light->x -= detect_light->width * 0.3;
-                detect_light->y -= detect_light->height * 0.3;
-                detect_light->width *= 1.6;
-                detect_light->height *= 1.6;
-                detect_light.value() &=
-                    cv::Rect(0, 0, frame.img_frame.src_img.cols, frame.img_frame.src_img.rows);
+                if (target.need_detect_lights()) {
+                    detect_light = target.expanded( // 送给传统越小越好
+                        frame.img_frame.timestamp,
+                        camera_cv_in_old,
+                        camera_info,
+                        frame.img_frame.src_img.size()
+                    );
+                    detect_light->x -= detect_light->width * 0.3;
+                    detect_light->y -= detect_light->height * 0.3;
+                    detect_light->width *= 1.6;
+                    detect_light->height *= 1.6;
+                    detect_light.value() &=
+                        cv::Rect(0, 0, frame.img_frame.src_img.cols, frame.img_frame.src_img.rows);
+                }
             }
+
+            auto_aim::Armors armors { .timestamp = frame.img_frame.timestamp,
+                                      .id = frame.id,
+                                      .frame_id = frame.frame_id };
+            {
+                bool got = detector_sem->try_acquire();
+                utils::SemaphoreGuard guard(*detector_sem, got); //并发控制
+                if (got) {
+                    auto start = Clock::now();
+                    r.detect_start = start;
+                    auto [ls, as] = armor_detector.detect(frame, net_focus, detect_light);
+                    armors.armors = as;
+                    armors.lights = ls;
+                    log_ctx.detect_count++;
+                }
+            }
+            armors_queue.enqueue(armors);
+            auto batch_armors = armors_queue.dequeue_batch(); // 根据id有序输出
+            r.armors = batch_armors;
+        } else {
+            static std::unique_ptr<std::counting_semaphore<>> detector_sem;
+            if (!detector_sem) {
+                detector_sem =
+                    std::make_unique<std::counting_semaphore<>>(config["rune_detector"]["max_infer_num"].as<int>());
+            }
+            auto target = rune_target.read();
+            if (target.need_focus()) {
+                auto camera_cv_in_old = tf->pose_a_in_b(
+                    SentryFrame(frame.frame_id),
+                    SentryFrame(target.get_target_state().frame_id),
+                    frame.img_frame.timestamp
+                );
+                net_focus = target.get_net_focus_roi(
+                    frame.img_frame.timestamp,
+                    camera_cv_in_old,
+                    camera_info,
+                    frame.img_frame.src_img.size(),
+                    armor_detector.get_net_wh_ratio()
+                );
+            }
+            auto_buff::RuneDetection rune_detection;
+            {
+                bool got = detector_sem->try_acquire();
+                utils::SemaphoreGuard guard(*detector_sem, got); //并发控制
+                if (got) {
+                    auto start = Clock::now();
+                    r.detect_start = start;
+                    rune_detection = rune_detector.detect(frame, net_focus, enemy_color);
+                    log_ctx.detect_count++;
+                }
+            }
+            rune_detection.frame_id = frame.frame_id;
+            rune_detection.id = frame.id;
+            rune_detection.timestamp = frame.img_frame.timestamp;
+            rune_detections_queue.enqueue(rune_detection);
+            auto batch_runes = rune_detections_queue.dequeue_batch();
+            r.rune = batch_runes;
         }
 
-        auto_aim::Armors armors { .timestamp = frame.img_frame.timestamp,
-                                  .id = frame.id,
-                                  .frame_id = frame.frame_id };
-        {
-            bool got = detector_sem->try_acquire();
-            utils::SemaphoreGuard guard(*detector_sem, got);
-            if (got) {
-                auto [ls, as] = armor_detector.detect(frame, net_focus, detect_light);
-                armors.armors = as;
-                armors.lights = ls;
-                log_ctx.detect_count++;
-            }
-        }
-        armors_queue.enqueue(armors);
-        auto batch_armors = armors_queue.dequeue_batch();
-        if (auto_aim_dbg && is_web_running()) {
-            auto_aim_dbg->expanded.set(net_focus);
-            auto_aim_dbg->img_frame.set(std::move(frame.img_frame.clone()));
+        if (dbg && is_web_running()) {
+            dbg->expanded.set(net_focus);
+            dbg->img_frame.set(std::move(frame.img_frame));
         }
 
-        return std::make_tuple(std::optional<DetIo::second_type>(std::move(batch_armors)));
+        return std::make_tuple(std::optional<DetIo::second_type>(std::move(r)));
     });
 
     s.register_task<DetIo>("tracker", [&](DetIo::second_type&& io) {
         static std::mutex mutex;
         std::lock_guard<std::mutex> lock(mutex);
-        for (const auto& armors_raw: io) {
-            auto armors = armors_raw;
-            auto is_ally = [&](const auto& obj) {
-                return (enemy_color == EnemyColor::BLUE && obj.color == auto_aim::ArmorColor::RED)
-                    || (enemy_color == EnemyColor::RED && obj.color == auto_aim::ArmorColor::BLUE);
-            };
-            armors.armors.erase(
-                std::remove_if(
-                    armors.armors.begin(),
-                    armors.armors.end(),
-                    [&](const auto& armor) {
-                        return is_ally(armor) || armor.number == auto_aim::ArmorClass::NO2;
-                    }
-                ),
-                armors.armors.end()
-            );
-            armors.lights.erase(
-                std::remove_if(armors.lights.begin(), armors.lights.end(), is_ally),
-                armors.lights.end()
-            );
-            auto camera_cv_in_odom =
-                tf->pose_a_in_b(SentryFrame(armors.frame_id), SentryFrame::ODOM, armors.timestamp);
-            armors.frame_id = std::to_underlying(SentryFrame::ODOM);
-            auto __armor_target =
-                armor_tracker.track(armors, camera_info, camera_cv_in_odom, armors.frame_id);
-            auto_aim_fsm_controller.update(
-                __armor_target.get_target_state().vyaw(),
-                __armor_target.jumped,
-                __armor_target.get_target_state().timestamp
-            );
-            auto target_in_big_yaw = __armor_target;
-            auto old_in_big_yaw = tf->pose_a_in_b(
-                SentryFrame(target_in_big_yaw.get_target_state().frame_id),
-                SentryFrame::BIG_YAW,
-                target_in_big_yaw.get_target_state().timestamp
-            );
-            target_in_big_yaw.set_target_state([&](auto& s) {
-                auto pos = s.pos();
-                pos = old_in_big_yaw * pos;
-                auto vel = s.vel();
-                vel = old_in_big_yaw.linear() * vel;
-                s.set_pos(pos);
-                s.set_vel(vel);
-            });
-            if (brain) {
-                brain->update_armor_target(target_in_big_yaw);
-            }
-
-            armor_target.write(__armor_target);
-
-            auto latency_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-                                  Clock::now() - armors.timestamp
-            )
-                                  .count();
-            log_ctx.latency_ms_total += latency_ms;
-            log_ctx.found_count += armor_tracker.get_count();
-            armor_tracker.reset_count();
-            if (auto_aim_dbg) {
-                auto_aim_dbg->armors.set(armors);
-#ifdef USE_ROS2
-                rcl::pub_armor_marker(rcl_node, SentryFrame_to_str(armors.frame_id), armors);
-                rcl::pub_armor_target_marker(
-                    rcl_node,
-                    SentryFrame_to_str(__armor_target.get_target_state().frame_id),
-                    __armor_target
+        if (io.armors) {
+            for (const auto& armors_raw: io.armors.value()) {
+                auto armors = armors_raw;
+                auto is_ally = [&](const auto& obj) {
+                    return (enemy_color == EnemyColor::BLUE
+                            && obj.color == auto_aim::ArmorColor::RED)
+                        || (enemy_color == EnemyColor::RED
+                            && obj.color == auto_aim::ArmorColor::BLUE);
+                };
+                armors.armors.erase(
+                    std::remove_if(armors.armors.begin(), armors.armors.end(), is_ally),
+                    armors.armors.end()
                 );
-#endif
-            }
+                armors.lights.erase(
+                    std::remove_if(armors.lights.begin(), armors.lights.end(), is_ally),
+                    armors.lights.end()
+                );
+                auto camera_cv_in_odom = tf->pose_a_in_b(
+                    SentryFrame(armors.frame_id),
+                    SentryFrame::ODOM,
+                    armors.timestamp
+                ); //转到odom
+                armors.frame_id = std::to_underlying(SentryFrame::ODOM);
+                auto __armor_target =
+                    armor_tracker.track(armors, camera_info, camera_cv_in_odom, armors.frame_id);
+                auto_aim_fsm_controller.update(
+                    __armor_target.get_target_state().vyaw(),
+                    __armor_target.jumped,
+                    __armor_target.get_target_state().timestamp
+                );
+                armor_target.write(__armor_target);
+                if (io.detect_start) {
+                    auto latency_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                          Clock::now() - io.detect_start.value()
+                    )
+                                          .count();
+                    log_ctx.latency_ms_total += latency_ms;
+                }
 
-            log_ctx.track_count++;
+                log_ctx.found_count += armor_tracker.get_count();
+                armor_tracker.reset_count();
+                if (dbg) {
+                    dbg->armors.set(armors);
+#ifdef USE_ROS2
+                    rcl::pub_armor_marker(rcl_node, SentryFrame_to_str(armors.frame_id), armors);
+                    rcl::pub_armor_target_marker(
+                        rcl_node,
+                        SentryFrame_to_str(__armor_target.get_target_state().frame_id),
+                        __armor_target
+                    );
+#endif
+                }
+
+                log_ctx.track_count++;
+            }
+        } else if (io.rune) {
+            for (auto& rune: io.rune.value()) {
+                auto camera_cv_in_odom = tf->pose_a_in_b(
+                    SentryFrame(rune.frame_id),
+                    SentryFrame::ODOM,
+                    rune.timestamp
+                ); //转到odom
+                rune.frame_id = std::to_underlying(SentryFrame::ODOM);
+
+                auto __rune_target =
+                    rune_tracker.track(rune, camera_info, camera_cv_in_odom, rune.frame_id);
+
+                rune_target.write(__rune_target);
+                if (io.detect_start) {
+                    auto latency_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                          Clock::now() - io.detect_start.value()
+                    )
+                                          .count();
+                    log_ctx.latency_ms_total += latency_ms;
+                }
+                log_ctx.found_count += rune_tracker.get_count();
+                rune_tracker.reset_count();
+
+                if (dbg) {
+                    dbg->rune.set(rune);
+                }
+                log_ctx.track_count++;
+            }
         }
     });
     s.add_rate_source<>("solver", 1000.0, [&]() {
         log_ctx.solve_count++;
         bool is_omni = false;
-        auto_aim::ArmorTarget target;
-        target = armor_target.read();
-        if (!target.check()) {
-            target = omni_armor_target.read();
+        auto a_target = armor_target.read(); //需要转为相对gimbal_odom
+        if (!a_target.check()) {
+            a_target = omni_armor_target.read();
             is_omni = true;
         }
-        int old_this_id = target.this_id;
-        auto gimbal_odom_state_in_odom = wheel_odometry.state; //转为相对gimbal_odom
+        int old_this_id = a_target.this_id;
+        auto gimbal_odom_state_in_odom = wheel_odometry.state;
         gimbal_odom_state_in_odom.predict(Clock::now());
-        target.set_target_state([&](auto& s) {
+        a_target.set_target_state([&](auto& s) {
             namespace idx = auto_aim::armor_point_motion_model::idx;
+            s.frame_id = std::to_underlying(SentryFrame::GIMBAL_ODOM);
             const auto pos = gimbal_odom_state_in_odom.pos();
             const auto vel = gimbal_odom_state_in_odom.vel();
-            s.frame_id = std::to_underlying(SentryFrame::GIMBAL_ODOM);
             s.x[idx::CX] -= pos.x();
             s.x[idx::CY] -= pos.y();
             s.x[idx::CZ] -= pos.z();
@@ -541,31 +619,39 @@ int main(int argc, char** argv) {
             s.x[idx::VCY] -= vel.y();
             s.x[idx::VCZ] -= vel.z();
         });
-        target.this_id = old_this_id;
+        a_target.this_id = old_this_id;
+        auto r_target = rune_target.read();
+        old_this_id = r_target.this_id;
+        r_target.set_target_state([&](auto& s) {
+            namespace idx = auto_buff::motion_model::idx;
+            s.frame_id = std::to_underlying(SentryFrame::GIMBAL_ODOM);
+            const auto pos = gimbal_odom_state_in_odom.pos();
+            const auto vel = gimbal_odom_state_in_odom.vel();
+            s.x[idx::CX] -= pos.x();
+            s.x[idx::CY] -= pos.y();
+            s.x[idx::CZ] -= pos.z();
+        });
+        r_target.this_id = old_this_id;
 
         GimbalCmd cmd {
             .appear = false,
         };
-        if (target.check()) {
-            auto shoot_in_gimbal_odom =
-                tf->pose_a_in_b(SentryFrame::SHOOT, SentryFrame::GIMBAL_ODOM, Clock::now());
-            auto gimbal_in_gimbal_odom =
-                tf->pose_a_in_b(SentryFrame::GIMBAL, SentryFrame::GIMBAL_ODOM, Clock::now());
+        auto shoot_in_gimbal_odom =
+            tf->pose_a_in_b(SentryFrame::SHOOT, SentryFrame::GIMBAL_ODOM, Clock::now());
+        auto gimbal_in_gimbal_odom =
+            tf->pose_a_in_b(SentryFrame::GIMBAL, SentryFrame::GIMBAL_ODOM, Clock::now());
+        if (a_target.check()) {
             cmd = very_aimer.very_aim(
-                target,
+                a_target,
                 bullet_speed,
                 auto_aim_fsm_controller.get_state(),
                 shoot_in_gimbal_odom,
                 gimbal_in_gimbal_odom
             );
-            cmd = very_aimer.very_aim(
-                target,
-                (!is_omni ? bullet_speed : 100.0),
-                (!is_omni ? auto_aim_fsm_controller.get_state()
-                          : auto_aim::AutoAimFsm::AIM_SINGLE_ARMOR),
-                shoot_in_gimbal_odom,
-                gimbal_in_gimbal_odom
-            );
+
+        } else if (r_target.check()) {
+            cmd =
+                rune_aimer.aim(r_target, bullet_speed, shoot_in_gimbal_odom, gimbal_in_gimbal_odom);
         }
 
         if (serial) {
@@ -588,8 +674,8 @@ int main(int argc, char** argv) {
             cmd.timestamp
         );
         cmd.aim_point.transform(old_in_camera_cv, std::to_underlying(SentryFrame::CAMERA_CV));
-        if (auto_aim_dbg && is_web_running()) {
-            auto_aim_dbg->gimbal_cmd.set(cmd);
+        if (dbg && is_web_running()) {
+            dbg->gimbal_cmd.set(cmd);
         }
     });
     auto armor_omni_task = s.register_source<>("armor_omni");
@@ -674,7 +760,7 @@ int main(int argc, char** argv) {
                                           .count();
                     log_ctx.omni_latency_ms_total += latency_ms;
                     log_ctx.omni_count++;
-                    if (auto_aim_dbg) {
+                    if (dbg) {
 #ifdef USE_ROS2
                         rcl::pub_armor_target_marker(
                             rcl_node,
@@ -702,37 +788,38 @@ int main(int argc, char** argv) {
             log_ctx.omni_count,
             omni_avg_latency_ms
         );
-        if (auto_aim_dbg) {
-            auto_aim_dbg->avg_latency_ms.set(avg_latency_ms);
+        if (dbg) {
+            dbg->avg_latency_ms.set(avg_latency_ms);
         }
         log_ctx.reset();
     });
-    if (auto_aim_dbg) {
+    if (dbg) {
         s.add_rate_source<>("debug", 45.0, [&]() {
             if (!is_web_running()) {
                 return;
             }
-            auto target = armor_target.read();
-            if (!target.check()) {
-                omni_armor_target.read().write_log();
-            } else {
-                target.write_log();
-            }
+            static Web web;
+            dbg->type =
+                (mode == Mode::AutoAim) ? VisionDebugCtx::AUTO_AIM : VisionDebugCtx::AUTO_BUFF;
+            auto __armor_target = armor_target.read();
+            auto __rune_target = rune_target.read();
+            __armor_target.write_log();
+            __rune_target.write_log();
             wheel_odometry.write_log();
-            auto img_now = auto_aim_dbg->img_frame.get().timestamp;
-            auto_aim_dbg->armor_target.set(target);
-            auto_aim_dbg->fsm_state.set(auto_aim_fsm_controller.get_state());
+            auto img_now = dbg->img_frame.get().timestamp;
+            dbg->armor_target.set(__armor_target);
+            dbg->rune_target.set(__rune_target);
+            dbg->auto_aim_fsm_state.set(auto_aim_fsm_controller.get_state());
             auto gimbal_in_gimbal_odom =
                 tf->pose_a_in_b(SentryFrame::GIMBAL, SentryFrame::GIMBAL_ODOM, Clock::now());
             auto rpy = utils::matrix2rpy(gimbal_in_gimbal_odom.linear());
             auto gimbal_yaw_pitch =
                 std::make_pair(angles::to_degrees(rpy[2]), -angles::to_degrees(rpy[1]));
-            auto_aim_dbg->gimbal_yaw_pitch.set(gimbal_yaw_pitch);
-            write_debug_data(auto_aim_dbg.value());
+            dbg->gimbal_yaw_pitch.set(gimbal_yaw_pitch);
+            web.write_debug_data(dbg.value());
             bullet_pick_up.update(
                 Clock::now(),
-                auto_aim_dbg->gimbal_cmd.get().appear ? auto_aim_dbg->gimbal_cmd.get().fly_time
-                                                      : 0.4
+                dbg->gimbal_cmd.get().appear ? dbg->gimbal_cmd.get().fly_time : 0.4
             );
             auto bullet_poss =
                 bullet_pick_up.get_bullet_positions(img_now, very_aimer.get_yaw_pitch_offset());
@@ -741,18 +828,16 @@ int main(int argc, char** argv) {
             for (auto& pos: bullet_poss) {
                 pos = odom_in_camera_cv * pos;
             }
-            auto_aim_dbg->odom_in_camera_cv.set(odom_in_camera_cv);
-            auto_aim_dbg->bullet_positions.set(bullet_poss);
-            auto img = auto_aim_dbg->img_frame.get();
-            auto debug_img = img.src_img;
+            dbg->odom_in_camera_cv.set(odom_in_camera_cv);
+            dbg->bullet_positions.set(bullet_poss);
+            auto img = dbg->img_frame.get();
+            auto debug_img = img.src_img.clone();
             if (img.format == PixelFormat::RGB) {
                 cv::cvtColor(debug_img, debug_img, cv::COLOR_RGB2BGR);
             }
-            static cv::Mat last_draw;
-            if (!debug_img.empty() && debug_img.data != last_draw.data) {
-                auto_aim::draw_auto_aim(debug_img, auto_aim_dbg.value());
-                web::write_shm(debug_img);
-                last_draw = debug_img;
+            if (!debug_img.empty()) {
+                web.draw(debug_img, dbg.value());
+                web.write_shm(debug_img);
             }
         });
 #ifdef USE_ROS2

@@ -144,17 +144,12 @@ struct ArmorDetector::Impl {
         auto key_points = (armor.net.has_value()) ? armor.net->key_points.points
             : (armor.cv.has_value())
             ? armor.cv->key_points.points
-            : std::array<std::optional<cv::Point2f>, std::to_underlying(ArmorKeyPointsIndex::N)>();
+            : std::array<std::optional<cv::Point2f>, ArmorKeyPointsIndex::N>();
 
-        const cv::Point2f& rb =
-            key_points[std::to_underlying(ArmorKeyPointsIndex::RIGHT_BOTTOM)].value();
-        const cv::Point2f& rt =
-            key_points[std::to_underlying(ArmorKeyPointsIndex::RIGHT_TOP)].value();
-        const cv::Point2f& lt =
-            key_points[std::to_underlying(ArmorKeyPointsIndex::LEFT_TOP)].value();
-        const cv::Point2f& lb =
-            key_points[std::to_underlying(ArmorKeyPointsIndex::LEFT_BOTTOM)].value();
-
+        const cv::Point2f& rb = key_points[ArmorKeyPointsIndex::RIGHT_BOTTOM].value();
+        const cv::Point2f& rt = key_points[ArmorKeyPointsIndex::RIGHT_TOP].value();
+        const cv::Point2f& lt = key_points[ArmorKeyPointsIndex::LEFT_TOP].value();
+        const cv::Point2f& lb = key_points[ArmorKeyPointsIndex::LEFT_BOTTOM].value();
         const float l1_len = cv::norm(rt - rb);
         const float l2_len = cv::norm(lt - lb);
         const cv::Point2f c1 = (rb + rt) * 0.5f;
@@ -200,7 +195,7 @@ struct ArmorDetector::Impl {
         }
         auto& key_points = armor.net->key_points.points;
         auto getPt = [&](ArmorKeyPointsIndex idx) -> const cv::Point2f* {
-            auto& opt = key_points[std::to_underlying(idx)];
+            auto& opt = key_points[idx];
             return opt ? &(*opt) : nullptr;
         };
 

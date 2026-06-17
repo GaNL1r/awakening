@@ -1,6 +1,5 @@
 mode: auto_aim
 enemy_color: red
-max_infer_num: 5
 bullet_speed: 21.0
 
 serial:
@@ -53,6 +52,7 @@ auto_exposure:
   control_interval_ms: 300
 
 armor_detector:
+  max_infer_num: 5
   backend: tensorrt
   net_detector:
     openvino:
@@ -149,10 +149,11 @@ very_aimer:
     resistance: 0.001
 
 rune_detector:
+  max_infer_num: 5
   backend: tensorrt
   net_detector:
     openvino:
-      model_path: /home/hy/awakening/model/best.onnx
+      model_path: ${ROOT_DIR}/model/cb_rune.onnx
       device_name: "CPU"
       perf_mode: "THROUGHPUT"
       priority: "HIGH"
@@ -160,7 +161,7 @@ rune_detector:
       execution_mode: "PERFORMANCE"
       infer_request_buffer_num: 10
     tensorrt:
-      model_path: /home/hy/awakening/model/best.onnx
+      model_path: ${ROOT_DIR}/model/cb_rune.onnx
       copy_context_num: 3
       min_free_mem_ratio: 0.1
       use_cuda_preproces: true

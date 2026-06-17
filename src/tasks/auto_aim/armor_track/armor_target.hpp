@@ -114,8 +114,6 @@ public:
         Matrix<double, armor_point_motion_model::UVZ_N, armor_point_motion_model::UVZ_N>
         uvmeasurement_covariance(const Eigen::Matrix<double, armor_point_motion_model::UVZ_N, 1>& z
         ) const noexcept;
-    [[nodiscard]] Eigen::Matrix<double, armor_point_motion_model::UVZ_N, 1>
-    get_uvmeasurement(Armor& a, bool left) const noexcept;
     [[nodiscard]] Eigen::
         Matrix<double, armor_point_motion_model::YPDZ_N, armor_point_motion_model::YPDZ_N>
         ypdmeasurement_covariance(

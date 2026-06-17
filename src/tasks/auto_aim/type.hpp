@@ -52,7 +52,7 @@ struct ArmorKeyPoint3D {
         };
     }
 };
-enum class ArmorKeyPointsIndex : int {
+enum ArmorKeyPointsIndex {
     LEFT_TOP,
     LEFT_BOTTOM,
     RIGHT_BOTTOM,
@@ -288,10 +288,10 @@ struct Armor {
             auto max_lightbar_length = std::max(left.length, right.length);
             auto min_lightbar_length = std::min(left.length, right.length);
             ratio = width / max_lightbar_length;
-            key_points.points[std::to_underlying(ArmorKeyPointsIndex::LEFT_TOP)] = left.top;
-            key_points.points[std::to_underlying(ArmorKeyPointsIndex::RIGHT_TOP)] = right.top;
-            key_points.points[std::to_underlying(ArmorKeyPointsIndex::LEFT_BOTTOM)] = left.bottom;
-            key_points.points[std::to_underlying(ArmorKeyPointsIndex::RIGHT_BOTTOM)] = right.bottom;
+            key_points.points[ArmorKeyPointsIndex::LEFT_TOP] = left.top;
+            key_points.points[ArmorKeyPointsIndex::RIGHT_TOP] = right.top;
+            key_points.points[ArmorKeyPointsIndex::LEFT_BOTTOM] = left.bottom;
+            key_points.points[ArmorKeyPointsIndex::RIGHT_BOTTOM] = right.bottom;
         }
     };
     std::optional<CvCtx> cv;
@@ -300,9 +300,7 @@ struct Armor {
         ArmorColor color = ArmorColor::NONE;
         ArmorClass number = ArmorClass::UNKNOWN;
         ArmorKeyPoints2D key_points;
-        std::vector<
-            std::array<std::optional<cv::Point2f>, std::to_underlying(ArmorKeyPointsIndex::N)>>
-            tmp_points;
+        std::vector<std::array<std::optional<cv::Point2f>, ArmorKeyPointsIndex::N>> tmp_points;
     };
     std::optional<NetCtx> net;
     struct NumberClassifierCtx {
@@ -375,7 +373,7 @@ struct Armor {
         using I = ArmorKeyPointsIndex;
 
         auto get = [&](I idx) -> cv::Point {
-            auto p = pts[std::to_underlying(idx)];
+            auto p = pts[idx];
             // cv::circle(img, p, 5,cv::Scalar(0, 255, 0));
             // cv::putText(img, string_by_armor_key_points_index(std::to_underlying(idx)),p, cv::FONT_HERSHEY_COMPLEX, 0.5, cv::Scalar(0, 255, 0));
             return p;
