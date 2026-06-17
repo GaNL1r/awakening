@@ -16,6 +16,8 @@ const chartMap = {
   fly_time: { label: "Fly Time", color: "#8bd3dd" },
   target_v_yaw: { label: "Target V Yaw", color: "#f58ac2" },
   target_v_roll: { label: "Target V Roll", color: "#a7d46f" },
+  rune_a_diff: { label: "Rune A Diff", color: "#ffcf8a" },
+  rune_w_diff: { label: "Rune W Diff", color: "#a7d46f" },
   yaw_diff: { label: "Yaw Diff", color: "#a7d46f" },
   pitch_diff: { label: "Pitch Diff", color: "#ffcf8a" },
 };

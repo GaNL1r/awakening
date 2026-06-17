@@ -18,12 +18,13 @@
 
 - 华南师范大学PIONEER战队@chenjunnn [rm_vision](https://github.com/chenjunnn/rm_vision)
 - 中南大学FYT战队 [FYT2024_vision](https://github.com/CSU-FYT-Vision/FYT2024_vision)
-- 河北科技大学Actor&Thinker战队 [at_vision](https://github.com/PraySky1337/at_vision) [talos-scheduler](https://github.com/Blackjack200/talos-scheduler)  [at_vision_simulator](https://github.com/Blackjack200/at_vision_simulator)
+- 河北科技大学Actor&Thinker战队 [at_vision](https://github.com/PraySky1337/at_vision) [Daedalus](https://github.com/Blackjack200/bevy_robomaster_simulator) 
 - 同济大学superpower战队 [sp_vision_25](https://github.com/TongjiSuperPower/sp_vision_25)
 - 深圳北理莫斯科大学北极熊战队 [armor_detector_tensorrt](https://github.com/SMBU-PolarBear-Robotics-Team/armor_detector_tensorrt)
 - 四川大学火锅战队 [openvino_armor_detector](https://github.com/Ericsii/rm_vision/tree/develop/openvino_armor_detector)
 - 沈阳航空航天大学TUP战队 [opt-1208-001.onnx](https://github.com/tup-robomaster/TUP-Vision-2023-Based/blob/main/src/vehicle_system/autoaim/armor_detector/model/opt-1208-001.onnx)
 - 北京科技大学Reborn战队 [number_classifier.onnx](https://github.com/RebornVision/Reborn-Vision-2024-armor-Inference/blob/main/model/number_classifier.onnx)
+- 常州大学Climber战队 [Climber_Vision_26](https://github.com/CCZU-Climber/Climber_Vision_26)
 - 华北理工大学Horizon战队 https://github.com/BreCaspian/ROBOMASTER-HORIZON-LiDAR-2025/releases/tag/2026.04.24
 - 香港科技大学ENTERPRIZE战队 [RM2025-Radar-Algorithm](https://github.com/hkustenterprize/RM2025-Radar-Algorithm)
 - 南京理工大学Alliance战队 https://github.com/Alliance-Algorithm
@@ -50,6 +51,7 @@
 - 高性能：以自动瞄准算法为例，在intel nuc 1240P平台做到全流程（包括相机取流解码，神经网络推理，cv算法识别，滤波器更新预测等，下同）250hz（工业相机上限）吞吐，平均6-8ms延迟，nvidia orin nx 8g做到 250hz吞吐，4-7ms延迟 （具体实现方案请参考下文内容）
 - 无复杂依赖，易部署（一台只配置过操作系统的minipc从0配置只需要不到半小时即可做到上场水平，别问为什么知道）
 - 算法实现与应用层分离，可针对不同兵种不同车型不同需求定制不同的运行时代码
+- 适配[Daedalus](https://github.com/Blackjack200/bevy_robomaster_simulator)，可一键无痛算法验证
 
 ## 部署
 

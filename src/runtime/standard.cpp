@@ -92,6 +92,7 @@ using CommonFrameIo = IOPair<FrameTag, CommonFrame>;
 struct Detection {
     std::optional<std::vector<auto_aim::Armors>> armors;
     std::optional<std::vector<auto_buff::RuneDetection>> rune;
+    std::optional<TimePoint> detect_start;
 };
 using DetIo = IOPair<DetectTag, Detection>;
 struct LogCtx {
@@ -304,6 +305,11 @@ int main(int argc, char** argv) {
                     }
                 );
             }
+            if (auto ground_truth = daedalus_shm_client->recv_ground_truth()) {
+                if (dbg) {
+                    dbg->ground_truth.set(ground_truth.value());
+                }
+            }
 
             push_pose(talos::ipc::PoseIndex::POSE_CAMERA, SimpleFrame::GIMBAL, SimpleFrame::CAMERA);
 
@@ -480,6 +486,7 @@ int main(int argc, char** argv) {
                 utils::SemaphoreGuard guard(*detector_sem, got); //并发控制
                 if (got) {
                     auto start = Clock::now();
+                    r.detect_start = start;
                     auto [ls, as] = armor_detector.detect(frame, net_focus, detect_light);
                     armors.armors = as;
                     armors.lights = ls;
@@ -511,6 +518,7 @@ int main(int argc, char** argv) {
                 utils::SemaphoreGuard guard(*detector_sem, got); //并发控制
                 if (got) {
                     auto start = Clock::now();
+                    r.detect_start = start;
                     rune_detection = rune_detector.detect(frame, net_focus, enemy_color);
                     log_ctx.detect_count++;
                 }
@@ -565,11 +573,14 @@ int main(int argc, char** argv) {
                     __armor_target.get_target_state().timestamp
                 );
                 armor_target.write(__armor_target);
-                auto latency_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-                                      Clock::now() - armors.timestamp
-                )
-                                      .count();
-                log_ctx.latency_ms_total += latency_ms;
+                if (io.detect_start) {
+                    auto latency_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                          Clock::now() - io.detect_start.value()
+                    )
+                                          .count();
+                    log_ctx.latency_ms_total += latency_ms;
+                }
+
                 log_ctx.found_count += armor_tracker.get_count();
                 armor_tracker.reset_count();
                 if (dbg) {
@@ -594,16 +605,21 @@ int main(int argc, char** argv) {
                     rune.timestamp
                 ); //转到odom
                 rune.frame_id = std::to_underlying(SimpleFrame::ODOM);
+
                 auto __rune_target =
                     rune_tracker.track(rune, camera_info, camera_cv_in_odom, rune.frame_id);
+
                 rune_target.write(__rune_target);
-                auto latency_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-                                      Clock::now() - rune.timestamp
-                )
-                                      .count();
+                if (io.detect_start) {
+                    auto latency_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                          Clock::now() - io.detect_start.value()
+                    )
+                                          .count();
+                    log_ctx.latency_ms_total += latency_ms;
+                }
                 log_ctx.found_count += rune_tracker.get_count();
                 rune_tracker.reset_count();
-                log_ctx.latency_ms_total += latency_ms;
+
                 if (dbg) {
                     dbg->rune.set(rune);
                 }
@@ -658,8 +674,10 @@ int main(int argc, char** argv) {
                 shoot_in_gimbal_odom,
                 gimbal_in_gimbal_odom
             );
+
         } else if (r_target.check()) {
             rune_aimer.set_operator_offset(operator_offset);
+
             cmd =
                 rune_aimer.aim(r_target, bullet_speed, shoot_in_gimbal_odom, gimbal_in_gimbal_odom);
         }
@@ -710,7 +728,7 @@ int main(int argc, char** argv) {
         }
     });
     s.add_rate_source<>("logger", 1.0, [&]() {
-        double avg_latency_ms = log_ctx.latency_ms_total / log_ctx.track_count;
+        double avg_latency_ms = log_ctx.latency_ms_total / log_ctx.detect_count;
         AWAKENING_INFO(
             "detect: {} track: {} found: {} solve: {} serial: {} camera: {} avg_latency: {:.3} ms",
             log_ctx.detect_count,

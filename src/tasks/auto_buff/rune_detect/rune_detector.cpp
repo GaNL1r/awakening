@@ -50,41 +50,40 @@ struct RuneDetector::Impl {
     } params_;
     Impl(const YAML::Node& config) {
         params_.load(config);
-        rune_infer_ = RuneInfer::create(config["rune_infer"]);
-        auto backend = config["net_detector"]["backend"].as<std::string>();
-        const double scale = rune_infer_->use_norm() ? 1.0 / 255.0f : 1.0f;
-        auto format = rune_infer_->target_format();
-        auto net_cfg = utils::NetDetectorBase::Config {
-            .target_format = format,
-            .preprocess_scale = scale,
-            .target_w = rune_infer_->input_w(),
-            .target_h = rune_infer_->input_h(),
-        };
-        bool backend_valid = false;
+        auto backend = config["backend"].as<std::string>();
+        if (backend != "opencv") {
+            rune_infer_ = RuneInfer::create(config["net_detector"]["rune_infer"]);
+
+            const double scale = rune_infer_->use_norm() ? 1.0 / 255.0f : 1.0f;
+            auto format = rune_infer_->target_format();
+            auto net_cfg = utils::NetDetectorBase::Config {
+                .target_format = format,
+                .preprocess_scale = scale,
+                .target_w = rune_infer_->input_w(),
+                .target_h = rune_infer_->input_h(),
+            };
+            bool backend_valid = false;
 #ifdef USE_OPENVINO
-        if (backend == OPENVINO) {
-            backend_valid = true;
-            net_detector_ = std::make_unique<utils::NetDetectorOpenVINO>(
-                config["net_detector"][OPENVINO],
-                net_cfg
-            );
-        }
+            if (backend == OPENVINO) {
+                backend_valid = true;
+                net_detector_ = std::make_unique<utils::NetDetectorOpenVINO>(
+                    config["net_detector"][OPENVINO],
+                    net_cfg
+                );
+            }
 #endif
 #ifdef USE_TRT
-        if (backend == TENSORRT) {
-            backend_valid = true;
-            net_detector_ = std::make_unique<utils::NetDetectorTensorrt>(
-                config["net_detector"][TENSORRT],
-                net_cfg
-            );
-        }
+            if (backend == TENSORRT) {
+                backend_valid = true;
+                net_detector_ = std::make_unique<utils::NetDetectorTensorrt>(
+                    config["net_detector"][TENSORRT],
+                    net_cfg
+                );
+            }
 #endif
-        // if (backend == "opencv") {
-        //     backend_valid = true;
-        //     net_detector_ = nullptr;
-        // }
-        if (!backend_valid) {
-            throw std::runtime_error("Invalid backend");
+            if (!backend_valid) {
+                throw std::runtime_error("Invalid backend");
+            }
         }
     }
     cv::Mat preprocess(const cv::Mat& src, PixelFormat format) const noexcept {
@@ -395,14 +394,16 @@ struct RuneDetector::Impl {
     detect(const CommonFrame& frame, const cv::Rect& focus, EnemyColor enemy_color) const noexcept {
         RuneDetection result;
         cv::Mat roi = frame.img_frame.src_img(focus);
-
-        utils::NetDetectorBase::OutPut net_output;
-        net_output = net_detector_->detect(roi, frame.img_frame.format);
-        result.fan_blades = rune_infer_->process(net_output.output);
-        for (auto& fan_blade: result.fan_blades) {
-            fan_blade.transform(net_output.transform_matrix);
-            fan_blade.add_offset(focus.tl());
+        if (net_detector_) {
+            utils::NetDetectorBase::OutPut net_output;
+            net_output = net_detector_->detect(roi, frame.img_frame.format);
+            result.fan_blades = rune_infer_->process(net_output.output);
+            for (auto& fan_blade: result.fan_blades) {
+                fan_blade.transform(net_output.transform_matrix);
+                fan_blade.add_offset(focus.tl());
+            }
         }
+
         auto bin = preprocess(roi, frame.img_frame.format);
         std::vector<std::vector<cv::Point>> contours;
         std::vector<cv::Vec4i> hierarchy;

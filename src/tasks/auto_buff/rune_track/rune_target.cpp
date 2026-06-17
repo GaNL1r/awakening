@@ -110,22 +110,35 @@ bool RuneTarget::reset(
 ) {
     cfg = c;
     std::optional<ISO3> pose;
-    if (d.fan_blades.size() > 0) {
+    if (!d.fan_blades.empty()) {
         fan_pnp(d.fan_blades.front(), camera_info, camera_cv_in_odom, true);
         pose = d.fan_blades.front().pose;
         // target_color = d.fan_blades.front().color;
     } else if (!d.fan_targets.empty() && !d.rune_rs.empty()) {
-        cv::Point2f r;
-        double min_area = std::numeric_limits<double>::max();
-        for (const auto& rune_r: d.rune_rs) {
-            if (rune_r.rr.boundingRect2f().area() < min_area) {
-                min_area = rune_r.rr.boundingRect2f().area();
-                r = rune_r.rr.center;
+        std::optional<RuneR*> r = std::nullopt;
+        double min_dist = std::numeric_limits<double>::max();
+        for (auto& rune_r: d.rune_rs) {
+            double dist = utils::calculate_distance_to_img_center(
+                rune_r.rr.center,
+                camera_info.camera_matrix
+            );
+            if (dist < min_dist) {
+                min_dist = dist;
+                r = &rune_r;
             }
         }
-        d.fan_targets.front().sort_corners(r);
-        fan_target_pnp(d.fan_targets.front(), r, camera_info, camera_cv_in_odom, true);
-        // target_color = d.fan_targets.front().color;
+        if (r.has_value()) {
+            r.value()->laji = false;
+            fan_target_pnp(
+                d.fan_targets.front(),
+                r.value()->rr.center,
+                camera_info,
+                camera_cv_in_odom,
+                true
+            );
+            pose = d.fan_targets.front().pose;
+            // target_color = d.fan_targets.front().color;
+        }
     }
     if (!pose) {
         return false;
@@ -203,8 +216,8 @@ void RuneTarget::fan_pnp(
     auto key_points = r.points;
     r.pose = utils::solve_pnp(
         key_points,
-        in_r ? RuneFanBladeWithR::Point3DTargetCenterZERO<cv::Point3f>::build()
-             : RuneFanBladeWithR::Point3DRZERO<cv::Point3f>::build(),
+        !in_r ? RuneFanBladeWithR::Point3DTargetCenterZERO<cv::Point3f>::build()
+              : RuneFanBladeWithR::Point3DRZERO<cv::Point3f>::build(),
         camera_info.camera_matrix,
         camera_info.distortion_coefficients
     );
@@ -221,8 +234,8 @@ void RuneTarget::fan_target_pnp(
     auto key_points = a.key_points;
     a.pose = utils::solve_pnp(
         key_points,
-        in_r ? RuneFanTarget::Point3DTargetCenterZERO<cv::Point3f>::build_no_r()
-             : RuneFanTarget::Point3DRZERO<cv::Point3f>::build_no_r(),
+        !in_r ? RuneFanTarget::Point3DTargetCenterZERO<cv::Point3f>::build_no_r()
+              : RuneFanTarget::Point3DRZERO<cv::Point3f>::build_no_r(),
         camera_info.camera_matrix,
         camera_info.distortion_coefficients
     );

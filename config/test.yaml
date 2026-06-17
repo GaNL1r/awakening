@@ -1,4 +1,4 @@
-mode: auto_buff
+mode: auto_aim
 enemy_color: blue
 max_infer_num: 5
 bullet_speed: 23.5
@@ -43,11 +43,8 @@ auto_exposure:
 
 
 armor_detector:
-  armor_infer:
-    model_type: tup
-    conf_threshold: 0.2
+  backend: tensorrt
   net_detector:
-    backend: tensorrt
     openvino:
       model_path: ${ROOT_DIR}/model/opt-1208-001.onnx
       device_name: "CPU"
@@ -61,6 +58,9 @@ armor_detector:
       copy_context_num: 3
       min_free_mem_ratio: 0.1
       use_cuda_preproces: true
+    armor_infer:
+      model_type: tup
+      conf_threshold: 0.2
   number_classifier:
     enable: true
     model_path: ${ROOT_DIR}/model/mlp.onnx
@@ -97,7 +97,7 @@ armor_tracker:
   light_match_length_ratio_gate: 0.2
   light_match_angle_gate: 0.2
   light_match_pos_gate_by_length_ratio: 5.0
-  r_uv_at_1m: 70.0
+  r_uv_at_1m: 50.0
   r_uv_min: 30.0
   esekf_iter_num: 5
 
@@ -133,11 +133,8 @@ very_aimer:
     resistance: 0.001
 
 rune_detector:
-  rune_infer:
-    model_type: cb
-    conf_threshold: 0.2
+  backend: tensorrt
   net_detector:
-    backend: tensorrt
     openvino:
       model_path: /home/hy/awakening/model/best.onnx
       device_name: "CPU"
@@ -151,6 +148,9 @@ rune_detector:
       copy_context_num: 3
       min_free_mem_ratio: 0.1
       use_cuda_preproces: true
+    rune_infer:
+      model_type: cb
+      conf_threshold: 0.2
   cv:
     bin_threshold: 70
     color_diff_thresh: 10

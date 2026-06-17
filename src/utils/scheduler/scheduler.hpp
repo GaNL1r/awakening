@@ -95,7 +95,7 @@ public:
     using clock = std::chrono::steady_clock;
     inline static unsigned int __hardware_concurrency = std::thread::hardware_concurrency();
 
-    explicit Scheduler(size_t threads = __hardware_concurrency):
+    explicit Scheduler(size_t threads = __hardware_concurrency * 2.0):
         worker_count(threads ? threads : 1),
         pool_(worker_count) {}
 

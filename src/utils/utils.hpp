@@ -180,6 +180,16 @@ inline std::vector<cv::Point2f> reprojection(
     cv::projectPoints(object_points, rvec, tvec, camera_matrix, dist_coeffs, pts_2d);
     return pts_2d;
 }
+template<class ImgPoints>
+inline std::vector<cv::Point2f> undistort_points(
+    const cv::Mat& camera_matrix,
+    const cv::Mat& dist_coeffs,
+    const ImgPoints& img_points
+) {
+    std::vector<cv::Point2f> norm_pts;
+    cv::undistortPoints(img_points, norm_pts, camera_matrix, dist_coeffs);
+    return norm_pts;
+}
 template<typename T>
 inline void project_points_jets(
     const std::vector<cv::Point3f>& obj_pts,
@@ -237,6 +247,61 @@ inline void project_points_jets(
         T v = fy * yd + cy;
 
         img_pts_jet.emplace_back(u, v);
+    }
+}
+template<typename T>
+inline void project_points_jets_normalized(
+    const std::vector<cv::Point3f>& obj_pts,
+    const Eigen::Transform<T, 3, Eigen::Isometry>& pose_cam,
+    const cv::Mat& dist_coeffs,
+    std::vector<Eigen::Matrix<T, 2, 1>>& norm_pts
+) {
+    if (obj_pts.empty())
+        return;
+
+    if (dist_coeffs.empty())
+        throw std::runtime_error("Invalid dist_coeffs");
+
+    const Eigen::Matrix<T, 3, 3>& R = pose_cam.linear();
+    const Eigen::Matrix<T, 3, 1>& t = pose_cam.translation();
+
+    auto get_dist = [&](int i) -> double {
+        return (dist_coeffs.rows == 1) ? dist_coeffs.at<double>(0, i)
+                                       : dist_coeffs.at<double>(i, 0);
+    };
+
+    const int n_dist = dist_coeffs.rows * dist_coeffs.cols;
+
+    const T k1 = n_dist > 0 ? T(get_dist(0)) : T(0);
+    const T k2 = n_dist > 1 ? T(get_dist(1)) : T(0);
+    const T p1 = n_dist > 2 ? T(get_dist(2)) : T(0);
+    const T p2 = n_dist > 3 ? T(get_dist(3)) : T(0);
+    const T k3 = n_dist > 4 ? T(get_dist(4)) : T(0);
+
+    norm_pts.clear();
+    norm_pts.reserve(obj_pts.size());
+
+    for (const auto& pt3: obj_pts) {
+        Eigen::Matrix<T, 3, 1> Pw(T(pt3.x), T(pt3.y), T(pt3.z));
+        Eigen::Matrix<T, 3, 1> Pc = R * Pw + t;
+
+        T Xc = Pc(0);
+        T Yc = Pc(1);
+        T Zc = Pc(2);
+
+        T x = Xc / Zc;
+        T y = Yc / Zc;
+
+        T r2 = x * x + y * y;
+        T r4 = r2 * r2;
+        T r6 = r4 * r2;
+
+        T radial = T(1) + k1 * r2 + k2 * r4 + k3 * r6;
+
+        T xd = x * radial + T(2) * p1 * x * y + p2 * (r2 + T(2) * x * x);
+        T yd = y * radial + p1 * (r2 + T(2) * y * y) + T(2) * p2 * x * y;
+
+        norm_pts.emplace_back(xd, yd);
     }
 }
 [[nodiscard]] inline double lerp_angle(double a0, double a1, double t) noexcept {
@@ -320,6 +385,12 @@ inline ISO3 solve_pnp(
     pose.translation() = t_eigen;
     return pose;
 }
+inline auto
+calculate_distance_to_img_center(const cv::Point2f& image_point, const cv::Mat& camera_matrix) {
+    auto cx = camera_matrix.at<double>(0, 2);
+    auto cy = camera_matrix.at<double>(1, 2);
+    return cv::norm(image_point - cv::Point2f(cx, cy));
+}
 template<class Mat>
 inline void
 fill_constant_accel_noise(Mat& q, int pos_idx, int vel_idx, double noise, double dt) noexcept {
@@ -344,4 +415,40 @@ fill_constant_accel_noise(Mat& q, int pos_idx, int vel_idx, double noise, double
         return 0.f;
     return inter_area / union_area;
 }
+template<typename Func, typename T>
+[[nodiscard]] inline T
+golden_section_search(Func&& f, T left, T right, T eps = static_cast<T>(1e-4)) {
+    static_assert(std::is_floating_point_v<T>);
+
+    constexpr T phi = static_cast<T>(0.6180339887498948482);
+
+    T x1 = right - phi * (right - left);
+    T x2 = left + phi * (right - left);
+
+    T f1 = f(x1);
+    T f2 = f(x2);
+
+    while ((right - left) > eps) {
+        if (f1 > f2) {
+            left = x1;
+
+            x1 = x2;
+            f1 = f2;
+
+            x2 = left + phi * (right - left);
+            f2 = f(x2);
+        } else {
+            right = x2;
+
+            x2 = x1;
+            f2 = f1;
+
+            x1 = right - phi * (right - left);
+            f1 = f(x1);
+        }
+    }
+
+    return (f1 < f2) ? x1 : x2;
+}
+
 } // namespace awakening::utils

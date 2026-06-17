@@ -533,6 +533,7 @@ struct Web::Impl {
         auto rune_target = ctx.rune_target.get();
         auto rune_target_state = rune_target.get_target_state();
         rune_target_state.predict(Clock::now(), rune_target.voter);
+        auto ground_truth = ctx.ground_truth.get();
         d.time_log.handle_once(t);
         auto un_warp = [&](double _yaw) {
             return last_yaw + angles::shortest_angular_distance_degrees(last_yaw, _yaw);
@@ -555,6 +556,15 @@ struct Web::Impl {
         d.fly_time_log.handle_once(cmd.fly_time);
         d.target_v_yaw_log.handle_once(armor_target_state.vyaw());
         d.target_v_roll_log.handle_once(rune_target_state.v_roll(rune_target.voter));
+        talos::ipc::GroundTruthRune big_rune;
+        for (const auto& rune: ground_truth.runes) {
+            if (rune.team == 1) {
+                big_rune = rune;
+                break;
+            }
+        }
+        d.rune_a_diff_log.handle_once(rune_target_state.a() - big_rune.sin_amplitude);
+        d.rune_w_diff_log.handle_once(rune_target_state.w() - big_rune.sin_omega);
         d.write();
     }
 
@@ -664,6 +674,8 @@ struct Web::Impl {
     X(double, 100, fly_time) \
     X(double, 100, target_v_yaw) \
     X(double, 100, target_v_roll) \
+    X(double, 100, rune_a_diff) \
+    X(double, 100, rune_w_diff) \
     X(double, 100, yaw_diff) \
     X(double, 100, pitch_diff)
 #define GEN_LOG(TYPE, SIZE, NAME) DatasStream<TYPE, SIZE> NAME##_log { #NAME, j, mtx };

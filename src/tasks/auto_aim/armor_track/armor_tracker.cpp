@@ -1,7 +1,9 @@
 #include "armor_tracker.hpp"
 #include "angles.h"
+#include "tasks/auto_aim/armor_track/armor_target.hpp"
 #include "tasks/base/dta_utils.hpp"
 #include "utils/logger.hpp"
+#include "utils/utils.hpp"
 #include <algorithm>
 #include <array>
 #include <iostream>
@@ -32,7 +34,9 @@ struct ArmorTracker::Impl {
             return found;
         };
         //双缓冲，方便异常丢失恢复，方便操作手换目标
-        process(cur_target_idx_);
+        if (process(cur_target_idx_)) {
+            // target_data_.emplace_back(cur);
+        }
 
         if (cur.track_state.tracker_state == ArmorTarget::TrackState::TEMP_LOST) {
             process(pre_target_idx_);

@@ -90,41 +90,39 @@ struct ArmorDetector::Impl {
         if (params_.number_classifier_params) {
             init_number_classifier();
         }
-        armor_infer_ = ArmorInfer::create(config["armor_infer"]);
-        auto backend = config["net_detector"]["backend"].as<std::string>();
-        const double scale = armor_infer_->use_norm() ? 1.0 / 255.0f : 1.0f;
-        auto format = armor_infer_->target_format();
-        auto net_cfg = utils::NetDetectorBase::Config {
-            .target_format = format,
-            .preprocess_scale = scale,
-            .target_w = armor_infer_->input_w(),
-            .target_h = armor_infer_->input_h(),
-        };
-        bool backend_valid = false;
+        auto backend = config["backend"].as<std::string>();
+        if (backend != "opencv") {
+            armor_infer_ = ArmorInfer::create(config["net_detector"]["armor_infer"]);
+            const double scale = armor_infer_->use_norm() ? 1.0 / 255.0f : 1.0f;
+            auto format = armor_infer_->target_format();
+            auto net_cfg = utils::NetDetectorBase::Config {
+                .target_format = format,
+                .preprocess_scale = scale,
+                .target_w = armor_infer_->input_w(),
+                .target_h = armor_infer_->input_h(),
+            };
+            bool backend_valid = false;
 #ifdef USE_OPENVINO
-        if (backend == OPENVINO) {
-            backend_valid = true;
-            net_detector_ = std::make_unique<utils::NetDetectorOpenVINO>(
-                config["net_detector"][OPENVINO],
-                net_cfg
-            );
-        }
+            if (backend == OPENVINO) {
+                backend_valid = true;
+                net_detector_ = std::make_unique<utils::NetDetectorOpenVINO>(
+                    config["net_detector"][OPENVINO],
+                    net_cfg
+                );
+            }
 #endif
 #ifdef USE_TRT
-        if (backend == TENSORRT) {
-            backend_valid = true;
-            net_detector_ = std::make_unique<utils::NetDetectorTensorrt>(
-                config["net_detector"][TENSORRT],
-                net_cfg
-            );
-        }
+            if (backend == TENSORRT) {
+                backend_valid = true;
+                net_detector_ = std::make_unique<utils::NetDetectorTensorrt>(
+                    config["net_detector"][TENSORRT],
+                    net_cfg
+                );
+            }
 #endif
-        if (backend == "opencv") {
-            backend_valid = true;
-            net_detector_ = nullptr;
-        }
-        if (!backend_valid) {
-            throw std::runtime_error("Invalid backend");
+            if (!backend_valid) {
+                throw std::runtime_error("Invalid backend");
+            }
         }
     }
     bool extract_number(const cv::Mat& src, Armor& armor) const noexcept {

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "daedalus_interface/shm_layout.hpp"
 #include "tasks/auto_aim/armor_track/armor_target.hpp"
 #include "tasks/auto_aim/auto_aim_fsm.hpp"
 #include "tasks/auto_aim/type.hpp"
@@ -36,6 +37,7 @@ struct VisionDebugCtx {
     utils::Locked<auto_buff::RuneDetection> rune;
     utils::Locked<auto_buff::RuneTarget> rune_target;
 
+    utils::Locked<talos::ipc::GroundTruthBatch> ground_truth;
     CameraInfo camera_info() const noexcept {
         return camera_info_;
     }

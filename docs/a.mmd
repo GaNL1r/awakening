@@ -1,0 +1,136 @@
+flowchart LR
+      A[输入检测结果与时间戳<br/>相机内参 / 相机外参 / frame_id] --> B{Tracker
+      类型}
+
+      %% Armor tracker
+      B -->|ArmorTracker| C[ArmorTracker::track]
+      C --> C1[读取当前目标 cur<br/>备用目标 pre]
+      C1 --> C2{cur 状态是否 LOST?}
+
+      C2 -->|是| C3[init_target]
+      C3 --> C31[从检测结果中选择有效装甲板<br/>过滤 NONE / PURPLE 等无效颜色]
+      C31 --> C32[PnP 初始化装甲板位姿<br/>并做 yaw 搜索修正]
+      C32 --> C33[由装甲板位置、yaw 和预设半径<br/>反推整车中心]
+      C33 --> C34[初始化整车 ESEKF<br/>状态: cx vcx cy vcy cz vcz yaw vyaw r l
+      h]
+      C34 --> C35[记录目标数字类别 / 更新时间戳<br/>状态置为 DETECTING]
+      C35 --> C9[update_fsm]
+
+      C2 -->|否| C4[update_target]
+      C4 --> C41[按已跟踪装甲板数字过滤候选装甲板<br/>只保留同类且颜色有效的观
+      测]
+      C41 --> C42[predict_ekf<br/>基于匀速和匀角速度模型预测整车状态]
+      C42 --> C43[match_armor<br/>匹配检测装甲板与预测装甲板编号]
+      C43 --> C431[PnP 粗定位每个候选装甲板<br/>此处仅用于匹配]
+      C431 --> C432[构造 YPD + rot_yaw 粗观测<br/>yaw / pitch / distance / 装甲
+      板朝向]
+      C432 --> C433[与预测出的各编号装甲板比较<br/>计算马氏距离并按阈值门控]
+      C433 --> C434[greedy_match 贪心匹配<br/>得到 matched_armors]
+      C434 --> C44[match_light<br/>匹配检测灯条与预测相邻单灯条]
+      C44 --> C440{是否存在可见的单独灯条或灯条对应装甲板未被匹配板?}
+      C440 -->|否| C4430[matched_lights 为空]
+      C440 -->|是| C441[根据整车几何预测可见灯条]
+      C441 --> C442[长度差与预测长度比 / 角度差 / 位置差门控<br/>剔除错误观测]
+      C442 --> C443[以端点位置差作为代价<br/>贪心匹配得到 matched_lights]
+      C4430 --> C45[update]
+      C443 --> C45
+
+      C45 --> C450{matched_armors 是否为空?}
+      C450 -->|是| C455[本帧无可靠完整装甲板<br/>不进行状态更新]
+      C450 -->|否| C451[完整装甲板拆成左右灯条 UV 观测<br/>每条灯条包含上下端点
+      像素坐标]
+      C451 --> C452[相邻单灯条构造 UV 观测<br/>未被完整装甲板占用时参与更新]
+      C452 --> C453[update_multi 多观测 ESEKF 集合拼接更新<br/>最小化像素重投影
+      残差]
+      C453 --> C454[更新整车状态与 last_update 时间戳]
+      C454 --> C9
+      C455 --> C9
+
+      C9 --> C10{cur 是否 TEMP_LOST?}
+      C10 -->|是| C11[尝试处理 pre<br/>用于遮挡、误检或目标切换后的恢复]
+      C11 --> C12{pre 是否 TRACKING?}
+      C12 -->|是| C13[交换 cur / pre<br/>采用更可靠的备用目标]
+      C12 -->|否| C14[保持 cur]
+      C10 -->|否| C15{cur 是否 TRACKING?}
+      C15 -->|是| C16[重置 pre 为 LOST<br/>当前目标稳定后清空备用目标]
+      C15 -->|否| C14
+      C13 --> C17[输出 ArmorTarget<br/>整车状态 / 装甲板几何 / 跟踪状态]
+      C14 --> C17
+      C16 --> C17
+
+      %% Rune tracker
+      B -->|RuneTracker| D[RuneTracker::track]
+      D --> D1{是否已有有效目标?}
+
+      D1 -->|否| D2[init_target]
+      D2 --> D21[从 RuneDetector 输出中选择初始化目标<br/>优先使用带 R 扇叶]
+      D21 --> D22[提取 R 标 / 扇叶 / 靶盘关键点<br/>建立能量机关平面观测]
+      D22 --> D23[利用四关键点目标进行 PnP<br/>扇叶或靶盘求解靶面空间位姿]
+      D23 --> D24[初始化 RuneTarget 状态<br/>位置、yaw、roll、v_roll、tau、a、w]
+      D24 --> D241[初始化顺逆时针和大小能量机关投票器 voter<br/>保留大符 a / w /
+      tau 初始参数]
+      D241 --> D25[状态置为 DETECTING]
+      D25 --> D9[update_fsm]
+
+      D1 -->|是| D3[update_target]
+      D3 --> D30{扇叶 / R 标 / 靶盘观测是否全部为空?}
+      D30 -->|是| D90[本帧无可用观测<br/>found = false]
+      D30 -->|否| D31[predict_ekf<br/>基于 voter 状态选择小符匀速或大符正弦模型
+      预测]
+      D31 --> D311[若方向未确定则用 v_roll 外推<br/>若已确定则按顺/逆时针推进
+      roll]
+      D311 --> D32[match_fan<br/>匹配候选扇叶与预测扇叶编号]
+      D32 --> D321[对候选扇叶 PnP 粗定位<br/>构造 YPD + rot_yaw + rot_roll 观测]
+      D321 --> D322[与五个预测扇叶编号计算马氏距离<br/>按 match_gate 门控]
+      D322 --> D323[greedy_match 得到 matched_fans]
+
+      D323 --> D33[match_r<br/>匹配或估计 R 标中心]
+      D33 --> D331[融合预测 R 点与 matched_fans 内部 R 点<br/>计算 avg_r 和平均
+      臂长]
+      D331 --> D332{是否检测到合法独立 R 标?}
+      D332 -->|是| D333[使用 CV 检测 R 标中心<br/>并标记该 R 非废弃]
+      D332 -->|否| D334{是否有 matched_fans?}
+      D334 -->|是| D335[使用扇叶内部 R 点均值<br/>作为弱 R 观测]
+      D334 -->|否| D336[本帧不使用 R 观测]
+
+      D333 --> D34[match_fan_target<br/>匹配待击打靶盘]
+      D335 --> D34
+      D336 --> D34
+      D34 --> D341{是否存在可用 R 中心?}
+      D341 -->|否| D342[无法可靠排序靶盘角点<br/>matched_fan_targets 为空]
+      D341 -->|是| D343[以 R 中心排序靶盘角点]
+      D343 --> D344[靶盘 PnP 粗定位<br/>构造 YPD + rot_yaw + rot_roll 观测]
+      D344 --> D345[与五个预测扇叶编号门控匹配]
+      D345 --> D346[greedy_match 得到 matched_fan_targets]
+
+      D342 --> D35[update RuneTarget]
+      D346 --> D35
+      D35 --> D351[若有 R 中心<br/>加入 R_X / R_Y 二维像素观测]
+      D351 --> D352[matched_fans 加入扇叶四点观测<br/>TOP / LEFT / BOTTOM /
+      RIGHT]
+      D352 --> D353[matched_fan_targets 加入靶盘五点观测<br/>四角点 + 中心点]
+      D353 --> D354[update_multi 多观测 ESEKF 集合拼接更新<br/>最小化 R 标、扇
+      叶、靶盘重投影残差]
+      D354 --> D355[更新能量机关位置姿态、roll、相位和运动参数]
+      D355 --> D356[更新可见扇叶集合]
+      D356 --> D357[根据 roll 状态连续变化更新 voter 方向投票<br/>判断顺时针 / 逆时
+      针 / 收集中]
+      D357 --> D358[若单帧同时匹配到多个扇叶或靶盘<br/>累计大符模式证据]
+      D358 --> D359[超过阈值后 voter.mode 切换为 Big]
+      D359 --> D36[更新 RuneTarget]
+      D36 --> D9
+      D90 --> D9
+
+      D9 --> D91{目标距离是否过远/过近}
+      D91 -->|是| D92[认为状态异常或目标过远<br/>强制置为 LOST]
+      D91 -->|否| D10{是否连续稳定跟踪?}
+      D92 --> D11[DETECTING / TEMP_LOST / LOST 状态迁移]
+      D10 -->|否| D11
+      D10 -->|是| D12[TRACKING]
+      D11 --> D13[输出 RuneTarget<br/>状态 / voter / 可见扇叶集
+      合]
+      D12 --> D13
+
+      %% Downstream
+      C17 --> E[下游控制 / 识别 ROI 反馈 / 可视化]
+      D13 --> E

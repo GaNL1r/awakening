@@ -1,8 +1,10 @@
 #include "armor_target.hpp"
 #include "angles.h"
+#include "tasks/auto_aim/armor_track/motion_model.hpp"
 #include "tasks/auto_aim/type.hpp"
 #include "tasks/base/dta_utils.hpp"
 #include "tasks/base/web.hpp"
+#include "utils/logger.hpp"
 #include "utils/utils.hpp"
 #include <Eigen/src/Core/Matrix.h>
 #include <algorithm>
@@ -138,7 +140,6 @@ void ArmorTarget::armor_pnp(
     const ISO3& camera_cv_in_odom
 ) noexcept {
     auto key_points = a.key_points.landmarks();
-
     a.pose = utils::solve_pnp(
         key_points,
         getArmorKeyPoints3D<cv::Point3f>(a.number),
@@ -149,20 +150,16 @@ void ArmorTarget::armor_pnp(
     auto armor_in_odom = camera_cv_in_odom * a.pose;
     a.pose = armor_in_odom;
     auto rpy = utils::matrix2rpy(a.pose.linear());
-    double yaw_raw = rpy[2];
-    constexpr double SEARCH_RANGE = 140; // 随便穷举（
-    auto yaw0 = angles::normalize_angle(yaw_raw - SEARCH_RANGE / 2 * CV_PI / 180.0);
-    auto min_error = 1e10;
-    auto best_rot = a.pose.linear();
     auto obj_points = getArmorKeyPoints3D<cv::Point3f>(a.number);
     const double armor_pitch = (a.number == auto_aim::ArmorClass::OUTPOST)
         ? -auto_aim::FIFTTEN_DEGREE_RAD
         : auto_aim::FIFTTEN_DEGREE_RAD;
-    for (int i = 0; i < SEARCH_RANGE; i++) {
-        double yaw = angles::normalize_angle(yaw0 + i * CV_PI / 180.0);
+    auto center = [](const cv::Point2f& a, const cv::Point2f& b) { return (a + b) * 0.5f; };
+    auto eval_yaw = [&](double yaw) -> double {
         auto a_pose_in_odom = a.pose;
-        auto search_rpy = Vec3(0, armor_pitch, yaw);
+        Vec3 search_rpy(0.0, armor_pitch, yaw);
         a_pose_in_odom.linear() = utils::rpy2matrix(search_rpy);
+
         auto a_pose_in_camera_cv = camera_cv_in_odom.inverse() * a_pose_in_odom;
         auto img_points = utils::reprojection(
             camera_info.camera_matrix,
@@ -170,11 +167,11 @@ void ArmorTarget::armor_pnp(
             obj_points,
             a_pose_in_camera_cv
         );
-        double error = 0;
+
+        double error = 0.0;
         // for (int i = 0; i < img_points.size(); i++) {
         //     error += cv::norm(img_points[i] - key_points[i]);
-        // }
-        auto center = [](const cv::Point2f& a, const cv::Point2f& b) { return (a + b) * 0.5f; };
+        //     }
         error += cv::norm(
             center(
                 img_points[std::to_underlying(ArmorKeyPointsIndex::LEFT_TOP)],
@@ -185,6 +182,7 @@ void ArmorTarget::armor_pnp(
                 key_points[std::to_underlying(ArmorKeyPointsIndex::RIGHT_TOP)]
             )
         );
+
         error += cv::norm(
             center(
                 img_points[std::to_underlying(ArmorKeyPointsIndex::LEFT_BOTTOM)],
@@ -194,16 +192,19 @@ void ArmorTarget::armor_pnp(
                 key_points[std::to_underlying(ArmorKeyPointsIndex::LEFT_BOTTOM)],
                 key_points[std::to_underlying(ArmorKeyPointsIndex::RIGHT_BOTTOM)]
             )
-        ); //中点为约束实验上比原来4点约束更准（
+        );
 
-        if (error < min_error) {
-            min_error = error;
-            best_rot = a_pose_in_odom.linear();
-        }
-    }
-    a.pose.linear() = best_rot;
+        return error;
+    };
+    constexpr double SEARCH_RANGE_DEG = 140.0;
+    constexpr double HALF_RANGE_RAD = SEARCH_RANGE_DEG * CV_PI / 180.0 * 0.5;
+    double left = rpy[2] - HALF_RANGE_RAD;
+    double right = rpy[2] + HALF_RANGE_RAD;
+    double best_yaw = utils::golden_section_search(eval_yaw, left, right, 1e-4);
+    auto best_pose = a.pose;
+    best_pose.linear() = utils::rpy2matrix(Vec3(0.0, armor_pitch, best_yaw));
+    a.pose = best_pose;
 }
-
 Eigen::Matrix<double, UVZ_N, UVZ_N>
 ArmorTarget::uvmeasurement_covariance(const Eigen::Matrix<double, UVZ_N, 1>& z) const noexcept {
     Eigen::Matrix<double, UVZ_N, UVZ_N> r;
@@ -246,10 +247,10 @@ ArmorTarget::get_uvmeasurement(Armor& a, bool left) const noexcept {
     r.setZero(); //copy下sp_vision_25 这个参数不用在观测，差不多就行
     r(idx::YPD_Y, idx::YPD_Y) = 4e-3;
     r(idx::YPD_P, idx::YPD_P) = 4e-3;
-    r(idx::YPD_D, idx::YPD_D) =
-        log(std::abs(delta_angle) + 1) + z[idx::YPD_D] * z[idx::YPD_D] * 0.1;
-    r(idx::ROT_YAW, idx::ROT_YAW) = log(std::abs(z[idx::YPD_D]) + 1) / 200 + 9e-2;
-
+    r(idx::YPD_D, idx::YPD_D) = std::log(std::abs(delta_angle) + 1) + 1;
+    // r(idx::YPD_D, idx::YPD_D) =
+    //     log(std::abs(delta_angle) + 1) + z[idx::YPD_D] * z[idx::YPD_D] * 0.1;
+    r(idx::ROT_YAW, idx::ROT_YAW) = std::log(std::abs(z[idx::YPD_D]) + 1) / 200 + 9e-2;
     return r;
 }
 [[nodiscard]] Eigen::Matrix<double, armor_point_motion_model::YPDZ_N, 1>
@@ -327,16 +328,45 @@ int ArmorTarget::update(
     const auto cal_residual = [](const Eigen::Matrix<double, UVZ_N, 1>& z_pred,
                                  const Eigen::Matrix<double, UVZ_N, 1>& z) { return z - z_pred; };
 
-    auto add_obs = [&](Armor& armor, int id, bool is_left) {
+    auto add_armor_uv_obs = [&](Armor& armor, int id, bool is_left) {
         auto ctx = uvmeasure_ctx;
         ctx.id = id;
         ctx.is_left = is_left;
         ctx.camera_cv_in_odom = camera_cv_in_odom;
-
+        Eigen::Matrix<double, UVZ_N, 1> z;
+        auto key_points = armor.key_points.landmarks();
+        if (is_left) {
+            z[idx::TOP_X] = key_points[std::to_underlying(ArmorKeyPointsIndex::LEFT_TOP)].x;
+            z[idx::TOP_Y] = key_points[std::to_underlying(ArmorKeyPointsIndex::LEFT_TOP)].y;
+            z[idx::BOTTOM_X] = key_points[std::to_underlying(ArmorKeyPointsIndex::LEFT_BOTTOM)].x;
+            z[idx::BOTTOM_Y] = key_points[std::to_underlying(ArmorKeyPointsIndex::LEFT_BOTTOM)].y;
+        } else {
+            z[idx::BOTTOM_X] = key_points[std::to_underlying(ArmorKeyPointsIndex::RIGHT_BOTTOM)].x;
+            z[idx::BOTTOM_Y] = key_points[std::to_underlying(ArmorKeyPointsIndex::RIGHT_BOTTOM)].y;
+            z[idx::TOP_X] = key_points[std::to_underlying(ArmorKeyPointsIndex::RIGHT_TOP)].x;
+            z[idx::TOP_Y] = key_points[std::to_underlying(ArmorKeyPointsIndex::RIGHT_TOP)].y;
+        }
         UVMeasure measure { .ctx = ctx };
+        obs.push_back(esekf.value().make_obs(z, measure, u_r, cal_residual));
+    };
+    auto add_armor_ypd_obs = [&](Armor& armor, int id) {
+        auto ctx = ypdmeasure_ctx;
+        ctx.id = id;
+        const auto ypd_u_r = [&](const Eigen::Matrix<double, YPDZ_N, 1>& z) {
+            return ypdmeasurement_covariance(z);
+        };
 
+        const auto ypd_cal_residual = [](const Eigen::Matrix<double, YPDZ_N, 1>& z_pred,
+                                         const Eigen::Matrix<double, YPDZ_N, 1>& z) {
+            Eigen::Matrix<double, YPDZ_N, 1> v = z - z_pred;
+            ;
+            v[idx::YPD_Y] = angles::normalize_angle(v[idx::YPD_Y]);
+            v[idx::ROT_YAW] = angles::normalize_angle(v[idx::ROT_YAW]);
+            return v;
+        };
+        YPDMeasure measure { .ctx = ctx };
         obs.push_back(
-            esekf.value().make_obs(get_uvmeasurement(armor, is_left), measure, u_r, cal_residual)
+            esekf.value().make_obs(get_ypdmeasurement(armor), measure, ypd_u_r, ypd_cal_residual)
         );
     };
 
@@ -355,20 +385,15 @@ int ArmorTarget::update(
     std::vector<bool> used_id(armor_num(), false);
     for (auto& [id, armor]: matched_armors) {
         jumped |= (id != 0);
-
         update_outpost_state(id);
-
         last_match_id = id;
         used_id[id] = true;
-        add_obs(armor, id, true);
-        add_obs(armor, id, false);
+        add_armor_uv_obs(armor, id, true);
+        add_armor_uv_obs(armor, id, false);
         ++updated;
         ++update_count;
     }
     for (const auto& [id, is_left, light]: matched_lights) {
-        if (used_id[id]) {
-            continue;
-        }
         auto ctx = uvmeasure_ctx;
         ctx.id = id;
         ctx.is_left = is_left;
