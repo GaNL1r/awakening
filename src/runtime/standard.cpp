@@ -13,6 +13,7 @@
 #include "utils/io/video_save.hpp"
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <chrono>
 #include <cstdint>
 #include <memory>
@@ -161,9 +162,10 @@ int main(int argc, char** argv) {
     }
     auto config = YAML::LoadFile(config_path);
     Scheduler s;
-    Mode mode = str_to_Mode(config["mode"].as<std::string>());
-    EnemyColor enemy_color = enemy_color_from_string(config["enemy_color"].as<std::string>());
-    double bullet_speed = config["bullet_speed"].as<double>();
+    std::atomic<Mode> mode = str_to_Mode(config["mode"].as<std::string>());
+    std::atomic<EnemyColor> enemy_color =
+        enemy_color_from_string(config["enemy_color"].as<std::string>());
+    std::atomic<double> bullet_speed = config["bullet_speed"].as<double>();
 #ifdef USE_ROS2
     rcl::RclcppNode rcl_node("awakening");
     rcl::TF rcl_tf(rcl_node);
@@ -274,15 +276,12 @@ int main(int argc, char** argv) {
 
             if (!has_camera_info) {
                 auto info = daedalus_shm_client->camera_info();
-
                 has_camera_info = true;
-
                 camera_info.camera_matrix = cv::Mat::eye(3, 3, CV_64F);
                 camera_info.camera_matrix.at<double>(0, 0) = info.fx;
                 camera_info.camera_matrix.at<double>(1, 1) = info.fy;
                 camera_info.camera_matrix.at<double>(0, 2) = info.cx;
                 camera_info.camera_matrix.at<double>(1, 2) = info.cy;
-
                 camera_info.distortion_coefficients = cv::Mat(1, 5, CV_64F);
                 std::memcpy(
                     camera_info.distortion_coefficients.ptr<double>(),
@@ -297,7 +296,6 @@ int main(int argc, char** argv) {
                     .format = PixelFormat::RGB,
                     .timestamp = TimePoint(std::chrono::nanoseconds(frame->timestamp_ns)),
                 };
-
                 s.runtime_push_source<CameraIO>(
                     daedalus_imgs,
                     [f = std::move(img_frame)]() mutable {
@@ -312,9 +310,7 @@ int main(int argc, char** argv) {
             }
 
             push_pose(talos::ipc::PoseIndex::POSE_CAMERA, SimpleFrame::GIMBAL, SimpleFrame::CAMERA);
-
             push_pose(talos::ipc::PoseIndex::POSE_MUZZLE, SimpleFrame::GIMBAL, SimpleFrame::SHOOT);
-
             push_pose(
                 talos::ipc::PoseIndex::POSE_GIMBAL,
                 SimpleFrame::GIMBAL_ODOM,
@@ -367,8 +363,8 @@ int main(int argc, char** argv) {
 
                 auto packet_time =
                     now - std::chrono::microseconds(serial_send_to_image_microseconds);
-                ISO3 gimbal_2_gimbal_odom = ISO3::Identity();
-                gimbal_2_gimbal_odom.linear() = utils::rpy2matrix(Vec3(
+                ISO3 gimbal_in_gimbal_odom = ISO3::Identity();
+                gimbal_in_gimbal_odom.linear() = utils::rpy2matrix(Vec3(
                     angles::from_degrees(robo.roll),
                     angles::from_degrees(robo.pitch),
                     angles::from_degrees(robo.yaw)
@@ -377,15 +373,17 @@ int main(int argc, char** argv) {
                     SimpleFrame::GIMBAL_ODOM,
                     SimpleFrame::GIMBAL,
                     packet_time,
-                    gimbal_2_gimbal_odom
+                    gimbal_in_gimbal_odom
                 );
                 operator_offset = { angles::from_degrees(robo.operator_yaw_offset),
                                     angles::from_degrees(robo.operator_pitch_offset) };
+                auto gimbal_odom_in_odom = ISO3::Identity();
+                gimbal_odom_in_odom.translation() = Vec3(robo.v_x, robo.v_y, robo.v_z);
                 tf->push(
                     SimpleFrame::ODOM,
                     SimpleFrame::GIMBAL_ODOM,
                     packet_time,
-                    ISO3::Identity()
+                    gimbal_odom_in_odom
                 );
                 enemy_color = EnemyColor(robo.detect_color);
                 bullet_speed = robo.bullet_speed;
@@ -444,8 +442,9 @@ int main(int argc, char** argv) {
         if (mode == Mode::AutoAim) {
             static std::unique_ptr<std::counting_semaphore<>> detector_sem;
             if (!detector_sem) {
-                detector_sem =
-                    std::make_unique<std::counting_semaphore<>>(config["armor_detector"]["max_infer_num"].as<int>());
+                detector_sem = std::make_unique<std::counting_semaphore<>>(
+                    config["armor_detector"]["max_infer_num"].as<int>()
+                );
             }
             std::optional<cv::Rect> detect_light = std::nullopt;
             auto target = armor_target.read();
@@ -499,8 +498,9 @@ int main(int argc, char** argv) {
         } else {
             static std::unique_ptr<std::counting_semaphore<>> detector_sem;
             if (!detector_sem) {
-                detector_sem =
-                    std::make_unique<std::counting_semaphore<>>(config["rune_detector"]["max_infer_num"].as<int>());
+                detector_sem = std::make_unique<std::counting_semaphore<>>(
+                    config["rune_detector"]["max_infer_num"].as<int>()
+                );
             }
             auto target = rune_target.read();
             if (target.need_focus()) {
@@ -682,7 +682,6 @@ int main(int argc, char** argv) {
 
         } else if (r_target.check()) {
             rune_aimer.set_operator_offset(operator_offset);
-
             cmd =
                 rune_aimer.aim(r_target, bullet_speed, shoot_in_gimbal_odom, gimbal_in_gimbal_odom);
         }
@@ -693,7 +692,7 @@ int main(int argc, char** argv) {
             send.time_stamp =
                 std::chrono::duration_cast<std::chrono::microseconds>(Clock::now() - start_tp)
                     .count();
-            send.appear = cmd.appear, send.detect_color = std::to_underlying(enemy_color);
+            send.appear = cmd.appear, send.detect_color = std::to_underlying(enemy_color.load());
             send.yaw = cmd.yaw, send.pitch = cmd.pitch, send.v_yaw = cmd.v_yaw;
             send.target_yaw = cmd.target_yaw, send.target_pitch = cmd.target_pitch;
             send.v_pitch = cmd.v_pitch, send.a_yaw = cmd.a_yaw, send.a_pitch = cmd.a_pitch;

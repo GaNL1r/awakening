@@ -154,9 +154,10 @@ int main(int argc, char** argv) {
     auto config = YAML::LoadFile(config_path);
 
     Scheduler s;
-    Mode mode = str_to_Mode(config["mode"].as<std::string>());
-    EnemyColor enemy_color = enemy_color_from_string(config["enemy_color"].as<std::string>());
-    double bullet_speed = config["bullet_speed"].as<double>();
+    std::atomic<Mode> mode = str_to_Mode(config["mode"].as<std::string>());
+    std::atomic<EnemyColor> enemy_color =
+        enemy_color_from_string(config["enemy_color"].as<std::string>());
+    std::atomic<double> bullet_speed = config["bullet_speed"].as<double>();
 #ifdef USE_ROS2
     rcl::RclcppNode rcl_node("auto_aim");
     rcl::TF rcl_tf(rcl_node);
@@ -277,6 +278,7 @@ int main(int argc, char** argv) {
             return std::make_tuple(std::optional<CameraIO::second_type>(std::nullopt));
         });
     }
+    auto serial_send_to_image_microseconds = config["serial_send_to_image_microseconds"].as<int>();
 
     s.register_task<CameraIO, CommonFrameIo>("push_common_frame", [&](CameraIO::second_type&& f) {
         static int current_id = 0;
@@ -312,9 +314,10 @@ int main(int argc, char** argv) {
                              - (robo.time_stamp_send_micro - robo.time_stamp_receive_micro))
                         / 2.0;
                 }
-                auto packet_time = now - std::chrono::microseconds(delay);
-                ISO3 gimbal_2_gimbal_odom = ISO3::Identity();
-                gimbal_2_gimbal_odom.linear() = utils::rpy2matrix(Vec3(
+                auto packet_time =
+                    now - std::chrono::microseconds(serial_send_to_image_microseconds);
+                ISO3 gimbal_in_gimbal_odom = ISO3::Identity();
+                gimbal_in_gimbal_odom.linear() = utils::rpy2matrix(Vec3(
                     angles::from_degrees(robo.roll),
                     angles::from_degrees(robo.pitch),
                     angles::from_degrees(robo.yaw)
@@ -323,13 +326,15 @@ int main(int argc, char** argv) {
                     SentryFrame::GIMBAL_ODOM,
                     SentryFrame::GIMBAL,
                     packet_time,
-                    gimbal_2_gimbal_odom
+                    gimbal_in_gimbal_odom
                 );
+                auto gimbal_odom_in_odom = ISO3::Identity();
+                gimbal_odom_in_odom.translation() = Vec3(robo.v_x, robo.v_y, robo.v_z);
                 tf->push(
                     SentryFrame::ODOM,
                     SentryFrame::GIMBAL_ODOM,
                     packet_time,
-                    ISO3::Identity()
+                    gimbal_odom_in_odom
                 );
                 enemy_color = EnemyColor(robo.detect_color);
                 robo.update_log(delay);
@@ -408,8 +413,9 @@ int main(int argc, char** argv) {
         if (mode == Mode::AutoAim) {
             static std::unique_ptr<std::counting_semaphore<>> detector_sem;
             if (!detector_sem) {
-                detector_sem =
-                    std::make_unique<std::counting_semaphore<>>(config["armor_detector"]["max_infer_num"].as<int>());
+                detector_sem = std::make_unique<std::counting_semaphore<>>(
+                    config["armor_detector"]["max_infer_num"].as<int>()
+                );
             }
             std::optional<cv::Rect> detect_light = std::nullopt;
             auto target = armor_target.read();
@@ -463,8 +469,9 @@ int main(int argc, char** argv) {
         } else {
             static std::unique_ptr<std::counting_semaphore<>> detector_sem;
             if (!detector_sem) {
-                detector_sem =
-                    std::make_unique<std::counting_semaphore<>>(config["rune_detector"]["max_infer_num"].as<int>());
+                detector_sem = std::make_unique<std::counting_semaphore<>>(
+                    config["rune_detector"]["max_infer_num"].as<int>()
+                );
             }
             auto target = rune_target.read();
             if (target.need_focus()) {
@@ -660,7 +667,7 @@ int main(int argc, char** argv) {
             send.time_stamp =
                 std::chrono::duration_cast<std::chrono::microseconds>(Clock::now() - start_tp)
                     .count();
-            send.appear = cmd.appear, send.detect_color = std::to_underlying(enemy_color);
+            send.appear = cmd.appear, send.detect_color = std::to_underlying(enemy_color.load());
             send.yaw = cmd.yaw, send.pitch = cmd.pitch, send.v_yaw = cmd.v_yaw;
             send.target_yaw = cmd.target_yaw, send.target_pitch = cmd.target_pitch;
             send.v_pitch = cmd.v_pitch, send.a_yaw = cmd.a_yaw, send.a_pitch = cmd.a_pitch;

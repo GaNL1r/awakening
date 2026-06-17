@@ -18,7 +18,7 @@
 
 - 华南师范大学PIONEER战队@chenjunnn [rm_vision](https://github.com/chenjunnn/rm_vision)
 - 中南大学FYT战队 [FYT2024_vision](https://github.com/CSU-FYT-Vision/FYT2024_vision)
-- 河北科技大学Actor&Thinker战队 [at_vision](https://github.com/PraySky1337/at_vision) [Daedalus](https://github.com/Blackjack200/bevy_robomaster_simulator) 
+- 河北科技大学Actor&Thinker战队 [at_vision](https://github.com/PraySky1337/at_vision) [Daedalus](https://github.com/Blackjack200/bevy_robomaster_simulator) [talos_2026](https://github.com/Blackjack200/talos_2026)
 - 同济大学superpower战队 [sp_vision_25](https://github.com/TongjiSuperPower/sp_vision_25)
 - 深圳北理莫斯科大学北极熊战队 [armor_detector_tensorrt](https://github.com/SMBU-PolarBear-Robotics-Team/armor_detector_tensorrt)
 - 四川大学火锅战队 [openvino_armor_detector](https://github.com/Ericsii/rm_vision/tree/develop/openvino_armor_detector)

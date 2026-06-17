@@ -63,7 +63,7 @@ armor_detector:
       conf_threshold: 0.2
   number_classifier:
     enable: true
-    model_path: ${ROOT_DIR}/model/mlp.onnx
+    model_path: ${ROOT_DIR}/model/mlp_finetuned.onnx
     label_path: ${ROOT_DIR}/model/label.txt
   color_classifier:
     enable: true
@@ -116,7 +116,7 @@ very_aimer:
   base_yaw_offset: -0.0
   base_pitch_offset: -0.5
   sample_total_time: 1.0
-  sample_horizon: 200
+  sample_horizon: 100
   fire_delay_min: 0.00
   fire_delay_max: 0.00
   max_yaw_acc: 40
