@@ -1,6 +1,7 @@
 #include "../config.hpp"
 #include "ascii_banner.hpp"
 #include "backward-cpp/backward.hpp"
+#include "tasks/base/control_2026_protocol.hpp"
 #include "tasks/base/packet_typedef_receive.hpp"
 #include "tasks/base/packet_typedef_send.hpp"
 #include "utils/drivers/serial_driver.hpp"
@@ -68,9 +69,10 @@ int main(int argc, char** argv) {
     s.register_task<SerialIO>("receive_serial", [&](SerialIO::second_type&& data) {
         static std::mutex mutex;
         std::lock_guard<std::mutex> lock(mutex);
+        static control_2026::StatusStreamParser status_parser;
         auto now = Clock::now();
 
-        if (auto robo_opt = ReceiveRobotData::create(data); robo_opt.has_value()) {
+        if (auto robo_opt = status_parser.push(data); robo_opt.has_value()) {
             auto robo = robo_opt.value();
             static uint32_t last_pc = -1, delay = 0, last_bullet_count = 0;
             if (robo.time_stamp_pc != last_pc) {
@@ -141,7 +143,7 @@ int main(int argc, char** argv) {
         send.v_pitch = cmd.v_pitch, send.a_yaw = cmd.a_yaw, send.a_pitch = cmd.a_pitch;
         send.enable_yaw_diff = cmd.enable_yaw_diff;
         send.enable_pitch_diff = cmd.enable_pitch_diff;
-        serial.write(std::move(utils::to_vector(send)));
+        serial.write(control_2026::pack_command_for_control_2026(send));
         dbg.gimbal_cmd.set(cmd);
         auto gimbal_in_gimbal_odom =
             tf->pose_a_in_b(SimpleFrame::GIMBAL, SimpleFrame::GIMBAL_ODOM, Clock::now());

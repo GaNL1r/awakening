@@ -2,6 +2,7 @@
 #include "ascii_banner.hpp"
 #include "backward-cpp/backward.hpp"
 #include "tasks/base/common.hpp"
+#include "tasks/base/control_2026_protocol.hpp"
 #include "tasks/base/packet_typedef_receive.hpp"
 #include "tasks/base/packet_typedef_send.hpp"
 #include "utils/drivers/hik_camera.hpp"
@@ -184,9 +185,10 @@ int main(int argc, char** argv) {
         s.register_task<SerialIO>("receive_serial", [&](SerialIO::second_type&& data) {
             static std::mutex mutex;
             std::lock_guard<std::mutex> lock(mutex);
+            static control_2026::StatusStreamParser status_parser;
             auto now = Clock::now();
 
-            if (auto robo_opt = ReceiveRobotData::create(data); robo_opt.has_value()) {
+            if (auto robo_opt = status_parser.push(data); robo_opt.has_value()) {
                 auto robo = robo_opt.value();
                 auto packet_time =
                     now - std::chrono::microseconds(serial_send_to_image_microseconds);
@@ -261,7 +263,7 @@ int main(int argc, char** argv) {
         send.enable_yaw_diff = cmd.enable_yaw_diff;
         send.enable_pitch_diff = cmd.enable_pitch_diff;
         if (serial) {
-            serial->write(std::move(utils::to_vector(send)));
+            serial->write(control_2026::pack_command_for_control_2026(send));
         }
     });
     if (camera) {

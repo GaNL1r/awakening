@@ -8,7 +8,9 @@
 #include <atomic>
 #include <chrono>
 #include <deque>
+#include <filesystem>
 #include <memory>
+#include <string>
 #include <thread>
 #include <vector>
 
@@ -125,27 +127,75 @@ private:
     }
 
     bool open_port() {
-        boost::system::error_code ec;
+        for (const auto& device_name: device_candidates()) {
+            boost::system::error_code ec;
+            port_.open(device_name, ec);
+            if (ec) {
+                error_handler(ec);
+                continue;
+            }
 
-        port_.open(params_.device_name, ec);
-        if (ec) {
-            error_handler(ec);
-            return false;
+            port_.set_option(boost::asio::serial_port_base::baud_rate(params_.baud_rate), ec);
+            port_.set_option(boost::asio::serial_port_base::character_size(params_.char_size), ec);
+            port_.set_option(boost::asio::serial_port_base::parity(params_.parity), ec);
+            port_.set_option(boost::asio::serial_port_base::stop_bits(params_.stop_bits), ec);
+            port_.set_option(boost::asio::serial_port_base::flow_control(params_.flow_control), ec);
+
+            if (ec) {
+                error_handler(ec);
+                port_.close(ec);
+                continue;
+            }
+
+            AWAKENING_INFO("serial open success: {}", device_name);
+            return true;
         }
 
-        port_.set_option(boost::asio::serial_port_base::baud_rate(params_.baud_rate), ec);
-        port_.set_option(boost::asio::serial_port_base::character_size(params_.char_size), ec);
-        port_.set_option(boost::asio::serial_port_base::parity(params_.parity), ec);
-        port_.set_option(boost::asio::serial_port_base::stop_bits(params_.stop_bits), ec);
-        port_.set_option(boost::asio::serial_port_base::flow_control(params_.flow_control), ec);
+        return false;
+    }
 
-        if (ec) {
-            error_handler(ec);
-            return false;
+    std::vector<std::string> device_candidates() const {
+        std::vector<std::string> out;
+        auto push_unique = [&](const std::string& device_name) {
+            if (device_name.empty())
+                return;
+            if (std::find(out.begin(), out.end(), device_name) == out.end()) {
+                out.push_back(device_name);
+            }
+        };
+
+        push_unique(params_.device_name);
+        push_unique("/dev/gimbal");
+
+        std::error_code ec;
+        const std::filesystem::path by_id_dir("/dev/serial/by-id");
+        if (std::filesystem::exists(by_id_dir, ec)) {
+            std::vector<std::string> by_id_devices;
+            for (const auto& entry: std::filesystem::directory_iterator(by_id_dir, ec)) {
+                by_id_devices.push_back(entry.path().string());
+            }
+            std::sort(by_id_devices.begin(), by_id_devices.end());
+            for (const auto& device_name: by_id_devices) {
+                push_unique(device_name);
+            }
         }
 
-        AWAKENING_INFO("serial open success: {}", params_.device_name);
-        return true;
+        const std::filesystem::path dev_dir("/dev");
+        if (std::filesystem::exists(dev_dir, ec)) {
+            std::vector<std::string> acm_devices;
+            for (const auto& entry: std::filesystem::directory_iterator(dev_dir, ec)) {
+                const auto filename = entry.path().filename().string();
+                if (filename.starts_with("ttyACM")) {
+                    acm_devices.push_back(entry.path().string());
+                }
+            }
+            std::sort(acm_devices.begin(), acm_devices.end());
+            for (const auto& device_name: acm_devices) {
+                push_unique(device_name);
+            }
+        }
+
+        return out;
     }
 
     void close_port() {

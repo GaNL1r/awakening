@@ -28,6 +28,7 @@
 #include "param_deliver.h"
 #include "runtime/config.hpp"
 #include "tasks/auto_aim/armor_control/very_aimer.hpp"
+#include "tasks/base/control_2026_protocol.hpp"
 #include "utils/drivers/hik_camera.hpp"
 #include "utils/semaphore_guard.hpp"
 #include "utils/signal_guard.hpp"
@@ -300,11 +301,18 @@ int main(int argc, char** argv) {
         s.register_task<SerialIO>("receive_serial", [&](SerialIO::second_type&& data) {
             static std::mutex mutex;
             std::lock_guard<std::mutex> lock(mutex);
+            static control_2026::StatusStreamParser status_parser;
             auto now = Clock::now();
 
             log_ctx.serial_count++;
-            if (auto robo_opt = ReceiveRobotData::create(data); robo_opt.has_value()) {
-                auto robo = robo_opt.value();
+            if (auto status_opt = status_parser.push_status(data); status_opt.has_value()) {
+                auto status = status_opt.value();
+                if (status.mode == 0) {
+                    mode = Mode::AutoAim;
+                } else if (status.mode == 1) {
+                    mode = Mode::AutoBuff;
+                }
+                auto robo = status.robot;
                 static uint32_t last_pc = -1, delay = 0, last_bullet_count = 0;
                 if (robo.time_stamp_pc != last_pc) {
                     last_pc = robo.time_stamp_pc;
@@ -673,7 +681,7 @@ int main(int argc, char** argv) {
             send.v_pitch = cmd.v_pitch, send.a_yaw = cmd.a_yaw, send.a_pitch = cmd.a_pitch;
             send.enable_yaw_diff = cmd.enable_yaw_diff;
             send.enable_pitch_diff = cmd.enable_pitch_diff;
-            serial->write(std::move(utils::to_vector(send)));
+            serial->write(control_2026::pack_command_for_control_2026(send, cmd.fire_advice));
         }
         auto old_in_camera_cv = tf->pose_a_in_b(
             SentryFrame(cmd.aim_point.frame_id),
