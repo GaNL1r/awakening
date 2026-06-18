@@ -52,7 +52,6 @@ struct CameraInfo {
 };
 struct AimPoint {
     ISO3 pose;
-    double d_angle;
     int frame_id;
     static AimPoint lerp(const AimPoint& a, const AimPoint& b, double t) {
         AimPoint p;
@@ -65,7 +64,6 @@ struct AimPoint {
         p.pose = ISO3::Identity();
         p.pose.linear() = q.toRotationMatrix();
         p.pose.translation() = trans;
-        p.d_angle = utils::lerp_angle(a.d_angle, b.d_angle, t);
         return p;
     }
     void transform(const ISO3& old_in_new, int new_frame_id) {

@@ -209,8 +209,10 @@ struct Web::Impl {
                     { cv::Point3f(0, 0, 0) },
                     vel_pose
                 );
-                auto whole_car_pose =
-                    auto_aim::armor_point_motion_model::_whole_car_pose(target_state.x.data());
+                auto whole_car_pose = auto_aim::armor_point_motion_model::_whole_car_pose(
+                    target_state.x.data(),
+                    armor_target.target_number
+                );
                 auto vyaw_in_car = ISO3::Identity();
                 vyaw_in_car.translation().z() = target_state.vyaw() / 10.0;
                 auto vyaw_pose = odom_in_camera_cv * whole_car_pose * vyaw_in_car;

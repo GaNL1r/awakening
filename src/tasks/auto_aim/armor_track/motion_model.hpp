@@ -142,18 +142,22 @@ inline T _get_armor_r(const T x[X_N], int id, int armor_num) {
     return use_lh ? x[idx::R] + x[idx::L] : x[idx::R];
 }
 template<typename T>
-inline Eigen::Transform<T, 3, Eigen::Isometry> _whole_car_pose(const T x[X_N]) {
+inline Eigen::Transform<T, 3, Eigen::Isometry>
+_whole_car_pose(const T x[X_N], ArmorClass armor_number) {
     Eigen::Transform<T, 3, Eigen::Isometry> car_in_odom =
         Eigen::Transform<T, 3, Eigen::Isometry>::Identity();
     car_in_odom.translation() << x[idx::CX], x[idx::CY], x[idx::CZ];
+    const bool building =
+        (armor_number == auto_aim::ArmorClass::OUTPOST || armor_number == auto_aim::ArmorClass::BASE
+        );
     Eigen::Quaternion<T> q_yaw_car_in_odom(
         Eigen::AngleAxis<T>(T(x[idx::YAW]), Eigen::Vector3<T>::UnitZ())
     );
     Eigen::Quaternion<T> q_pitch_car_in_odom(
-        Eigen::AngleAxis<T>(T(x[idx::WP]), Eigen::Vector3<T>::UnitY())
+        Eigen::AngleAxis<T>(building ? T(0.0) : T(x[idx::WP]), Eigen::Vector3<T>::UnitY())
     );
     Eigen::Quaternion<T> q_roll_car_in_odom(
-        Eigen::AngleAxis<T>(T(x[idx::WR]), Eigen::Vector3<T>::UnitX())
+        Eigen::AngleAxis<T>(building ? T(0.0) : T(x[idx::WR]), Eigen::Vector3<T>::UnitX())
     );
     car_in_odom.linear() =
         (q_roll_car_in_odom * q_pitch_car_in_odom * q_yaw_car_in_odom).toRotationMatrix();
@@ -190,7 +194,8 @@ _armor_pose(const T x[X_N], int id, int armor_num, ArmorClass armor_number) {
     Eigen::Quaternion<T> q_roll_in_car(Eigen::AngleAxis<T>(T(0.0), Eigen::Vector3<T>::UnitX()));
     pose_in_car.linear() = (q_yaw_in_car * q_pitch_in_car * q_roll_in_car).toRotationMatrix();
 
-    Eigen::Transform<T, 3, Eigen::Isometry> pose_in_odom = _whole_car_pose(x) * pose_in_car;
+    Eigen::Transform<T, 3, Eigen::Isometry> pose_in_odom =
+        _whole_car_pose(x, armor_number) * pose_in_car;
     return pose_in_odom;
 }
 struct UVMeasure {
@@ -269,33 +274,12 @@ struct State {
     TimePoint timestamp;
     int frame_id = 0;
 
-    inline std::vector<Vec4> get_armors_xyza(auto_aim::ArmorClass armor_number) const {
-        std::vector<Vec4> r;
-        int armor_num = armor_num_by_armor_class(armor_number);
-        r.reserve(armor_num);
-        for (int i = 0; i < armor_num; ++i) {
-            auto pose_in_odom = _armor_pose(x.data(), i, armor_num, armor_number);
-            double ax, ay, az, ayaw;
-            ax = pose_in_odom.translation().x();
-            ay = pose_in_odom.translation().y();
-            az = pose_in_odom.translation().z();
-            auto rpy = utils::matrix2rpy<double>(pose_in_odom.linear());
-            ayaw = rpy[2];
-            r.push_back({ ax, ay, az, ayaw });
-        }
-        return r;
-    }
-
     inline std::vector<ISO3> get_armors_pose(auto_aim::ArmorClass armor_number) const {
         std::vector<ISO3> r;
-        const double armor_pitch = (armor_number == auto_aim::ArmorClass::OUTPOST)
-            ? -auto_aim::FIFTTEN_DEGREE_RAD
-            : auto_aim::FIFTTEN_DEGREE_RAD;
         int armor_num = armor_num_by_armor_class(armor_number);
         r.reserve(armor_num);
         for (int i = 0; i < armor_num; ++i) {
             auto pose = _armor_pose(x.data(), i, armor_num, armor_number);
-
             r.push_back(pose);
         }
 

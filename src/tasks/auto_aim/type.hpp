@@ -183,9 +183,14 @@ inline std::vector<PointT> getArmorLightKeyPoints3D(ArmorClass armor_class, bool
 }
 enum class ArmorColor : int { BLUE = 0, RED, NONE, PURPLE };
 
-constexpr int armor_num_by_armor_class(const ArmorClass& armor_class) {
-    constexpr std::array details { 4, 4, 4, 4, 4, 4, 3, 1, 4 };
-    return details[std::to_underlying(armor_class)];
+inline int armor_num_by_armor_class(const ArmorClass& armor_class) {
+    if (armor_class == ArmorClass::OUTPOST) {
+        return 3;
+    } else if (armor_class == ArmorClass::BASE) {
+        return 1;
+    } else {
+        return 4;
+    }
 }
 inline std::string string_by_armor_color(ArmorColor armor_color) {
     constexpr const char* details[] = { "blue", "red", "none", "purple" };

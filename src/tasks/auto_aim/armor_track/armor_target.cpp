@@ -155,7 +155,7 @@ void ArmorTarget::armor_pnp(
     );
     auto armor_in_odom = camera_cv_in_odom * a.pose;
     a.pose = armor_in_odom;
-    if (a.number == ArmorClass::OUTPOST || a.number == ArmorClass::BASE) {
+    if (a.number == ArmorClass::OUTPOST) {
         auto rpy = utils::matrix2rpy<double>(a.pose.linear());
         auto obj_points = getArmorKeyPoints3D<cv::Point3f>(a.number);
         const double armor_pitch = (a.number == auto_aim::ArmorClass::OUTPOST)
@@ -234,7 +234,7 @@ ArmorTarget::uvmeasurement_covariance(const Eigen::Matrix<double, UVZ_N, 1>& z) 
     r.setZero(); //copy下sp_vision_25 这个参数不用在观测，差不多就行
     r(idx::YPD_Y, idx::YPD_Y) = 4e-3;
     r(idx::YPD_P, idx::YPD_P) = 4e-3;
-    r(idx::YPD_D, idx::YPD_D) = z[idx::YPD_D] * z[idx::YPD_D] * 0.1 + 0.001;
+    r(idx::YPD_D, idx::YPD_D) = std::log(z[idx::YPD_D] * z[idx::YPD_D] * 0.1 + 1) + 1;
     r(idx::ROT_X, idx::ROT_X) = 0.1;
     r(idx::ROT_Y, idx::ROT_Y) = 0.1;
     r(idx::ROT_Z, idx::ROT_Z) = 0.03;
@@ -275,7 +275,7 @@ Eigen::Matrix<double, X_N, X_N> ArmorTarget::process_noise(double dt) const noex
     }
 
     q.setZero();
-    const Mat3 car_in_odom_R = _whole_car_pose(target_state.x.data()).linear();
+    const Mat3 car_in_odom_R = _whole_car_pose(target_state.x.data(), target_number).linear();
     const Mat3 accel_noise_odom = car_in_odom_R * q_xyz.asDiagonal() * car_in_odom_R.transpose();
 
     const double dt2 = dt * dt;

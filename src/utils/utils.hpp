@@ -46,32 +46,54 @@ inline Eigen::Matrix<T, 3, 1> so3_log(const Eigen::Matrix<T, 3, 3>& R) {
     w << R(2, 1) - R(1, 2), R(0, 2) - R(2, 0), R(1, 0) - R(0, 1);
     return scale * w;
 }
+enum class RPYOrder { XYZ, ZYX };
 template<class T>
-inline Eigen::Quaternion<T> rpy2quat(const Eigen::Vector3<T>& rpy) {
+inline Eigen::Quaternion<T> rpy2quat(const Eigen::Vector3<T>& rpy, RPYOrder order = RPYOrder::ZYX) {
     Eigen::AngleAxis<T> roll(rpy.x(), Eigen::Vector3<T>::UnitX());
     Eigen::AngleAxis<T> pitch(rpy.y(), Eigen::Vector3<T>::UnitY());
     Eigen::AngleAxis<T> yaw(rpy.z(), Eigen::Vector3<T>::UnitZ());
-    Eigen::Quaternion<T> q { yaw * pitch * roll };
+    Eigen::Quaternion<T> q;
+    switch (order) {
+        case RPYOrder::ZYX:
+            q = { yaw * pitch * roll };
+            break;
+        case RPYOrder::XYZ:
+            q = { roll * pitch * yaw };
+            break;
+    }
     q.normalize();
     return q;
 }
 
 template<class T>
-inline Eigen::Matrix3<T> rpy2matrix(const Eigen::Vector3<T>& rpy) {
-    return rpy2quat(rpy).toRotationMatrix();
+inline Eigen::Matrix3<T> rpy2matrix(const Eigen::Vector3<T>& rpy, RPYOrder order = RPYOrder::ZYX) {
+    return rpy2quat(rpy, order).toRotationMatrix();
 }
 
 template<class T>
-inline Eigen::Vector3<T> matrix2rpy(const Eigen::Matrix3<T>& R) {
-    const T roll = ceres::atan2(R(2, 1), R(2, 2));
-    const T pitch = ceres::atan2(-R(2, 0), ceres::hypot(R(2, 1), R(2, 2)));
-    const T yaw = ceres::atan2(R(1, 0), R(0, 0));
-    return { roll, pitch, yaw };
+inline Eigen::Vector3<T> matrix2rpy(const Eigen::Matrix3<T>& R, RPYOrder order = RPYOrder::ZYX) {
+    switch (order) {
+        case RPYOrder::ZYX: {
+            const T roll = ceres::atan2(R(2, 1), R(2, 2));
+            const T pitch = ceres::atan2(-R(2, 0), ceres::hypot(R(2, 1), R(2, 2)));
+            const T yaw = ceres::atan2(R(1, 0), R(0, 0));
+            return { roll, pitch, yaw };
+        }
+
+        case RPYOrder::XYZ: {
+            const T pitch = ceres::asin(-R(0, 2));
+            const T roll = ceres::atan2(R(1, 2), R(2, 2));
+            const T yaw = ceres::atan2(R(0, 1), R(0, 0));
+            return { roll, pitch, yaw };
+        }
+    }
+
+    return { T(0), T(0), T(0) };
 }
 
 template<class T>
-inline Eigen::Vector3<T> quat2rpy(const Eigen::Quaternion<T>& q) {
-    return matrix2rpy(q.normalized().toRotationMatrix());
+inline Eigen::Vector3<T> quat2rpy(const Eigen::Quaternion<T>& q, RPYOrder order = RPYOrder::ZYX) {
+    return matrix2rpy(q.normalized().toRotationMatrix(), order);
 }
 
 inline std::string expand_env(const std::string& s) {

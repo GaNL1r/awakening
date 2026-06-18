@@ -316,29 +316,27 @@ struct RuneAimer::Impl {
         auto cal_enbale_diff = [&](double _t) {
             auto aim_point = aim_traj_.state_at(_t);
             const double distance = aim_point.pose.translation().norm();
-            double shooting_range_yaw;
             double half_w = params_.shooting_range_w / 2;
-            auto cos_theta = std::cos(aim_point.d_angle);
-            auto sin_theta = std::sin(aim_point.d_angle);
-
-            auto yaw1 = std::atan2(
-                aim_point.pose.translation().y() + half_w * cos_theta,
-                aim_point.pose.translation().x() - half_w * sin_theta
-            );
-            auto yaw2 = std::atan2(
-                aim_point.pose.translation().y() - half_w * cos_theta,
-                aim_point.pose.translation().x() + half_w * sin_theta
-            );
+            auto pose1_in_aim_point = ISO3::Identity();
+            pose1_in_aim_point.translation() = Vec3(0, -half_w, 0);
+            auto pose2_in_aim_point = ISO3::Identity();
+            pose2_in_aim_point.translation() = Vec3(0, half_w, 0);
+            auto pose1_in_odom = aim_point.pose * pose1_in_aim_point;
+            auto pose2_in_odom = aim_point.pose * pose2_in_aim_point;
+            auto yaw1 =
+                std::atan2(pose1_in_odom.translation().y(), pose1_in_odom.translation().x());
+            auto yaw2 =
+                std::atan2(pose2_in_odom.translation().y(), pose2_in_odom.translation().x());
             auto aim_yaw =
                 std::atan2(aim_point.pose.translation().y(), aim_point.pose.translation().x());
-            shooting_range_yaw = std::min(
+            double shooting_range_yaw = std::min(
                 std::abs(angles::normalize_angle(yaw1 - aim_yaw)),
                 std::abs(angles::normalize_angle(yaw2 - aim_yaw))
             ); //直接算两个边缘yaw
             double shooting_range_pitch =
                 std::abs(std::atan2(params_.shooting_range_h / 2, distance));
-            const double pitch_factor = 1.0; //跟yaw一样逻辑还得多两次解弹道，没必要
-            shooting_range_pitch *= pitch_factor;
+            auto rpy = utils::matrix2rpy<double>(aim_point.pose.linear(), utils::RPYOrder::XYZ);
+            shooting_range_pitch *= std::cos(rpy[1]);
             shooting_range_yaw =
                 std::max(shooting_range_yaw, angles::from_degrees(params_.min_enable_yaw_deg));
             shooting_range_pitch =
