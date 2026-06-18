@@ -171,7 +171,7 @@ struct Bullet {
         if (dt <= 0) {
             return std::nullopt;
         }
-        auto rpy = utils::matrix2rpy(fire_time_shoot_in_odom.linear());
+        auto rpy = utils::matrix2rpy<double>(fire_time_shoot_in_odom.linear());
         double yaw = rpy[2] - offset.first;
         double pitch = -rpy[1] - offset.second;
         auto [dis, height] = b->solve_distance_height(pitch, speed_in_odom, dt);

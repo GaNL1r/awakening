@@ -24,6 +24,7 @@ struct ArmorTrackerCfg {
     double q_r;
     double q_l;
     double q_h;
+    double q_wpr;
     double q_outpost_dz;
     double r_uv_at_1m;
     double r_uv_min;
@@ -47,6 +48,7 @@ struct ArmorTrackerCfg {
         q_r = config["q_r"].as<double>();
         q_l = config["q_l"].as<double>();
         q_h = config["q_h"].as<double>();
+        q_wpr = config["q_wpr"].as<double>();
         q_outpost_dz = config["q_outpost_dz"].as<double>();
         r_uv_at_1m = config["r_uv_at_1m"].as<double>();
         r_uv_min = config["r_uv_min"].as<double>();

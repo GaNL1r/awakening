@@ -91,7 +91,7 @@ struct RuneAimer::Impl {
         auto R_gimbal_shoot =
             gimbal_in_gimbal_odom.linear().inverse() * shoot_in_gimbal_odom.linear();
         auto desired_gimbal = desired_shoot * R_gimbal_shoot.inverse();
-        auto rpy = utils::matrix2rpy(desired_gimbal);
+        auto rpy = utils::matrix2rpy<double>(desired_gimbal);
         cp.valid = true;
         cp.yaw = rpy[2];
         cp.pitch = rpy[1];

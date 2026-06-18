@@ -1,6 +1,9 @@
 #pragma once
 #include "angles.h"
 #include "utils/common/type_common.hpp"
+#include <Eigen/src/Core/Matrix.h>
+#include <Eigen/src/Geometry/Quaternion.h>
+#include <ceres/jet.h>
 #include <cmath>
 #include <numbers>
 #include <opencv2/calib3d.hpp>
@@ -12,28 +15,62 @@
 #include <utility>
 #include <vector>
 namespace awakening::utils {
+template<class T>
+inline Eigen::Matrix<T, 3, 3> so3_hat(const Eigen::Matrix<T, 3, 1>& w) {
+    Eigen::Matrix<T, 3, 3> W;
+    W << T(0), -w.z(), w.y(), w.z(), T(0), -w.x(), -w.y(), w.x(), T(0);
+    return W;
+}
+template<class T>
+inline Eigen::Matrix<T, 3, 3> so3_exp(const Eigen::Matrix<T, 3, 1>& phi) {
+    const T theta = phi.norm();
 
-inline Quaternion rpy2quat(const Vec3& rpy) {
-    AngleAxis roll(rpy.x(), Vec3::UnitX());
-    AngleAxis pitch(rpy.y(), Vec3::UnitY());
-    AngleAxis yaw(rpy.z(), Vec3::UnitZ());
-    Quaternion q { yaw * pitch * roll };
+    const auto W = so3_hat(phi);
+    const auto W2 = W * W;
+
+    Eigen::Matrix<T, 3, 3> R = Eigen::Matrix<T, 3, 3>::Identity();
+
+    const T A = ceres::sin(theta) / theta;
+    const T B = (T(1) - ceres::cos(theta)) / (theta * theta);
+
+    R += A * W + B * W2;
+
+    return R;
+}
+template<class T>
+inline Eigen::Matrix<T, 3, 1> so3_log(const Eigen::Matrix<T, 3, 3>& R) {
+    const T cos_theta = (R.trace() - T(1.0)) * T(0.5);
+    const T theta = ceres::acos(cos_theta);
+    const T scale = theta / (T(2.0) * ceres::sin(theta));
+    Eigen::Matrix<T, 3, 1> w;
+    w << R(2, 1) - R(1, 2), R(0, 2) - R(2, 0), R(1, 0) - R(0, 1);
+    return scale * w;
+}
+template<class T>
+inline Eigen::Quaternion<T> rpy2quat(const Eigen::Vector3<T>& rpy) {
+    Eigen::AngleAxis<T> roll(rpy.x(), Eigen::Vector3<T>::UnitX());
+    Eigen::AngleAxis<T> pitch(rpy.y(), Eigen::Vector3<T>::UnitY());
+    Eigen::AngleAxis<T> yaw(rpy.z(), Eigen::Vector3<T>::UnitZ());
+    Eigen::Quaternion<T> q { yaw * pitch * roll };
     q.normalize();
     return q;
 }
 
-inline Mat3 rpy2matrix(const Vec3& rpy) {
+template<class T>
+inline Eigen::Matrix3<T> rpy2matrix(const Eigen::Vector3<T>& rpy) {
     return rpy2quat(rpy).toRotationMatrix();
 }
 
-inline Vec3 matrix2rpy(const Mat3& R) {
-    const double roll = std::atan2(R(2, 1), R(2, 2));
-    const double pitch = std::atan2(-R(2, 0), std::hypot(R(2, 1), R(2, 2)));
-    const double yaw = std::atan2(R(1, 0), R(0, 0));
+template<class T>
+inline Eigen::Vector3<T> matrix2rpy(const Eigen::Matrix3<T>& R) {
+    const T roll = ceres::atan2(R(2, 1), R(2, 2));
+    const T pitch = ceres::atan2(-R(2, 0), ceres::hypot(R(2, 1), R(2, 2)));
+    const T yaw = ceres::atan2(R(1, 0), R(0, 0));
     return { roll, pitch, yaw };
 }
 
-inline Vec3 quat2rpy(const Quaternion& q) {
+template<class T>
+inline Eigen::Vector3<T> quat2rpy(const Eigen::Quaternion<T>& q) {
     return matrix2rpy(q.normalized().toRotationMatrix());
 }
 

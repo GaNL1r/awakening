@@ -183,7 +183,7 @@ bool RuneTarget::reset(
     esekf.value().set_iteration_num(cfg.esekf_iter_num);
 
     auto pos = pose.value().translation();
-    auto rpy = utils::matrix2rpy(pose.value().linear());
+    auto rpy = utils::matrix2rpy<double>(pose.value().linear());
     double a_guess = (A_LOWER + A_UPPER) / 2.0;
     double w_guess = (W_LOWER + W_UPPER) / 2.0;
     double tau = 0;
@@ -281,7 +281,7 @@ RuneTarget::get_ypdmeasurement(const ISO3& pose) const noexcept {
     z[idx::YPD_Y] = ypd_y;
     z[idx::YPD_P] = ypd_p;
     z[idx::YPD_D] = ypd_d;
-    auto rpy = utils::matrix2rpy(pose.linear());
+    auto rpy = utils::matrix2rpy<double>(pose.linear());
     z[idx::ROT_YAW] = rpy[2];
     z[idx::ROT_ROLL] = rpy[0];
     return z;

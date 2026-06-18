@@ -169,7 +169,7 @@ struct VeryAimer::Impl {
         const Mat3 R_gimbal_shoot =
             gimbal_in_gimbal_odom.linear().transpose() * shoot_in_gimbal_odom.linear();
         auto desired_gimbal = desired_shoot * R_gimbal_shoot.transpose();
-        auto rpy = utils::matrix2rpy(desired_gimbal);
+        auto rpy = utils::matrix2rpy<double>(desired_gimbal);
         cp.valid = true;
         cp.yaw = rpy[2];
         cp.pitch = rpy[1];

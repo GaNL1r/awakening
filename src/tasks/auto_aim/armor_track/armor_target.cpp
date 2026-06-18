@@ -4,8 +4,10 @@
 #include "tasks/auto_aim/type.hpp"
 #include "tasks/base/dta_utils.hpp"
 #include "tasks/base/web.hpp"
+#include "utils/common/type_common.hpp"
 #include "utils/logger.hpp"
 #include "utils/utils.hpp"
+#include <Eigen/Geometry>
 #include <Eigen/src/Core/Matrix.h>
 #include <algorithm>
 #include <array>
@@ -42,6 +44,8 @@ void ArmorTarget::write_log() {
         j_target_state["r"] = Web::val(target_state.r());
         j_target_state["l"] = Web::val(target_state.l());
         j_target_state["h"] = Web::val(target_state.h());
+        j_target_state["wp"] = Web::val(target_state.w_p());
+        j_target_state["wr"] = Web::val(target_state.w_r());
     });
 }
 
@@ -87,11 +91,13 @@ void ArmorTarget::reset(
     const auto inject =
         [this](const Eigen::Matrix<double, X_N, 1>& delta, Eigen::Matrix<double, X_N, 1>& nominal) {
             for (int i = 0; i < X_N; i++) {
-                if (i == idx::YAW)
+                if (i == idx::YAW || i == idx::WP || i == idx::WR)
                     continue;
                 nominal[i] += delta[i];
             }
             nominal[idx::YAW] = angles::normalize_angle(nominal[idx::YAW] + delta[idx::YAW]);
+            nominal[idx::WP] = angles::normalize_angle(nominal[idx::WP] + delta[idx::WP]);
+            nominal[idx::WR] = angles::normalize_angle(nominal[idx::WR] + delta[idx::WR]);
         };
     esekf =
         RobotStateESEKF(Predict { .dt = 0.005, .armor_number = target_number }, u_q, inject, p0);
@@ -103,7 +109,7 @@ void ArmorTarget::reset(
     const double xa = pos.x();
     const double ya = pos.y();
     const double za = pos.z();
-    auto rpy = utils::matrix2rpy(a.pose.linear());
+    auto rpy = utils::matrix2rpy<double>(a.pose.linear());
     const double yaw = rpy[2];
     last_rot_yaw = yaw;
     target_state.x = Eigen::VectorXd::Zero(X_N);
@@ -113,7 +119,7 @@ void ArmorTarget::reset(
     const double zc = za;
     double l = 0.0;
     double h = 0.0;
-    target_state.x << xc, 0, yc, 0, zc, 0, yaw, 0, r, l, h;
+    target_state.x << xc, 0, yc, 0, zc, 0, yaw, 0, r, l, h, 0, 0;
     target_state.timestamp = timestamp;
     target_state.frame_id = frame_id;
     esekf.value().set_state(target_state.x);
@@ -149,71 +155,71 @@ void ArmorTarget::armor_pnp(
     );
     auto armor_in_odom = camera_cv_in_odom * a.pose;
     a.pose = armor_in_odom;
-    auto rpy = utils::matrix2rpy(a.pose.linear());
-    auto obj_points = getArmorKeyPoints3D<cv::Point3f>(a.number);
-    const double armor_pitch = (a.number == auto_aim::ArmorClass::OUTPOST)
-        ? -auto_aim::FIFTTEN_DEGREE_RAD
-        : auto_aim::FIFTTEN_DEGREE_RAD;
-    auto center = [](const cv::Point2f& a, const cv::Point2f& b) { return (a + b) * 0.5f; };
-    auto eval_yaw = [&](double yaw) -> double {
-        auto a_pose_in_odom = a.pose;
-        Vec3 search_rpy(0.0, armor_pitch, yaw);
-        a_pose_in_odom.linear() = utils::rpy2matrix(search_rpy);
+    if (a.number == ArmorClass::OUTPOST || a.number == ArmorClass::BASE) {
+        auto rpy = utils::matrix2rpy<double>(a.pose.linear());
+        auto obj_points = getArmorKeyPoints3D<cv::Point3f>(a.number);
+        const double armor_pitch = (a.number == auto_aim::ArmorClass::OUTPOST)
+            ? -auto_aim::FIFTTEN_DEGREE_RAD
+            : auto_aim::FIFTTEN_DEGREE_RAD;
+        auto center = [](const cv::Point2f& a, const cv::Point2f& b) { return (a + b) * 0.5f; };
+        auto eval_yaw = [&](double yaw) -> double {
+            auto a_pose_in_odom = a.pose;
+            Vec3 search_rpy(0.0, armor_pitch, yaw);
+            a_pose_in_odom.linear() = utils::rpy2matrix(search_rpy);
 
-        auto a_pose_in_camera_cv = camera_cv_in_odom.inverse() * a_pose_in_odom;
-        auto img_points = utils::reprojection(
-            camera_info.camera_matrix,
-            camera_info.distortion_coefficients,
-            obj_points,
-            a_pose_in_camera_cv
-        );
+            auto a_pose_in_camera_cv = camera_cv_in_odom.inverse() * a_pose_in_odom;
+            auto img_points = utils::reprojection(
+                camera_info.camera_matrix,
+                camera_info.distortion_coefficients,
+                obj_points,
+                a_pose_in_camera_cv
+            );
 
-        double error = 0.0;
-        // for (int i = 0; i < img_points.size(); i++) {
-        //     error += cv::norm(img_points[i] - key_points[i]);
-        //     }
-        error += cv::norm(
-            center(
-                img_points[ArmorKeyPointsIndex::LEFT_TOP],
-                img_points[ArmorKeyPointsIndex::RIGHT_TOP]
-            )
-            - center(
-                key_points[ArmorKeyPointsIndex::LEFT_TOP],
-                key_points[ArmorKeyPointsIndex::RIGHT_TOP]
-            )
-        );
+            double error = 0.0;
+            // for (int i = 0; i < img_points.size(); i++) {
+            //     error += cv::norm(img_points[i] - key_points[i]);
+            //     }
+            error += cv::norm(
+                center(
+                    img_points[ArmorKeyPointsIndex::LEFT_TOP],
+                    img_points[ArmorKeyPointsIndex::RIGHT_TOP]
+                )
+                - center(
+                    key_points[ArmorKeyPointsIndex::LEFT_TOP],
+                    key_points[ArmorKeyPointsIndex::RIGHT_TOP]
+                )
+            );
 
-        error += cv::norm(
-            center(
-                img_points[ArmorKeyPointsIndex::LEFT_BOTTOM],
-                img_points[ArmorKeyPointsIndex::RIGHT_BOTTOM]
-            )
-            - center(
-                key_points[ArmorKeyPointsIndex::LEFT_BOTTOM],
-                key_points[ArmorKeyPointsIndex::RIGHT_BOTTOM]
-            )
-        );
+            error += cv::norm(
+                center(
+                    img_points[ArmorKeyPointsIndex::LEFT_BOTTOM],
+                    img_points[ArmorKeyPointsIndex::RIGHT_BOTTOM]
+                )
+                - center(
+                    key_points[ArmorKeyPointsIndex::LEFT_BOTTOM],
+                    key_points[ArmorKeyPointsIndex::RIGHT_BOTTOM]
+                )
+            );
 
-        return error;
-    };
-    constexpr double SEARCH_RANGE_DEG = 140.0;
-    constexpr double HALF_RANGE_RAD = SEARCH_RANGE_DEG * CV_PI / 180.0 * 0.5;
-    double left = rpy[2] - HALF_RANGE_RAD;
-    double right = rpy[2] + HALF_RANGE_RAD;
-    double best_yaw = utils::golden_section_search(eval_yaw, left, right, 1e-4);
-    auto best_pose = a.pose;
-    best_pose.linear() = utils::rpy2matrix(Vec3(0.0, armor_pitch, best_yaw));
-    a.pose = best_pose;
+            return error;
+        };
+        constexpr double SEARCH_RANGE_DEG = 140.0;
+        constexpr double HALF_RANGE_RAD = SEARCH_RANGE_DEG * CV_PI / 180.0 * 0.5;
+        double left = rpy[2] - HALF_RANGE_RAD;
+        double right = rpy[2] + HALF_RANGE_RAD;
+        double best_yaw = utils::golden_section_search(eval_yaw, left, right, 1e-4);
+        auto best_pose = a.pose;
+        best_pose.linear() = utils::rpy2matrix(Vec3(0.0, armor_pitch, best_yaw));
+        a.pose = best_pose;
+    }
 }
 Eigen::Matrix<double, UVZ_N, UVZ_N>
 ArmorTarget::uvmeasurement_covariance(const Eigen::Matrix<double, UVZ_N, 1>& z) const noexcept {
     Eigen::Matrix<double, UVZ_N, UVZ_N> r;
-
     double u_r = std::max(
         cfg.r_uv_at_1m * log((1.0 / target_state.pos().norm()) + 1),
         cfg.r_uv_min
     ); //比较简陋的逻辑或许应该和预测灯条长度存在比例
-
     r.setZero();
     r.diagonal().setConstant(u_r);
     return r;
@@ -225,14 +231,13 @@ ArmorTarget::uvmeasurement_covariance(const Eigen::Matrix<double, UVZ_N, 1>& z) 
         const Eigen::Matrix<double, armor_point_motion_model::YPDZ_N, 1>& z
     ) const noexcept {
     Eigen::Matrix<double, YPDZ_N, YPDZ_N> r;
-    const double delta_angle = angles::normalize_angle(z[idx::ROT_YAW] - z[idx::YPD_Y]);
     r.setZero(); //copy下sp_vision_25 这个参数不用在观测，差不多就行
     r(idx::YPD_Y, idx::YPD_Y) = 4e-3;
     r(idx::YPD_P, idx::YPD_P) = 4e-3;
-    r(idx::YPD_D, idx::YPD_D) = std::log(std::abs(delta_angle) + 1) + 1;
-    // r(idx::YPD_D, idx::YPD_D) =
-    //     log(std::abs(delta_angle) + 1) + z[idx::YPD_D] * z[idx::YPD_D] * 0.1;
-    r(idx::ROT_YAW, idx::ROT_YAW) = std::log(std::abs(z[idx::YPD_D]) + 1) / 200 + 9e-2;
+    r(idx::YPD_D, idx::YPD_D) = z[idx::YPD_D] * z[idx::YPD_D] * 0.1 + 0.001;
+    r(idx::ROT_X, idx::ROT_X) = 0.1;
+    r(idx::ROT_Y, idx::ROT_Y) = 0.1;
+    r(idx::ROT_Z, idx::ROT_Z) = 0.03;
     return r;
 }
 [[nodiscard]] Eigen::Matrix<double, armor_point_motion_model::YPDZ_N, 1>
@@ -246,8 +251,10 @@ ArmorTarget::get_ypdmeasurement(Armor& a) const noexcept {
     z[idx::YPD_Y] = ypd_y;
     z[idx::YPD_P] = ypd_p;
     z[idx::YPD_D] = ypd_d;
-    auto rpy = utils::matrix2rpy(a.pose.linear());
-    z[idx::ROT_YAW] = rpy[2];
+    auto rot_vec = utils::so3_log(a.pose.linear().eval());
+    z[idx::ROT_X] = rot_vec.x();
+    z[idx::ROT_Y] = rot_vec.y();
+    z[idx::ROT_Z] = rot_vec.z();
     return z;
 }
 Eigen::Matrix<double, X_N, X_N> ArmorTarget::process_noise(double dt) const noexcept {
@@ -268,13 +275,30 @@ Eigen::Matrix<double, X_N, X_N> ArmorTarget::process_noise(double dt) const noex
     }
 
     q.setZero();
-    utils::fill_constant_accel_noise(q, idx::CX, idx::VCX, q_xyz.x(), dt);
-    utils::fill_constant_accel_noise(q, idx::CY, idx::VCY, q_xyz.y(), dt);
-    utils::fill_constant_accel_noise(q, idx::CZ, idx::VCZ, q_xyz.z(), dt);
+    const Mat3 car_in_odom_R = _whole_car_pose(target_state.x.data()).linear();
+    const Mat3 accel_noise_odom = car_in_odom_R * q_xyz.asDiagonal() * car_in_odom_R.transpose();
+
+    const double dt2 = dt * dt;
+    const double dt3 = dt2 * dt;
+    const double dt4 = dt2 * dt2;
+    constexpr std::array<int, 3> pos_idx { idx::CX, idx::CY, idx::CZ };
+    constexpr std::array<int, 3> vel_idx { idx::VCX, idx::VCY, idx::VCZ };
+
+    for (int i = 0; i < 3; ++i) {
+        for (int j = 0; j < 3; ++j) {
+            const double noise = accel_noise_odom(i, j);
+            q(pos_idx[i], pos_idx[j]) = dt4 * 0.25 * noise;
+            q(pos_idx[i], vel_idx[j]) = dt3 * 0.5 * noise;
+            q(vel_idx[i], pos_idx[j]) = dt3 * 0.5 * noise;
+            q(vel_idx[i], vel_idx[j]) = dt2 * noise;
+        }
+    }
     utils::fill_constant_accel_noise(q, idx::YAW, idx::VYAW, q_yaw, dt);
     q(idx::R, idx::R) = cfg.q_r;
     q(idx::L, idx::L) = q_l;
     q(idx::H, idx::H) = q_h;
+    q(idx::WP, idx::WP) = cfg.q_wpr;
+    q(idx::WR, idx::WR) = cfg.q_wpr;
     return q;
 }
 
@@ -341,9 +365,17 @@ int ArmorTarget::update(
         const auto ypd_cal_residual = [](const Eigen::Matrix<double, YPDZ_N, 1>& z_pred,
                                          const Eigen::Matrix<double, YPDZ_N, 1>& z) {
             Eigen::Matrix<double, YPDZ_N, 1> v = z - z_pred;
-            ;
+
             v[idx::YPD_Y] = angles::normalize_angle(v[idx::YPD_Y]);
-            v[idx::ROT_YAW] = angles::normalize_angle(v[idx::ROT_YAW]);
+            auto so3_residual = utils::so3_log(
+                (utils::so3_exp(Vec3(z[idx::ROT_X], z[idx::ROT_Y], z[idx::ROT_Z]))
+                 * utils::so3_exp(Vec3(z_pred[idx::ROT_X], z_pred[idx::ROT_Y], z_pred[idx::ROT_Z]))
+                       .transpose())
+                    .eval()
+            );
+            v[idx::ROT_X] = so3_residual.x();
+            v[idx::ROT_Y] = so3_residual.y();
+            v[idx::ROT_Z] = so3_residual.z();
             return v;
         };
         YPDMeasure measure { .ctx = ctx };
@@ -424,7 +456,7 @@ std::vector<std::pair<int, Armor>> ArmorTarget::match_armor(
     pred_state.predict(timestamp, target_number);
     for (int j = 0; j < n_obs; ++j) {
         if (armors[j].number == ArmorClass::OUTPOST) {
-            auto rpy = utils::matrix2rpy(armors[j].pose.linear());
+            auto rpy = utils::matrix2rpy<double>(armors[j].pose.linear());
             if (rpy[1] > 0) {
                 continue;
             }
@@ -444,7 +476,20 @@ std::vector<std::pair<int, Armor>> ArmorTarget::match_armor(
 
             YPDVecZ nu = meas_list[j] - z_pred;
             nu[idx::YPD_Y] = angles::normalize_angle(nu[idx::YPD_Y]);
-            nu[idx::ROT_YAW] = angles::normalize_angle(nu[idx::ROT_YAW]);
+            auto so3_residual = utils::so3_log(
+                (utils::so3_exp(Vec3(
+                     meas_list[j][idx::ROT_X],
+                     meas_list[j][idx::ROT_Y],
+                     meas_list[j][idx::ROT_Z]
+                 ))
+                 * utils::so3_exp(Vec3(z_pred[idx::ROT_X], z_pred[idx::ROT_Y], z_pred[idx::ROT_Z]))
+                       .transpose())
+                    .eval()
+            );
+            nu[idx::ROT_X] = so3_residual.x();
+            nu[idx::ROT_Y] = so3_residual.y();
+            nu[idx::ROT_Z] = so3_residual.z();
+
             auto R = ypdmeasurement_covariance(z_pred);
             double d2 = nu.transpose() * R.ldlt().solve(nu);
 
