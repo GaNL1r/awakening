@@ -217,6 +217,12 @@ endfunction()
 add_common_executable(standard src/runtime/standard.cpp)
 add_tool_executable(control_test src/runtime/test/control_test.cpp)
 add_tool_executable(delay_test src/runtime/test/delay_test.cpp)
+add_tool_executable(calibrate_camera src/runtime/calibration/calibrate_camera.cpp)
+add_tool_executable(calibrate_handeye src/runtime/calibration/calibrate_handeye.cpp)
+add_tool_executable(
+    calibrate_robotworld_handeye
+    src/runtime/calibration/calibrate_robotworld_handeye.cpp
+)
 
 
 target_link_libraries(standard

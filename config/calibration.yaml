@@ -1,0 +1,17 @@
+# Images are read as 1.jpg, 2.jpg, ... from the input folder.
+# Hand-eye tools also read 1.txt, 2.txt, ... with quaternion order: w x y z.
+board_type: circles
+pattern_cols: 10
+pattern_rows: 7
+center_distance_mm: 40
+object_frame: xy
+image_extension: .jpg
+quaternion_extension: .txt
+show_detection: true
+
+R_gimbal2imubody: [1, 0, 0, 0, 1, 0, 0, 0, 1]
+
+camera_matrix: [1295.4665175006589, 0, 655.71498478800618,
+                0, 1297.2591156991834, 506.21320670125334,
+                0, 0, 1]
+distort_coeffs: [-0.065333853609182, 0.134510791250441, 0, 0, 0]
