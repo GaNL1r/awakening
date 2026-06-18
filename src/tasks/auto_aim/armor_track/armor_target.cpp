@@ -4,8 +4,10 @@
 #include "tasks/auto_aim/type.hpp"
 #include "tasks/base/dta_utils.hpp"
 #include "tasks/base/web.hpp"
+#include "utils/common/type_common.hpp"
 #include "utils/logger.hpp"
 #include "utils/utils.hpp"
+#include <Eigen/Geometry>
 #include <Eigen/src/Core/Matrix.h>
 #include <algorithm>
 #include <array>
@@ -42,6 +44,8 @@ void ArmorTarget::write_log() {
         j_target_state["r"] = Web::val(target_state.r());
         j_target_state["l"] = Web::val(target_state.l());
         j_target_state["h"] = Web::val(target_state.h());
+        j_target_state["wp"] = Web::val(target_state.w_p());
+        j_target_state["wr"] = Web::val(target_state.w_r());
     });
 }
 
@@ -115,8 +119,6 @@ void ArmorTarget::reset(
     const double zc = za;
     double l = 0.0;
     double h = 0.0;
-    // target_state.x << xc, 0, yc, 0, zc, 0, yaw, 0, r, l, h;
-    // target_state.x << xc, 0, yc, 0, zc, 0, 0, 0, r, l, h, rpy[2], rpy[1], rpy[0];
     target_state.x << xc, 0, yc, 0, zc, 0, yaw, 0, r, l, h, 0, 0;
     target_state.timestamp = timestamp;
     target_state.frame_id = frame_id;
@@ -214,12 +216,10 @@ void ArmorTarget::armor_pnp(
 Eigen::Matrix<double, UVZ_N, UVZ_N>
 ArmorTarget::uvmeasurement_covariance(const Eigen::Matrix<double, UVZ_N, 1>& z) const noexcept {
     Eigen::Matrix<double, UVZ_N, UVZ_N> r;
-
     double u_r = std::max(
         cfg.r_uv_at_1m * log((1.0 / target_state.pos().norm()) + 1),
         cfg.r_uv_min
     ); //比较简陋的逻辑或许应该和预测灯条长度存在比例
-
     r.setZero();
     r.diagonal().setConstant(u_r);
     return r;
@@ -231,14 +231,13 @@ ArmorTarget::uvmeasurement_covariance(const Eigen::Matrix<double, UVZ_N, 1>& z) 
         const Eigen::Matrix<double, armor_point_motion_model::YPDZ_N, 1>& z
     ) const noexcept {
     Eigen::Matrix<double, YPDZ_N, YPDZ_N> r;
-    const double delta_angle = angles::normalize_angle(z[idx::ROT_YAW] - z[idx::YPD_Y]);
     r.setZero(); //copy下sp_vision_25 这个参数不用在观测，差不多就行
     r(idx::YPD_Y, idx::YPD_Y) = 4e-3;
     r(idx::YPD_P, idx::YPD_P) = 4e-3;
-    r(idx::YPD_D, idx::YPD_D) = std::log(std::abs(delta_angle) + 1) + 1;
-    // r(idx::YPD_D, idx::YPD_D) =
-    //     log(std::abs(delta_angle) + 1) + z[idx::YPD_D] * z[idx::YPD_D] * 0.1;
-    r(idx::ROT_YAW, idx::ROT_YAW) = std::log(std::abs(z[idx::YPD_D]) + 1) / 200 + 9e-2;
+    r(idx::YPD_D, idx::YPD_D) = z[idx::YPD_D] * z[idx::YPD_D] * 0.1 + 0.001;
+    r(idx::ROT_X, idx::ROT_X) = 0.1;
+    r(idx::ROT_Y, idx::ROT_Y) = 0.1;
+    r(idx::ROT_Z, idx::ROT_Z) = 0.03;
     return r;
 }
 [[nodiscard]] Eigen::Matrix<double, armor_point_motion_model::YPDZ_N, 1>
@@ -252,8 +251,10 @@ ArmorTarget::get_ypdmeasurement(Armor& a) const noexcept {
     z[idx::YPD_Y] = ypd_y;
     z[idx::YPD_P] = ypd_p;
     z[idx::YPD_D] = ypd_d;
-    auto rpy = utils::matrix2rpy<double>(a.pose.linear());
-    z[idx::ROT_YAW] = rpy[2];
+    auto rot_vec = utils::so3_log(a.pose.linear().eval());
+    z[idx::ROT_X] = rot_vec.x();
+    z[idx::ROT_Y] = rot_vec.y();
+    z[idx::ROT_Z] = rot_vec.z();
     return z;
 }
 Eigen::Matrix<double, X_N, X_N> ArmorTarget::process_noise(double dt) const noexcept {
@@ -281,8 +282,8 @@ Eigen::Matrix<double, X_N, X_N> ArmorTarget::process_noise(double dt) const noex
     q(idx::R, idx::R) = cfg.q_r;
     q(idx::L, idx::L) = q_l;
     q(idx::H, idx::H) = q_h;
-    q(idx::WP, idx::WP) = 0.001;
-    q(idx::WR, idx::WR) = 0.001;
+    q(idx::WP, idx::WP) = cfg.q_wpr;
+    q(idx::WR, idx::WR) = cfg.q_wpr;
     return q;
 }
 
@@ -349,9 +350,17 @@ int ArmorTarget::update(
         const auto ypd_cal_residual = [](const Eigen::Matrix<double, YPDZ_N, 1>& z_pred,
                                          const Eigen::Matrix<double, YPDZ_N, 1>& z) {
             Eigen::Matrix<double, YPDZ_N, 1> v = z - z_pred;
-            ;
+
             v[idx::YPD_Y] = angles::normalize_angle(v[idx::YPD_Y]);
-            v[idx::ROT_YAW] = angles::normalize_angle(v[idx::ROT_YAW]);
+            auto so3_residual = utils::so3_log(
+                (utils::so3_exp(Vec3(z[idx::ROT_X], z[idx::ROT_Y], z[idx::ROT_Z]))
+                 * utils::so3_exp(Vec3(z_pred[idx::ROT_X], z_pred[idx::ROT_Y], z_pred[idx::ROT_Z]))
+                       .transpose())
+                    .eval()
+            );
+            v[idx::ROT_X] = so3_residual.x();
+            v[idx::ROT_Y] = so3_residual.y();
+            v[idx::ROT_Z] = so3_residual.z();
             return v;
         };
         YPDMeasure measure { .ctx = ctx };
@@ -452,7 +461,20 @@ std::vector<std::pair<int, Armor>> ArmorTarget::match_armor(
 
             YPDVecZ nu = meas_list[j] - z_pred;
             nu[idx::YPD_Y] = angles::normalize_angle(nu[idx::YPD_Y]);
-            nu[idx::ROT_YAW] = angles::normalize_angle(nu[idx::ROT_YAW]);
+            auto so3_residual = utils::so3_log(
+                (utils::so3_exp(Vec3(
+                     meas_list[j][idx::ROT_X],
+                     meas_list[j][idx::ROT_Y],
+                     meas_list[j][idx::ROT_Z]
+                 ))
+                 * utils::so3_exp(Vec3(z_pred[idx::ROT_X], z_pred[idx::ROT_Y], z_pred[idx::ROT_Z]))
+                       .transpose())
+                    .eval()
+            );
+            nu[idx::ROT_X] = so3_residual.x();
+            nu[idx::ROT_Y] = so3_residual.y();
+            nu[idx::ROT_Z] = so3_residual.z();
+
             auto R = ypdmeasurement_covariance(z_pred);
             double d2 = nu.transpose() * R.ldlt().solve(nu);
 

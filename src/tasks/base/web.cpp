@@ -1,4 +1,5 @@
 #include "web.hpp"
+#include "tasks/auto_aim/armor_track/motion_model.hpp"
 #include "tasks/auto_buff/type.hpp"
 #include "utils/common/type_common.hpp"
 #include "utils/utils.hpp"
@@ -208,12 +209,21 @@ struct Web::Impl {
                     { cv::Point3f(0, 0, 0) },
                     vel_pose
                 );
+                auto whole_car_pose =
+                    auto_aim::armor_point_motion_model::_whole_car_pose(target_state.x.data());
+                auto vyaw_in_car = ISO3::Identity();
+                vyaw_in_car.translation().z() = target_state.vyaw() / 10.0;
+                auto vyaw_pose = odom_in_camera_cv * whole_car_pose * vyaw_in_car;
+                auto vyaw_image_points = utils::reprojection(
+                    camera_info.camera_matrix,
+                    camera_info.distortion_coefficients,
+                    { cv::Point3f(0, 0, 0) },
+                    vyaw_pose
+                );
                 cv::Point2f center = center_image_points[0];
                 cv::Point2f vel = vel_image_points[0];
-                const double scale = 50.0;
-                const double dy = scale * target_state.vyaw();
                 const cv::Point2f start_pt = center;
-                cv::Point2f end_pt = start_pt + cv::Point2f(0, dy);
+                cv::Point2f end_pt = vyaw_image_points[0];
                 cv::arrowedLine(
                     img,
                     start_pt,

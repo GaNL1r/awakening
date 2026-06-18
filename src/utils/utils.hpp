@@ -16,6 +16,37 @@
 #include <vector>
 namespace awakening::utils {
 template<class T>
+inline Eigen::Matrix<T, 3, 3> so3_hat(const Eigen::Matrix<T, 3, 1>& w) {
+    Eigen::Matrix<T, 3, 3> W;
+    W << T(0), -w.z(), w.y(), w.z(), T(0), -w.x(), -w.y(), w.x(), T(0);
+    return W;
+}
+template<class T>
+inline Eigen::Matrix<T, 3, 3> so3_exp(const Eigen::Matrix<T, 3, 1>& phi) {
+    const T theta = phi.norm();
+
+    const auto W = so3_hat(phi);
+    const auto W2 = W * W;
+
+    Eigen::Matrix<T, 3, 3> R = Eigen::Matrix<T, 3, 3>::Identity();
+
+    const T A = ceres::sin(theta) / theta;
+    const T B = (T(1) - ceres::cos(theta)) / (theta * theta);
+
+    R += A * W + B * W2;
+
+    return R;
+}
+template<class T>
+inline Eigen::Matrix<T, 3, 1> so3_log(const Eigen::Matrix<T, 3, 3>& R) {
+    const T cos_theta = (R.trace() - T(1.0)) * T(0.5);
+    const T theta = ceres::acos(cos_theta);
+    const T scale = theta / (T(2.0) * ceres::sin(theta));
+    Eigen::Matrix<T, 3, 1> w;
+    w << R(2, 1) - R(1, 2), R(0, 2) - R(2, 0), R(1, 0) - R(0, 1);
+    return scale * w;
+}
+template<class T>
 inline Eigen::Quaternion<T> rpy2quat(const Eigen::Vector3<T>& rpy) {
     Eigen::AngleAxis<T> roll(rpy.x(), Eigen::Vector3<T>::UnitX());
     Eigen::AngleAxis<T> pitch(rpy.y(), Eigen::Vector3<T>::UnitY());
