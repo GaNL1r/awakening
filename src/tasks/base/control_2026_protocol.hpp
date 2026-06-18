@@ -127,10 +127,7 @@ inline std::optional<Status> unpack_status_with_mode(const std::vector<uint8_t>&
     out.robot.yaw = gimbal.yaw;
     out.robot.pitch = gimbal.pitch;
     out.robot.roll = gimbal.roll;
-    out.robot.detect_color = static_cast<uint8_t>(gimbal.color);
-    if (out.robot.detect_color > 1) {
-        out.robot.detect_color = 0;
-    }
+    out.robot.detect_color = gimbal.color >= 100 ? 0 : 1;
     out.mode = gimbal.mode;
     if (has_shoot) {
         out.robot.bullet_speed = shoot.bullet_speed;
