@@ -198,8 +198,7 @@ inline Eigen::Transform<T, 3, Eigen::Isometry> rune_pose(const T x[X_N], int id)
     auto yaw = ceres::atan2(x[idx::CY], x[idx::CX]);
     // auto yaw = x[idx::YAW];
     Eigen::Quaternion<T> q_yaw_rune_in_odom(Eigen::AngleAxis<T>(yaw, Eigen::Vector3<T>::UnitZ()));
-    Eigen::Quaternion<T> q_pitch_rune_in_odom(
-        Eigen::AngleAxis<T>(T(0.0), Eigen::Vector3<T>::UnitY())
+    Eigen::Quaternion<T> q_pitch_rune_in_odom(Eigen::AngleAxis<T>(T(0), Eigen::Vector3<T>::UnitY())
     );
     Eigen::Quaternion<T> q_roll_rune_in_odom(Eigen::AngleAxis<T>(roll, Eigen::Vector3<T>::UnitX()));
     rune_in_odom.linear() =

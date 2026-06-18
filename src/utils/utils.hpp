@@ -459,7 +459,7 @@ fill_constant_accel_noise(Mat& q, int pos_idx, int vel_idx, double noise, double
 
     q(pos_idx, pos_idx) = dt4 * 0.25 * noise;
     q(pos_idx, vel_idx) = dt3 * 0.5 * noise;
-    q(vel_idx, pos_idx) = q(pos_idx, vel_idx);
+    q(vel_idx, pos_idx) = dt3 * 0.5 * noise;
     q(vel_idx, vel_idx) = dt2 * noise;
 }
 [[nodiscard]] inline double sigmoid(double x) noexcept {

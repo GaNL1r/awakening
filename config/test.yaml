@@ -1,4 +1,4 @@
-mode: auto_buff
+mode: auto_aim
 enemy_color: blue
 bullet_speed: 23.5
 
@@ -176,7 +176,7 @@ rune_tracker:
   q_a: 0.00001
   q_w: 0.00001
   q_tau: 0.000001
-  match_gate: 50.0
+  match_gate: 30.0
   voter_state_need_count: 50
   voter_mode_need_count: 20
   big_args_continue_time: 1.0

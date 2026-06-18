@@ -234,7 +234,7 @@ ArmorTarget::uvmeasurement_covariance(const Eigen::Matrix<double, UVZ_N, 1>& z) 
     r.setZero(); //copy下sp_vision_25 这个参数不用在观测，差不多就行
     r(idx::YPD_Y, idx::YPD_Y) = 4e-3;
     r(idx::YPD_P, idx::YPD_P) = 4e-3;
-    r(idx::YPD_D, idx::YPD_D) = std::log(z[idx::YPD_D] * z[idx::YPD_D] * 0.1 + 1) + 1;
+    r(idx::YPD_D, idx::YPD_D) = std::log(z[idx::YPD_D] * z[idx::YPD_D] * 0.1 + 1) + 0.01;
     r(idx::ROT_X, idx::ROT_X) = 0.1;
     r(idx::ROT_Y, idx::ROT_Y) = 0.1;
     r(idx::ROT_Z, idx::ROT_Z) = 0.03;
