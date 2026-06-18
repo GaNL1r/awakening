@@ -703,7 +703,7 @@ int main(int argc, char** argv) {
         if (daedalus_shm_client) {
             auto gimbal_in_gimbal_odom =
                 tf->pose_a_in_b(SimpleFrame::GIMBAL, SimpleFrame::GIMBAL_ODOM, Clock::now());
-            auto rpy = utils::matrix2rpy(gimbal_in_gimbal_odom.linear());
+            auto rpy = utils::matrix2rpy<double>(gimbal_in_gimbal_odom.linear());
             daedalus_shm_client->send_gimbal_cmd(
                 cmd.yaw,
                 -cmd.pitch,
@@ -767,7 +767,7 @@ int main(int argc, char** argv) {
             dbg->auto_aim_fsm_state.set(auto_aim_fsm_controller.get_state());
             auto gimbal_in_gimbal_odom =
                 tf->pose_a_in_b(SimpleFrame::GIMBAL, SimpleFrame::GIMBAL_ODOM, Clock::now());
-            auto rpy = utils::matrix2rpy(gimbal_in_gimbal_odom.linear());
+            auto rpy = utils::matrix2rpy<double>(gimbal_in_gimbal_odom.linear());
             auto gimbal_yaw_pitch =
                 std::make_pair(angles::to_degrees(rpy[2]), -angles::to_degrees(rpy[1]));
             dbg->gimbal_yaw_pitch.set(gimbal_yaw_pitch);

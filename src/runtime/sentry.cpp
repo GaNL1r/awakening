@@ -352,7 +352,7 @@ int main(int argc, char** argv) {
                 auto joint = joint_opt.value();
                 auto gimbal_2_gimbal_odom =
                     tf->pose_a_in_b(SentryFrame::GIMBAL, SentryFrame::GIMBAL_ODOM, Clock::now());
-                auto rpy = utils::matrix2rpy(gimbal_2_gimbal_odom.linear());
+                auto rpy = utils::matrix2rpy<double>(gimbal_2_gimbal_odom.linear());
                 rpy[2] = angles::from_degrees(joint.big_yaw_in_world);
                 rpy[1] = 0.0;
                 ISO3 big_yaw_2_gimbal_odom = ISO3::Identity();
@@ -819,7 +819,7 @@ int main(int argc, char** argv) {
             dbg->auto_aim_fsm_state.set(auto_aim_fsm_controller.get_state());
             auto gimbal_in_gimbal_odom =
                 tf->pose_a_in_b(SentryFrame::GIMBAL, SentryFrame::GIMBAL_ODOM, Clock::now());
-            auto rpy = utils::matrix2rpy(gimbal_in_gimbal_odom.linear());
+            auto rpy = utils::matrix2rpy<double>(gimbal_in_gimbal_odom.linear());
             auto gimbal_yaw_pitch =
                 std::make_pair(angles::to_degrees(rpy[2]), -angles::to_degrees(rpy[1]));
             dbg->gimbal_yaw_pitch.set(gimbal_yaw_pitch);

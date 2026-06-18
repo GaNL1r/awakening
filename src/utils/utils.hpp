@@ -1,6 +1,9 @@
 #pragma once
 #include "angles.h"
 #include "utils/common/type_common.hpp"
+#include <Eigen/src/Core/Matrix.h>
+#include <Eigen/src/Geometry/Quaternion.h>
+#include <ceres/jet.h>
 #include <cmath>
 #include <numbers>
 #include <opencv2/calib3d.hpp>
@@ -12,28 +15,31 @@
 #include <utility>
 #include <vector>
 namespace awakening::utils {
-
-inline Quaternion rpy2quat(const Vec3& rpy) {
-    AngleAxis roll(rpy.x(), Vec3::UnitX());
-    AngleAxis pitch(rpy.y(), Vec3::UnitY());
-    AngleAxis yaw(rpy.z(), Vec3::UnitZ());
-    Quaternion q { yaw * pitch * roll };
+template<class T>
+inline Eigen::Quaternion<T> rpy2quat(const Eigen::Vector3<T>& rpy) {
+    Eigen::AngleAxis<T> roll(rpy.x(), Eigen::Vector3<T>::UnitX());
+    Eigen::AngleAxis<T> pitch(rpy.y(), Eigen::Vector3<T>::UnitY());
+    Eigen::AngleAxis<T> yaw(rpy.z(), Eigen::Vector3<T>::UnitZ());
+    Eigen::Quaternion<T> q { yaw * pitch * roll };
     q.normalize();
     return q;
 }
 
-inline Mat3 rpy2matrix(const Vec3& rpy) {
+template<class T>
+inline Eigen::Matrix3<T> rpy2matrix(const Eigen::Vector3<T>& rpy) {
     return rpy2quat(rpy).toRotationMatrix();
 }
 
-inline Vec3 matrix2rpy(const Mat3& R) {
-    const double roll = std::atan2(R(2, 1), R(2, 2));
-    const double pitch = std::atan2(-R(2, 0), std::hypot(R(2, 1), R(2, 2)));
-    const double yaw = std::atan2(R(1, 0), R(0, 0));
+template<class T>
+inline Eigen::Vector3<T> matrix2rpy(const Eigen::Matrix3<T>& R) {
+    const T roll = ceres::atan2(R(2, 1), R(2, 2));
+    const T pitch = ceres::atan2(-R(2, 0), ceres::hypot(R(2, 1), R(2, 2)));
+    const T yaw = ceres::atan2(R(1, 0), R(0, 0));
     return { roll, pitch, yaw };
 }
 
-inline Vec3 quat2rpy(const Quaternion& q) {
+template<class T>
+inline Eigen::Vector3<T> quat2rpy(const Eigen::Quaternion<T>& q) {
     return matrix2rpy(q.normalized().toRotationMatrix());
 }
 

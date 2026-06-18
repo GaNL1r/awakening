@@ -145,7 +145,7 @@ int main(int argc, char** argv) {
         dbg.gimbal_cmd.set(cmd);
         auto gimbal_in_gimbal_odom =
             tf->pose_a_in_b(SimpleFrame::GIMBAL, SimpleFrame::GIMBAL_ODOM, Clock::now());
-        auto rpy = utils::matrix2rpy(gimbal_in_gimbal_odom.linear());
+        auto rpy = utils::matrix2rpy<double>(gimbal_in_gimbal_odom.linear());
         auto gimbal_yaw_pitch =
             std::make_pair(angles::to_degrees(rpy[2]), -angles::to_degrees(rpy[1]));
         dbg.gimbal_yaw_pitch.set(gimbal_yaw_pitch);
