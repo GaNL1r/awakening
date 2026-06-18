@@ -275,9 +275,24 @@ Eigen::Matrix<double, X_N, X_N> ArmorTarget::process_noise(double dt) const noex
     }
 
     q.setZero();
-    utils::fill_constant_accel_noise(q, idx::CX, idx::VCX, q_xyz.x(), dt);
-    utils::fill_constant_accel_noise(q, idx::CY, idx::VCY, q_xyz.y(), dt);
-    utils::fill_constant_accel_noise(q, idx::CZ, idx::VCZ, q_xyz.z(), dt);
+    const Mat3 car_in_odom_R = _whole_car_pose(target_state.x.data()).linear();
+    const Mat3 accel_noise_odom = car_in_odom_R * q_xyz.asDiagonal() * car_in_odom_R.transpose();
+
+    const double dt2 = dt * dt;
+    const double dt3 = dt2 * dt;
+    const double dt4 = dt2 * dt2;
+    constexpr std::array<int, 3> pos_idx { idx::CX, idx::CY, idx::CZ };
+    constexpr std::array<int, 3> vel_idx { idx::VCX, idx::VCY, idx::VCZ };
+
+    for (int i = 0; i < 3; ++i) {
+        for (int j = 0; j < 3; ++j) {
+            const double noise = accel_noise_odom(i, j);
+            q(pos_idx[i], pos_idx[j]) = dt4 * 0.25 * noise;
+            q(pos_idx[i], vel_idx[j]) = dt3 * 0.5 * noise;
+            q(vel_idx[i], pos_idx[j]) = dt3 * 0.5 * noise;
+            q(vel_idx[i], vel_idx[j]) = dt2 * noise;
+        }
+    }
     utils::fill_constant_accel_noise(q, idx::YAW, idx::VYAW, q_yaw, dt);
     q(idx::R, idx::R) = cfg.q_r;
     q(idx::L, idx::L) = q_l;
