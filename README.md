@@ -94,8 +94,8 @@ sudo ./run.sh debug <program> [args] # 构建后使用 gdb 启动
 ### 自动瞄准/能量机关整体流程图
 
 ```mermaid
-flowchart LR
-    Start["运行时入口<br/>standard / sentry / hero"] --> LoadCfg["加载 YAML 配置<br/>mode / enemy_color / bullet_speed<br/>camera / serial / detector / tracker / aimer"]
+flowchart TD
+    Start["运行时入口"] --> LoadCfg["加载 YAML 配置<br/>mode / enemy_color / bullet_speed<br/>camera / serial / detector / tracker / aimer"]
     LoadCfg --> IOInit["初始化 IO<br/>HikCamera 或 Daedalus SHM<br/>SerialDriver / VideoSaver / ROS2 / Web"]
     IOInit --> RuntimeLoop["调度循环<br/>图像帧 + 串口帧 + TF + 时间戳"]
 
