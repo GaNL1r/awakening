@@ -47,6 +47,34 @@ inline Eigen::Matrix<T, 3, 3> so3_exp(const Eigen::Matrix<T, 3, 1>& phi) {
     return R;
 }
 template<class T>
+inline Eigen::Transform<T, 3, Eigen::Isometry>
+se3_exp(const Eigen::Matrix<T, 3, 1>& rho, const Eigen::Matrix<T, 3, 1>& phi) {
+    const T theta2 = phi.squaredNorm();
+    const T theta = ceres::sqrt(theta2);
+
+    const auto W = so3_hat(phi);
+    const auto W2 = W * W;
+
+    T B;
+    T C;
+    if (theta2 < T(1e-12)) {
+        const T theta4 = theta2 * theta2;
+        B = T(0.5) - theta2 / T(24) + theta4 / T(720);
+        C = T(1.0 / 6.0) - theta2 / T(120) + theta4 / T(5040);
+    } else {
+        B = (T(1) - ceres::cos(theta)) / theta2;
+        C = (theta - ceres::sin(theta)) / (theta2 * theta);
+    }
+
+    const Eigen::Matrix<T, 3, 3> V = Eigen::Matrix<T, 3, 3>::Identity() + B * W + C * W2;
+
+    Eigen::Transform<T, 3, Eigen::Isometry> T_se3 =
+        Eigen::Transform<T, 3, Eigen::Isometry>::Identity();
+    T_se3.linear() = so3_exp(phi);
+    T_se3.translation() = V * rho;
+    return T_se3;
+}
+template<class T>
 inline Eigen::Matrix<T, 3, 1> so3_log(const Eigen::Matrix<T, 3, 3>& R) {
     const T cos_theta = (R.trace() - T(1.0)) * T(0.5);
     Eigen::Matrix<T, 3, 1> w;
@@ -57,6 +85,31 @@ inline Eigen::Matrix<T, 3, 1> so3_log(const Eigen::Matrix<T, 3, 3>& R) {
     const T theta = ceres::acos(cos_theta);
     const T scale = theta / (T(2.0) * ceres::sin(theta));
     return scale * w;
+}
+template<class T>
+inline void se3_log(
+    const Eigen::Transform<T, 3, Eigen::Isometry>& T_se3,
+    Eigen::Matrix<T, 3, 1>& rho,
+    Eigen::Matrix<T, 3, 1>& phi
+) {
+    phi = so3_log(T_se3.linear().eval());
+
+    const T theta2 = phi.squaredNorm();
+    const T theta = ceres::sqrt(theta2);
+    const auto W = so3_hat(phi);
+    const auto W2 = W * W;
+
+    T D;
+    if (theta2 < T(1e-12)) {
+        const T theta4 = theta2 * theta2;
+        D = T(1.0 / 12.0) + theta2 / T(720) + theta4 / T(30240);
+    } else {
+        D = T(1) / theta2 - (T(1) + ceres::cos(theta)) / (T(2) * theta * ceres::sin(theta));
+    }
+
+    const Eigen::Matrix<T, 3, 3> V_inv =
+        Eigen::Matrix<T, 3, 3>::Identity() - T(0.5) * W + D * W2;
+    rho = V_inv * T_se3.translation();
 }
 enum class RPYOrder { XYZ, ZYX };
 template<class T>

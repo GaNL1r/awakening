@@ -73,14 +73,16 @@ void ArmorTarget::reset(
     target_number = a.number;
     double r_pre;
     Eigen::DiagonalMatrix<double, X_N> p0;
+    p0.diagonal().setZero();
+    p0.diagonal()[idx::CX] = p0.diagonal()[idx::CY] = p0.diagonal()[idx::CZ] = 1;
+    p0.diagonal()[idx::VCX] = p0.diagonal()[idx::VCY] = p0.diagonal()[idx::VCZ] = 64;
+    p0.diagonal()[idx::C_ROT_Z] = p0.diagonal()[idx::C_ROT_Y] = p0.diagonal()[idx::C_ROT_X] = 0.4;
+    p0.diagonal()[idx::VYAW] = 100;
     if (a.number == ArmorClass::OUTPOST) {
-        p0.diagonal() << 1, 64, 1, 64, 1, 81, 0.4, 100, 1e-4, 0.1, 0.1, 0.0, 0.0;
         r_pre = 0.2765;
     } else if (a.number == ArmorClass::BASE) {
-        p0.diagonal() << 1, 64, 1, 64, 1, 64, 0.4, 100, 1e-4, 0, 0, 0.0, 0.0;
         r_pre = 0.3205;
     } else {
-        p0.diagonal() << 1, 64, 1, 64, 1, 64, 0.4, 100, 1, 1, 1, 0.4, 0.4;
         r_pre = 0.26;
     }
     const auto u_q = [this]() {
@@ -88,24 +90,60 @@ void ArmorTarget::reset(
         return q;
     };
 
-    const auto inject =
-        [this](const Eigen::Matrix<double, X_N, 1>& delta, Eigen::Matrix<double, X_N, 1>& nominal) {
-            for (int i = 0; i < X_N; i++) {
-                if (i == idx::C_ROT_Z || i == idx::C_ROT_Y || i == idx::C_ROT_X)
-                    continue;
-                nominal[i] += delta[i];
-            }
-            Vec3 delta_rot(delta[idx::C_ROT_X], delta[idx::C_ROT_Y], delta[idx::C_ROT_Z]);
-            Vec3 nominal_rot(nominal[idx::C_ROT_X], nominal[idx::C_ROT_Y], nominal[idx::C_ROT_Z]);
-            const Mat3 injected_R =
-                utils::so3_exp(delta_rot) * utils::so3_exp(nominal_rot);
-            const Vec3 injected_rot = utils::so3_log(injected_R);
-            nominal[idx::C_ROT_X] = injected_rot.x();
-            nominal[idx::C_ROT_Y] = injected_rot.y();
-            nominal[idx::C_ROT_Z] = injected_rot.z();
-        };
+    const auto inject = [this](
+                            const Eigen::Matrix<double, X_N, 1>& delta,
+                            Eigen::Matrix<double, X_N, 1>& nominal
+                        ) {
+        for (int i = 0; i < X_N; i++) {
+            if (i == idx::CX || i == idx::CY || i == idx::CZ || i == idx::C_ROT_Z
+                || i == idx::C_ROT_Y || i == idx::C_ROT_X)
+                continue;
+            nominal[i] += delta[i];
+        }
+        Vec3 delta_rho(delta[idx::CX], delta[idx::CY], delta[idx::CZ]);
+        Vec3 delta_rot(delta[idx::C_ROT_X], delta[idx::C_ROT_Y], delta[idx::C_ROT_Z]);
+        ISO3 nominal_pose = ISO3::Identity();
+        nominal_pose.translation() = Vec3(nominal[idx::CX], nominal[idx::CY], nominal[idx::CZ]);
+        Vec3 nominal_rot(nominal[idx::C_ROT_X], nominal[idx::C_ROT_Y], nominal[idx::C_ROT_Z]);
+        nominal_pose.linear() = utils::so3_exp(nominal_rot);
+        const ISO3 injected_pose = nominal_pose * utils::se3_exp(delta_rho, delta_rot);
+        const Vec3 injected_rot = utils::so3_log(injected_pose.linear().eval());
+        nominal[idx::CX] = injected_pose.translation().x();
+        nominal[idx::CY] = injected_pose.translation().y();
+        nominal[idx::CZ] = injected_pose.translation().z();
+        nominal[idx::C_ROT_X] = injected_rot.x();
+        nominal[idx::C_ROT_Y] = injected_rot.y();
+        nominal[idx::C_ROT_Z] = injected_rot.z();
+    };
+    const auto box_minus = [](const Eigen::Matrix<double, X_N, 1>& nominal,
+                              const Eigen::Matrix<double, X_N, 1>& value,
+                              Eigen::Matrix<double, X_N, 1>& delta) {
+        delta = value - nominal;
+
+        ISO3 nominal_pose = ISO3::Identity();
+        nominal_pose.translation() = Vec3(nominal[idx::CX], nominal[idx::CY], nominal[idx::CZ]);
+        nominal_pose.linear() = utils::so3_exp(
+            Vec3(nominal[idx::C_ROT_X], nominal[idx::C_ROT_Y], nominal[idx::C_ROT_Z])
+        );
+
+        ISO3 value_pose = ISO3::Identity();
+        value_pose.translation() = Vec3(value[idx::CX], value[idx::CY], value[idx::CZ]);
+        value_pose.linear() =
+            utils::so3_exp(Vec3(value[idx::C_ROT_X], value[idx::C_ROT_Y], value[idx::C_ROT_Z]));
+
+        Vec3 delta_rho;
+        Vec3 delta_rot;
+        utils::se3_log(nominal_pose.inverse() * value_pose, delta_rho, delta_rot);
+        delta[idx::CX] = delta_rho.x();
+        delta[idx::CY] = delta_rho.y();
+        delta[idx::CZ] = delta_rho.z();
+        delta[idx::C_ROT_X] = delta_rot.x();
+        delta[idx::C_ROT_Y] = delta_rot.y();
+        delta[idx::C_ROT_Z] = delta_rot.z();
+    };
     esekf =
         RobotStateESEKF(Predict { .dt = 0.005, .armor_number = target_number }, u_q, inject, p0);
+    esekf.value().set_box_minus_state(box_minus);
 
     esekf.value().set_iteration_num(cfg.esekf_iter_num);
 
@@ -284,37 +322,27 @@ Eigen::Matrix<double, X_N, X_N> ArmorTarget::process_noise(double dt) const noex
 
     q.setZero();
     const Mat3 car_in_odom_R = _whole_car_pose(target_state.x.data(), target_number).linear();
-    const Mat3 accel_noise_odom = car_in_odom_R * q_xyz.asDiagonal() * car_in_odom_R.transpose();
+    const Mat3 accel_noise_car = q_xyz.asDiagonal();
+    const Mat3 accel_noise_odom = car_in_odom_R * accel_noise_car * car_in_odom_R.transpose();
 
     const double dt2 = dt * dt;
     const double dt3 = dt2 * dt;
     const double dt4 = dt2 * dt2;
     constexpr std::array<int, 3> pos_idx { idx::CX, idx::CY, idx::CZ };
     constexpr std::array<int, 3> vel_idx { idx::VCX, idx::VCY, idx::VCZ };
-    constexpr std::array<int, 3> rot_idx { idx::C_ROT_X, idx::C_ROT_Y, idx::C_ROT_Z };
+    const Mat3 pos_vel_noise = accel_noise_car * car_in_odom_R.transpose();
+    const Mat3 vel_pos_noise = car_in_odom_R * accel_noise_car;
 
     for (int i = 0; i < 3; ++i) {
         for (int j = 0; j < 3; ++j) {
-            const double noise = accel_noise_odom(i, j);
-            q(pos_idx[i], pos_idx[j]) = dt4 * 0.25 * noise;
-            q(pos_idx[i], vel_idx[j]) = dt3 * 0.5 * noise;
-            q(vel_idx[i], pos_idx[j]) = dt3 * 0.5 * noise;
-            q(vel_idx[i], vel_idx[j]) = dt2 * noise;
+            q(pos_idx[i], pos_idx[j]) = dt4 * 0.25 * accel_noise_car(i, j);
+            q(pos_idx[i], vel_idx[j]) = dt3 * 0.5 * pos_vel_noise(i, j);
+            q(vel_idx[i], pos_idx[j]) = dt3 * 0.5 * vel_pos_noise(i, j);
+            q(vel_idx[i], vel_idx[j]) = dt2 * accel_noise_odom(i, j);
         }
     }
 
-    const Vec3 yaw_axis_odom = car_in_odom_R * Vec3::UnitZ();
-    for (int i = 0; i < 3; ++i) {
-        const int ri = rot_idx[i];
-        q(ri, idx::VYAW) += dt3 * 0.5 * q_yaw * yaw_axis_odom[i];
-        q(idx::VYAW, ri) += dt3 * 0.5 * q_yaw * yaw_axis_odom[i];
-
-        for (int j = 0; j < 3; ++j) {
-            q(ri, rot_idx[j]) +=
-                dt4 * 0.25 * q_yaw * yaw_axis_odom[i] * yaw_axis_odom[j];
-        }
-    }
-    q(idx::VYAW, idx::VYAW) += dt2 * q_yaw;
+    utils::fill_constant_accel_noise(q, idx::C_ROT_Z, idx::VYAW, q_yaw, dt);
 
     q(idx::R, idx::R) = cfg.q_r;
     q(idx::L, idx::L) = q_l;
@@ -391,7 +419,9 @@ int ArmorTarget::update(
             v[idx::YPD_Y] = angles::normalize_angle(v[idx::YPD_Y]);
             auto so3_residual = utils::so3_log(
                 (utils::so3_exp(Vec3(z[idx::A_ROT_X], z[idx::A_ROT_Y], z[idx::A_ROT_Z]))
-                 * utils::so3_exp(Vec3(z_pred[idx::A_ROT_X], z_pred[idx::A_ROT_Y], z_pred[idx::A_ROT_Z]))
+                 * utils::so3_exp(
+                       Vec3(z_pred[idx::A_ROT_X], z_pred[idx::A_ROT_Y], z_pred[idx::A_ROT_Z])
+                 )
                        .transpose())
                     .eval()
             );
@@ -504,7 +534,9 @@ std::vector<std::pair<int, Armor>> ArmorTarget::match_armor(
                      meas_list[j][idx::A_ROT_Y],
                      meas_list[j][idx::A_ROT_Z]
                  ))
-                 * utils::so3_exp(Vec3(z_pred[idx::A_ROT_X], z_pred[idx::A_ROT_Y], z_pred[idx::A_ROT_Z]))
+                 * utils::so3_exp(
+                       Vec3(z_pred[idx::A_ROT_X], z_pred[idx::A_ROT_Y], z_pred[idx::A_ROT_Z])
+                 )
                        .transpose())
                     .eval()
             );

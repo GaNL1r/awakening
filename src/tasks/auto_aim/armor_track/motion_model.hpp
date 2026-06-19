@@ -48,7 +48,8 @@ inline Eigen::Matrix<T, 3, 3> _car_rotation(const T x[X_N], ArmorClass armor_num
         yaw_rotvec << T(0), T(0), x[idx::C_ROT_Z];
         return utils::so3_exp(yaw_rotvec);
     }
-    return utils::so3_exp(Eigen::Matrix<T, 3, 1>(x[idx::C_ROT_X], x[idx::C_ROT_Y], x[idx::C_ROT_Z]));
+    return utils::so3_exp(Eigen::Matrix<T, 3, 1>(x[idx::C_ROT_X], x[idx::C_ROT_Y], x[idx::C_ROT_Z])
+    );
 }
 
 struct Predict {
@@ -68,7 +69,11 @@ struct Predict {
             Eigen::Matrix<T, 3, 1> delta_rot;
             delta_rot << T(0), T(0), x0[idx::VYAW] * T(dt);
             const Eigen::Matrix<T, 3, 3> R1 =
-                (utils::so3_exp(Eigen::Matrix<T, 3, 1>(x0[idx::C_ROT_X], x0[idx::C_ROT_Y], x0[idx::C_ROT_Z])) * utils::so3_exp(delta_rot)).eval();
+                (utils::so3_exp(
+                     Eigen::Matrix<T, 3, 1>(x0[idx::C_ROT_X], x0[idx::C_ROT_Y], x0[idx::C_ROT_Z])
+                 )
+                 * utils::so3_exp(delta_rot))
+                    .eval();
             auto rot_vec = utils::so3_log(R1);
             x1[idx::C_ROT_X] = rot_vec.x();
             x1[idx::C_ROT_Y] = rot_vec.y();
@@ -325,7 +330,12 @@ struct State {
     }
 
     inline double yaw() const noexcept {
-        return utils::matrix2rpy<double>(utils::so3_exp(Eigen::Matrix<double, 3, 1>(x[idx::C_ROT_X], x[idx::C_ROT_Y], x[idx::C_ROT_Z]))).z();
+        return utils::matrix2rpy<double>(utils::so3_exp(Eigen::Matrix<double, 3, 1>(
+                                             x[idx::C_ROT_X],
+                                             x[idx::C_ROT_Y],
+                                             x[idx::C_ROT_Z]
+                                         )))
+            .z();
     }
     inline double vyaw() const noexcept {
         return x[idx::VYAW];
@@ -347,10 +357,20 @@ struct State {
         return x[idx::OUTPOST02DZ];
     }
     inline double w_p() const noexcept {
-        return utils::matrix2rpy<double>(utils::so3_exp(Eigen::Matrix<double, 3, 1>(x[idx::C_ROT_X], x[idx::C_ROT_Y], x[idx::C_ROT_Z]))).y();
+        return utils::matrix2rpy<double>(utils::so3_exp(Eigen::Matrix<double, 3, 1>(
+                                             x[idx::C_ROT_X],
+                                             x[idx::C_ROT_Y],
+                                             x[idx::C_ROT_Z]
+                                         )))
+            .y();
     }
     inline double w_r() const noexcept {
-        return utils::matrix2rpy<double>(utils::so3_exp(Eigen::Matrix<double, 3, 1>(x[idx::C_ROT_X], x[idx::C_ROT_Y], x[idx::C_ROT_Z]))).x();
+        return utils::matrix2rpy<double>(utils::so3_exp(Eigen::Matrix<double, 3, 1>(
+                                             x[idx::C_ROT_X],
+                                             x[idx::C_ROT_Y],
+                                             x[idx::C_ROT_Z]
+                                         )))
+            .x();
     }
 };
 

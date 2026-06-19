@@ -20,6 +20,7 @@ public:
 
     using UpdateQFunc = std::function<MatrixXX()>;
     using InjectFunc = std::function<void(const MatrixX1&, MatrixX1&)>;
+    using BoxMinusFunc = std::function<void(const MatrixX1&, const MatrixX1&, MatrixX1&)>;
 
     ErrorStateEKF() = default;
 
@@ -48,8 +49,42 @@ public:
     void set_inject_state(const InjectFunc& inject) {
         inject_state = inject;
     }
+    void set_box_minus_state(const BoxMinusFunc& box_minus) {
+        box_minus_state = box_minus;
+    }
 
     MatrixX1 predict() noexcept {
+        if (inject_state && box_minus_state) {
+            const MatrixX1 x_prev = x_nominal;
+            MatrixX1 x_pred;
+            f(x_prev.data(), x_pred.data());
+            x_nominal = x_pred;
+
+            constexpr double eps = 1e-6;
+            for (int i = 0; i < N_X; ++i) {
+                MatrixX1 delta = MatrixX1::Zero();
+                delta[i] = eps;
+
+                MatrixX1 x_pert = x_prev;
+                inject_state(delta, x_pert);
+
+                MatrixX1 x_pert_pred;
+                f(x_pert.data(), x_pert_pred.data());
+
+                MatrixX1 delta_pred;
+                box_minus_state(x_nominal, x_pert_pred, delta_pred);
+                F.col(i) = delta_pred / eps;
+            }
+
+            delta_x = F * delta_x;
+
+            Q = update_Q();
+            P_delta = F * P_delta * F.transpose() + Q;
+            P_delta = 0.5 * (P_delta + P_delta.transpose());
+
+            return x_nominal;
+        }
+
         std::array<ceres::Jet<double, N_X>, N_X> x_jet;
 
         for (int i = 0; i < N_X; ++i) {
@@ -154,6 +189,17 @@ public:
         virtual ~ObsBase() = default;
         virtual int dim() const = 0;
 
+        virtual void predict(
+            const Eigen::VectorXd& x,
+            Eigen::VectorXd& z_pred
+        ) const = 0;
+
+        virtual void residual_and_R(
+            const Eigen::VectorXd& z_pred,
+            Eigen::VectorXd& residual,
+            Eigen::MatrixXd& R
+        ) const = 0;
+
         virtual void evaluate(
             const Eigen::VectorXd& x,
             Eigen::MatrixXd& H,
@@ -184,6 +230,39 @@ public:
 
         int dim() const override {
             return N_Z;
+        }
+
+        void predict(
+            const Eigen::VectorXd& x,
+            Eigen::VectorXd& z_pred
+        ) const override {
+            assert(x.size() == N_X);
+
+            std::array<double, N_X> x_data;
+            for (int i = 0; i < N_X; ++i)
+                x_data[i] = x[i];
+
+            std::array<double, N_Z> z_data;
+            h(x_data.data(), z_data.data());
+
+            z_pred.resize(N_Z);
+            for (int i = 0; i < N_Z; ++i)
+                z_pred[i] = z_data[i];
+        }
+
+        void residual_and_R(
+            const Eigen::VectorXd& z_pred,
+            Eigen::VectorXd& residual,
+            Eigen::MatrixXd& R
+        ) const override {
+            assert(z_pred.size() == N_Z);
+
+            MatrixZ1 z_pred_fixed;
+            for (int i = 0; i < N_Z; ++i)
+                z_pred_fixed[i] = z_pred[i];
+
+            residual = residual_func(z_pred_fixed, z);
+            R = update_R(z);
         }
 
         void evaluate(
@@ -266,7 +345,39 @@ public:
                 Eigen::MatrixXd Hk, Rk;
                 Eigen::VectorXd rk;
 
-                obs->evaluate(x_eval, Hk, rk, Rk);
+                if (inject_state && box_minus_state) {
+                    Eigen::VectorXd z_pred;
+                    obs->predict(x_eval, z_pred);
+                    obs->residual_and_R(z_pred, rk, Rk);
+
+                    const int d = obs->dim();
+                    Hk.resize(d, N_X);
+                    constexpr double eps = 1e-6;
+                    for (int i = 0; i < N_X; ++i) {
+                        MatrixX1 delta_plus = delta_iter;
+                        MatrixX1 delta_minus = delta_iter;
+                        delta_plus[i] += eps;
+                        delta_minus[i] -= eps;
+
+                        MatrixX1 x_plus = x_nominal;
+                        MatrixX1 x_minus = x_nominal;
+                        inject_state(delta_plus, x_plus);
+                        inject_state(delta_minus, x_minus);
+
+                        Eigen::VectorXd z_plus, z_minus;
+                        obs->predict(x_plus, z_plus);
+                        obs->predict(x_minus, z_minus);
+
+                        Eigen::VectorXd dz, unused_residual;
+                        Eigen::MatrixXd unused_R;
+                        obs->residual_and_R(z_minus, dz, unused_R);
+                        obs->residual_and_R(z_plus, unused_residual, unused_R);
+                        dz = unused_residual - dz;
+                        Hk.col(i) = -dz / (2.0 * eps);
+                    }
+                } else {
+                    obs->evaluate(x_eval, Hk, rk, Rk);
+                }
 
                 int d = obs->dim();
                 H.block(offset, 0, d, N_X) = Hk;
@@ -308,6 +419,7 @@ private:
     PredicFunc f;
     UpdateQFunc update_Q;
     InjectFunc inject_state;
+    BoxMinusFunc box_minus_state;
 
     MatrixXX F = MatrixXX::Zero();
     MatrixXX Q = MatrixXX::Zero();

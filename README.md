@@ -125,7 +125,7 @@ flowchart TD
 
         AT1 -->|"否"| AT3["update_target"]
         AT3 --> AT31["按已跟踪目标数字过滤候选装甲板<br/>保留同类且颜色有效观测"]
-        AT31 --> AT32["predict_ekf<br/>常速度平移 + SO(3) 右乘 yaw 增量<br/>平移/姿态噪声映射到 odom 切空间"]
+        AT31 --> AT32["predict_ekf<br/>常速度平移 + SO(3) 右乘 yaw 增量<br/>右不变 SE(3) 误差线性化"]
         AT32 --> AT33["生成整车几何预测<br/>T_car_odom = t(cx,cy,cz) * Exp_SO3(rot)<br/>逐编号生成 T_armor_odom"]
         AT33 --> AT34["match_armor"]
         AT34 --> AT341["每个候选装甲板做 IPPE PnP<br/>仅用于粗匹配和门控"]
@@ -297,27 +297,53 @@ T_car_odom.translation = [cx, cy, cz]^T
 R_car_odom = Exp_SO3([rot_x, rot_y, rot_z])
 ```
 
-预测时先由旋转向量恢复 `R_car_odom`，再右乘 `Exp_SO3([0, 0, vyaw * dt])` 推进姿态；滤波误差注入时使用 `Exp_SO3(delta_rot) * R_car_odom` 组合，而不是直接相加欧拉角。由于注入函数采用左扰动，旋转误差协方差也按 odom 切空间解释。
-
-过程噪声分为平移和姿态两部分。平移噪声按 car 坐标系前后、左右、上下定义，构造 `Q` 时通过当前 `R_car_odom` 旋转到 odom 坐标系，再填入 `[position, velocity]` 的常加速度噪声块：
+预测时先由旋转向量恢复 `R_car_odom`，再右乘 `Exp_SO3([0, 0, vyaw * dt])` 推进姿态。滤波误差状态对整车位姿使用右不变 SE(3) 扰动：
 
 ```text
-Q_accel_odom = R_car_odom * diag(q_xyz) * R_car_odom^T
-Q_pp = 1/4 dt^4 Q_accel_odom
-Q_pv = 1/2 dt^3 Q_accel_odom
-Q_vv = dt^2 Q_accel_odom
+T_car_odom <- T_car_odom * Exp_SE3(delta_rho, delta_rot)
+delta = Log_SE3(T_nominal^-1 * T_value)
 ```
 
-姿态噪声不再只给 `rot_z` 一个标量常加速度块，而是将绕车体 z 轴的 yaw 角加速度投影到 odom 切空间：
+这里 `inject(delta, x)` 表示把误差状态注入名义状态，`box_minus(x_nominal, x_value)` 表示从两个名义状态反推出误差状态。普通欧氏状态可以直接相减，但 SE(3) 位姿不能做元素级相减，因此位姿部分必须使用 `Log_SE3(T_nominal^-1 * T_value)`。二者是一组互逆关系：
 
 ```text
-a_yaw_odom = R_car_odom * [0, 0, 1]^T
-Q_rot_rot += 1/4 dt^4 q_yaw * a_yaw_odom * a_yaw_odom^T
-Q_rot_vyaw += 1/2 dt^3 q_yaw * a_yaw_odom
+x_value = inject(delta, x_nominal)
+delta   = box_minus(x_nominal, x_value)
+```
+
+选择右不变扰动是为了避免左乘 SE(3) 扰动把目标位置绕 odom 原点旋转导致的远距离发散。启用该误差定义后，`ErrorStateEKF` 不再复用普通状态坐标下的自动微分雅可比，而是通过 `inject / box_minus` 对预测误差传播 `F` 和多观测更新 `H` 做数值线性化，使协方差、残差和注入操作处在同一误差坐标中。
+
+预测传播时，滤波器先扰动上一时刻名义状态，再分别预测，并用 `box_minus` 把两个预测结果的差转换回右不变误差坐标：
+
+```text
+x_pert      = inject(delta_i, x_prev)
+x_pred      = f(x_prev)
+x_pert_pred = f(x_pert)
+F_i         = box_minus(x_pred, x_pert_pred) / eps
+```
+
+多观测更新时，滤波器同样对误差状态做中心差分，得到与当前注入方式一致的观测雅可比 `H`。这比直接对状态数组做自动微分更慢，但避免了 “SE(3) 注入 + 欧氏雅可比” 混用造成的不一致。
+
+过程噪声分为平移和姿态两部分。平移加速度噪声按 car 坐标系前后、左右、上下定义；右不变位置误差 `delta_rho` 位于 car 切空间，而速度状态仍位于 odom 坐标系，因此构造 `Q` 时位置块、速度块和位置-速度交叉块分别为：
+
+```text
+Q_accel_car  = diag(q_xyz)
+Q_accel_odom = R_car_odom * Q_accel_car * R_car_odom^T
+Q_rho_rho = 1/4 dt^4 Q_accel_car
+Q_rho_v   = 1/2 dt^3 Q_accel_car * R_car_odom^T
+Q_v_rho   = 1/2 dt^3 R_car_odom * Q_accel_car
+Q_v_v     = dt^2 Q_accel_odom
+```
+
+姿态误差同样位于 car 切空间。当前状态只有 `vyaw`，因此 yaw 角加速度噪声仍按绕车体 z 轴的常角加速度模型填入 `rot_z / vyaw` 块：
+
+```text
+Q_rot_z_rot_z += 1/4 dt^4 q_yaw
+Q_rot_z_vyaw  += 1/2 dt^3 q_yaw
 Q_vyaw_vyaw += dt^2 q_yaw
 ```
 
-这里 `Q_rot_rot` 是 `rot_x/rot_y/rot_z` 对应的 `3x3` 协方差块，`Q_rot_vyaw` 是姿态误差与 `vyaw` 的交叉协方差。`q_wpr` 作为非 yaw 姿态漂移强度，以 `dt * q_wpr` 的形式加到 `rot_x/rot_y` 对角项，用于吸收车体 roll/pitch 小幅误差、地面坡度和外参残差。这个处理保留了当前状态量只有一个 `vyaw` 的轻量模型，同时比直接把 `rot_x/rot_y/rot_z` 当普通欧拉角独立加噪更符合 SO(3) 误差状态。
+`q_wpr` 作为非 yaw 姿态漂移强度，以 `dt * q_wpr` 的形式加到 `rot_x/rot_y` 对角项，用于吸收车体 roll/pitch 小幅误差、地面坡度和外参残差。这个处理保留了当前状态量只有一个 `vyaw` 的轻量模型，同时让位姿注入、过程噪声和滤波线性化都向右不变 InEKF 的误差定义靠近。
 
 对于第 `i` 块装甲板，其相对车体中心的位置由整车状态直接给出：
 
@@ -355,6 +381,8 @@ K = P H^T (H P H^T + R)^-1
 delta_x = K (z - h(x))
 x <- inject(delta_x, x)
 ```
+
+这里的 `delta_x` 是误差状态，不是普通状态增量。对位姿部分，`delta_x` 中的 `delta_rho/delta_rot` 会通过 `Exp_SE3` 右乘到整车位姿；对速度、半径和高度等欧氏量，则继续使用普通加法注入。
 
 当一帧中加入更多有效观测时，`H^T R^-1 H` 提供的信息量增加，后验状态的不确定性会下降。也就是说，“同时观测装甲板和灯条”不是简单堆特征点，而是在滤波理论上增加了对整车状态的约束。
 
