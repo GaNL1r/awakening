@@ -8,6 +8,7 @@
 #include <array>
 #include <iostream>
 #include <mutex>
+#include <numeric>
 #include <opencv2/core/eigen.hpp>
 #include <opencv2/core/types.hpp>
 #include <utility>
@@ -67,6 +68,7 @@ struct ArmorTracker::Impl {
         }
         bool found = false;
         Armor init_target;
+
         for (auto& a: armors.armors) {
             if (!(a.color == ArmorColor::NONE || a.color == ArmorColor::PURPLE) && !found) {
                 if (!(target_buf_[cur_target_idx_].target_number == ArmorClass::OUTPOST

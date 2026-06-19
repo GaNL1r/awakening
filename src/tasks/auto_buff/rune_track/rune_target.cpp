@@ -162,6 +162,11 @@ bool RuneTarget::reset(
     };
     Eigen::DiagonalMatrix<double, X_N> p0;
     p0.diagonal().setZero();
+    p0.diagonal()[idx::CX] = p0.diagonal()[idx::CY] = p0.diagonal()[idx::CZ] = 1;
+    p0.diagonal()[idx::A] = p0.diagonal()[idx::W] = 1;
+    p0.diagonal()[idx::ROLL] = p0.diagonal()[idx::YAW] = 1;
+    p0.diagonal()[idx::V_ROLL] = 100;
+    p0.diagonal()[idx::TAU] = 100;
     const auto u_q = [this]() {
         Eigen::Matrix<double, X_N, X_N> q;
         return q;
@@ -210,7 +215,12 @@ bool RuneTarget::reset(
             + std::chrono::duration<double>(timestamp - target_state.timestamp).count();
     }
     target_state.x = Eigen::VectorXd::Zero(X_N);
-    target_state.x << pos.x(), pos.y(), pos.z(), rpy[2], rpy[0], 0, tau, a_guess, w_guess;
+    target_state.set_pos(pos);
+    target_state.x[idx::ROLL] = rpy[0];
+    target_state.x[idx::YAW] = rpy[2];
+    target_state.x[idx::A] = a_guess;
+    target_state.x[idx::W] = w_guess;
+    target_state.x[idx::TAU] = tau;
     target_state.timestamp = timestamp;
     target_state.frame_id = frame_id;
     esekf.value().set_state(target_state.x);
@@ -260,16 +270,16 @@ void RuneTarget::fan_target_pnp(
 RuneTarget::process_noise(double dt, const Voter& v) const noexcept {
     Eigen::Matrix<double, X_N, X_N> q;
     q.setZero();
-    q(idx::CX, idx::CX) = cfg.q_xyz.x();
-    q(idx::CY, idx::CY) = cfg.q_xyz.y();
-    q(idx::CZ, idx::CZ) = cfg.q_xyz.z();
-    q(idx::YAW, idx::YAW) = cfg.q_yaw;
+    q(idx::CX, idx::CX) = dt * cfg.q_xyz.x();
+    q(idx::CY, idx::CY) = dt * cfg.q_xyz.y();
+    q(idx::CZ, idx::CZ) = dt * cfg.q_xyz.z();
+    q(idx::YAW, idx::YAW) = dt * cfg.q_yaw;
 
     utils::fill_constant_accel_noise(q, idx::ROLL, idx::V_ROLL, cfg.q_roll, dt);
 
-    q(idx::A, idx::A) = cfg.q_a;
-    q(idx::W, idx::W) = cfg.q_w;
-    q(idx::TAU, idx::TAU) = cfg.q_tau;
+    q(idx::A, idx::A) = dt * cfg.q_a;
+    q(idx::W, idx::W) = dt * cfg.q_w;
+    q(idx::TAU, idx::TAU) = dt * cfg.q_tau;
 
     return q;
 }

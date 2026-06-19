@@ -346,11 +346,11 @@ Eigen::Matrix<double, X_N, X_N> ArmorTarget::process_noise(double dt) const noex
 
     utils::fill_constant_accel_noise(q, idx::C_ROT_Z, idx::VYAW, q_yaw, dt);
 
-    q(idx::R, idx::R) = cfg.q_r;
-    q(idx::L, idx::L) = q_l;
-    q(idx::H, idx::H) = q_h;
-    q(idx::C_ROT_Y, idx::C_ROT_Y) += dt * cfg.q_wpr;
-    q(idx::C_ROT_X, idx::C_ROT_X) += dt * cfg.q_wpr;
+    q(idx::R, idx::R) = dt * cfg.q_r;
+    q(idx::L, idx::L) = dt * q_l;
+    q(idx::H, idx::H) = dt * q_h;
+    q(idx::C_ROT_Y, idx::C_ROT_Y) = dt * cfg.q_wpr;
+    q(idx::C_ROT_X, idx::C_ROT_X) = dt * cfg.q_wpr;
     return q;
 }
 

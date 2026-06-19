@@ -100,7 +100,7 @@ struct Predict {
             }
         } else {
             r = T(OUTPOST_R);
-            constrain_outpost_dz(x);
+            // constrain_outpost_dz(x);
         }
         if (armor_number == auto_aim::ArmorClass::BASE
             || armor_number == auto_aim::ArmorClass::OUTPOST) {

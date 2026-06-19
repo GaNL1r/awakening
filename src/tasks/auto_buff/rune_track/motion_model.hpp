@@ -356,6 +356,11 @@ struct State {
         timestamp +=
             std::chrono::duration_cast<TimePoint::duration>(std::chrono::duration<double>(dt));
     }
+    void set_pos(const Vec3& p) {
+        x[idx::CX] = p.x();
+        x[idx::CY] = p.y();
+        x[idx::CZ] = p.z();
+    }
     Vec3 pos() const {
         return Vec3(x[idx::CX], x[idx::CY], x[idx::CZ]);
     }
