@@ -23,15 +23,24 @@ inline Eigen::Matrix<T, 3, 3> so3_hat(const Eigen::Matrix<T, 3, 1>& w) {
 }
 template<class T>
 inline Eigen::Matrix<T, 3, 3> so3_exp(const Eigen::Matrix<T, 3, 1>& phi) {
-    const T theta = phi.norm();
+    const T theta2 = phi.squaredNorm();
+    const T theta = ceres::sqrt(theta2);
 
     const auto W = so3_hat(phi);
     const auto W2 = W * W;
 
     Eigen::Matrix<T, 3, 3> R = Eigen::Matrix<T, 3, 3>::Identity();
 
-    const T A = ceres::sin(theta) / theta;
-    const T B = (T(1) - ceres::cos(theta)) / (theta * theta);
+    T A;
+    T B;
+    if (theta2 < T(1e-12)) {
+        const T theta4 = theta2 * theta2;
+        A = T(1) - theta2 / T(6) + theta4 / T(120);
+        B = T(0.5) - theta2 / T(24) + theta4 / T(720);
+    } else {
+        A = ceres::sin(theta) / theta;
+        B = (T(1) - ceres::cos(theta)) / theta2;
+    }
 
     R += A * W + B * W2;
 
@@ -40,10 +49,13 @@ inline Eigen::Matrix<T, 3, 3> so3_exp(const Eigen::Matrix<T, 3, 1>& phi) {
 template<class T>
 inline Eigen::Matrix<T, 3, 1> so3_log(const Eigen::Matrix<T, 3, 3>& R) {
     const T cos_theta = (R.trace() - T(1.0)) * T(0.5);
-    const T theta = ceres::acos(cos_theta);
-    const T scale = theta / (T(2.0) * ceres::sin(theta));
     Eigen::Matrix<T, 3, 1> w;
     w << R(2, 1) - R(1, 2), R(0, 2) - R(2, 0), R(1, 0) - R(0, 1);
+    if (cos_theta > T(1.0 - 1e-12)) {
+        return T(0.5) * w;
+    }
+    const T theta = ceres::acos(cos_theta);
+    const T scale = theta / (T(2.0) * ceres::sin(theta));
     return scale * w;
 }
 enum class RPYOrder { XYZ, ZYX };

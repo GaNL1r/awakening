@@ -120,13 +120,13 @@ flowchart TD
         AT2 --> AT21["选择有效装甲板<br/>过滤 NONE / PURPLE / 低质量目标"]
         AT21 --> AT22["IPPE PnP 初始化装甲板位姿<br/>前哨站做 yaw 搜索修正"]
         AT22 --> AT23["由装甲板位姿 + 预设半径<br/>反推整车中心"]
-        AT23 --> AT24["初始化 ArmorTarget ESEKF<br/>x = cx vcx cy vcy cz vcz yaw vyaw r p1 p2 wp wr"]
+        AT23 --> AT24["初始化 ArmorTarget ESEKF<br/>x = cx vcx cy vcy cz vcz rot_z vyaw r p1 p2 rot_y rot_x"]
         AT24 --> AT25["初始化目标编号 / frame_id / last_update<br/>TrackState -> DETECTING"]
 
         AT1 -->|"否"| AT3["update_target"]
         AT3 --> AT31["按已跟踪目标数字过滤候选装甲板<br/>保留同类且颜色有效观测"]
         AT31 --> AT32["predict_ekf<br/>常速度平移 + 常角速度 yaw<br/>过程噪声从 car 系旋转到 odom 系"]
-        AT32 --> AT33["生成整车几何预测<br/>T_car_odom = t(cx,cy,cz) * Rx(wr) * Ry(wp) * Rz(yaw)<br/>逐编号生成 T_armor_odom"]
+        AT32 --> AT33["生成整车几何预测<br/>T_car_odom = t(cx,cy,cz) * Exp_SO3(rot)<br/>逐编号生成 T_armor_odom"]
         AT33 --> AT34["match_armor"]
         AT34 --> AT341["每个候选装甲板做 IPPE PnP<br/>仅用于粗匹配和门控"]
         AT341 --> AT342["构造 YPD + SO(3) 观测<br/>yaw / pitch / distance / Log(R)"]
@@ -285,19 +285,19 @@ flowchart TD
 代码中使用的是误差状态扩展卡尔曼滤波器 `ErrorStateEKF`，状态定义在 `src/tasks/auto_aim/armor_track/motion_model.hpp`：
 
 ```text
-x = [cx, vcx, cy, vcy, cz, vcz, yaw, vyaw, r, p1, p2, wp, wr]^T
+x = [cx, vcx, cy, vcy, cz, vcz, rot_z, vyaw, r, p1, p2, rot_y, rot_x]^T
 ```
 
-其中 `c = (cx, cy, cz)` 表示整车中心位置，`v = (vcx, vcy, vcz)` 表示整车速度，`yaw/vyaw` 表示车体旋转相位和角速度，`r` 表示装甲板到车体中心的基础半径。`p1/p2` 对普通四装甲目标分别作为长短轴差 `l` 和高度差 `h` 使用；对前哨站则复用为两层装甲板高度偏移。`wp/wr` 用于补偿车体平面相对 odom 的 pitch/roll 倾斜，基地和前哨站目标会将其约束为 0。
+其中 `c = (cx, cy, cz)` 表示整车中心位置，`v = (vcx, vcy, vcz)` 表示整车速度。`rot_x/rot_y/rot_z` 是车体姿态在 `SO(3)` 上的旋转向量分量，代码中复用原 `wr/wp/yaw` 三个槽位存储；`vyaw` 仍表示绕车体 z 轴的角速度，用于预测时右乘 yaw 增量。`r` 表示装甲板到车体中心的基础半径。`p1/p2` 对普通四装甲目标分别作为长短轴差 `l` 和高度差 `h` 使用；对前哨站则复用为两层装甲板高度偏移。基地和前哨站目标会将 `rot_x/rot_y` 约束为 0，仅保留 yaw 方向。
 
 当前车体位姿生成顺序为：
 
 ```text
 T_car_odom.translation = [cx, cy, cz]^T
-R_car_odom = Rx(wr) * Ry(wp) * Rz(yaw)
+R_car_odom = Exp_SO3([rot_x, rot_y, rot_z])
 ```
 
-因此 `yaw/vyaw` 的更新发生在倾斜后的车体平面内。平移过程噪声按 car 坐标系前后、左右、上下定义，构造过程噪声时会通过当前 `R_car_odom` 旋转到 odom 坐标系，再填入 `[position, velocity]` 的常加速度噪声块。
+预测时先由旋转向量恢复 `R_car_odom`，再右乘 `Exp_SO3([0, 0, vyaw * dt])` 推进姿态；滤波误差注入时使用 `Exp_SO3(delta_rot) * R_car_odom` 组合，而不是直接相加欧拉角。平移过程噪声按 car 坐标系前后、左右、上下定义，构造过程噪声时会通过当前 `R_car_odom` 旋转到 odom 坐标系，再填入 `[position, velocity]` 的常加速度噪声块。
 
 对于第 `i` 块装甲板，其相对车体中心的位置由整车状态直接给出：
 

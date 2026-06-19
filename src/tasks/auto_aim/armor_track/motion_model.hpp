@@ -16,13 +16,13 @@
 namespace awakening::auto_aim::armor_point_motion_model {
 
 namespace idx {
-    enum { CX, VCX, CY, VCY, CZ, VCZ, YAW, VYAW, R, P1, P2, WP, WR, X_N };
+    enum { CX, VCX, CY, VCY, CZ, VCZ, C_ROT_Z, VYAW, R, P1, P2, C_ROT_Y, C_ROT_X, X_N };
     constexpr int L = P1;
     constexpr int H = P2;
     constexpr int OUTPOST01DZ = P1;
     constexpr int OUTPOST02DZ = P2;
     enum { TOP_X, TOP_Y, BOTTOM_X, BOTTOM_Y, _UVZ_N };
-    enum { YPD_Y, YPD_P, YPD_D, ROT_X, ROT_Y, ROT_Z, _YPD_Z_N };
+    enum { YPD_Y, YPD_P, YPD_D, A_ROT_X, A_ROT_Y, A_ROT_Z, _YPD_Z_N };
 } // namespace idx
 constexpr int X_N = idx::X_N;
 constexpr int UVZ_N = idx::_UVZ_N;
@@ -36,6 +36,19 @@ template<typename T>
 inline T normalize_angle(T a) {
     const T two_pi = T(2.0 * M_PI);
     return a - two_pi * floor((a + T(M_PI)) / two_pi);
+}
+
+template<typename T>
+inline Eigen::Matrix<T, 3, 3> _car_rotation(const T x[X_N], ArmorClass armor_number) {
+    const bool building =
+        (armor_number == auto_aim::ArmorClass::OUTPOST || armor_number == auto_aim::ArmorClass::BASE
+        );
+    if (building) {
+        Eigen::Matrix<T, 3, 1> yaw_rotvec;
+        yaw_rotvec << T(0), T(0), x[idx::C_ROT_Z];
+        return utils::so3_exp(yaw_rotvec);
+    }
+    return utils::so3_exp(Eigen::Matrix<T, 3, 1>(x[idx::C_ROT_X], x[idx::C_ROT_Y], x[idx::C_ROT_Z]));
 }
 
 struct Predict {
@@ -52,7 +65,14 @@ struct Predict {
         x1[idx::CZ] += x0[idx::VCZ] * T(dt);
 
         if (armor_number != auto_aim::ArmorClass::BASE) {
-            x1[idx::YAW] += x0[idx::VYAW] * T(dt);
+            Eigen::Matrix<T, 3, 1> delta_rot;
+            delta_rot << T(0), T(0), x0[idx::VYAW] * T(dt);
+            const Eigen::Matrix<T, 3, 3> R1 =
+                (utils::so3_exp(Eigen::Matrix<T, 3, 1>(x0[idx::C_ROT_X], x0[idx::C_ROT_Y], x0[idx::C_ROT_Z])) * utils::so3_exp(delta_rot)).eval();
+            auto rot_vec = utils::so3_log(R1);
+            x1[idx::C_ROT_X] = rot_vec.x();
+            x1[idx::C_ROT_Y] = rot_vec.y();
+            x1[idx::C_ROT_Z] = rot_vec.z();
         }
 
         clamp(x1);
@@ -79,8 +99,8 @@ struct Predict {
         }
         if (armor_number == auto_aim::ArmorClass::BASE
             || armor_number == auto_aim::ArmorClass::OUTPOST) {
-            x[idx::WP] = T(0.0);
-            x[idx::WR] = T(0.0);
+            x[idx::C_ROT_Y] = T(0.0);
+            x[idx::C_ROT_X] = T(0.0);
         }
 
         if (ceres::abs(vyaw) > T(20.0)) {
@@ -147,20 +167,7 @@ _whole_car_pose(const T x[X_N], ArmorClass armor_number) {
     Eigen::Transform<T, 3, Eigen::Isometry> car_in_odom =
         Eigen::Transform<T, 3, Eigen::Isometry>::Identity();
     car_in_odom.translation() << x[idx::CX], x[idx::CY], x[idx::CZ];
-    const bool building =
-        (armor_number == auto_aim::ArmorClass::OUTPOST || armor_number == auto_aim::ArmorClass::BASE
-        );
-    Eigen::Quaternion<T> q_yaw_car_in_odom(
-        Eigen::AngleAxis<T>(T(x[idx::YAW]), Eigen::Vector3<T>::UnitZ())
-    );
-    Eigen::Quaternion<T> q_pitch_car_in_odom(
-        Eigen::AngleAxis<T>(building ? T(0.0) : T(x[idx::WP]), Eigen::Vector3<T>::UnitY())
-    );
-    Eigen::Quaternion<T> q_roll_car_in_odom(
-        Eigen::AngleAxis<T>(building ? T(0.0) : T(x[idx::WR]), Eigen::Vector3<T>::UnitX())
-    );
-    car_in_odom.linear() =
-        (q_roll_car_in_odom * q_pitch_car_in_odom * q_yaw_car_in_odom).toRotationMatrix();
+    car_in_odom.linear() = _car_rotation(x, armor_number);
     return car_in_odom;
 }
 template<typename T>
@@ -259,9 +266,9 @@ struct YPDMeasure {
         z[idx::YPD_Y] = ceres::atan2(ay, ax); // yaw
         z[idx::YPD_P] = ceres::atan2(az, xy_dist); // pitch
         z[idx::YPD_D] = dist; // distance
-        z[idx::ROT_X] = rot_vec.x();
-        z[idx::ROT_Y] = rot_vec.y();
-        z[idx::ROT_Z] = rot_vec.z();
+        z[idx::A_ROT_X] = rot_vec.x();
+        z[idx::A_ROT_Y] = rot_vec.y();
+        z[idx::A_ROT_Z] = rot_vec.z();
     }
 
     inline void h(const VecX& x, YPDVecZ& z) const {
@@ -318,7 +325,7 @@ struct State {
     }
 
     inline double yaw() const noexcept {
-        return x[idx::YAW];
+        return utils::matrix2rpy<double>(utils::so3_exp(Eigen::Matrix<double, 3, 1>(x[idx::C_ROT_X], x[idx::C_ROT_Y], x[idx::C_ROT_Z]))).z();
     }
     inline double vyaw() const noexcept {
         return x[idx::VYAW];
@@ -340,10 +347,10 @@ struct State {
         return x[idx::OUTPOST02DZ];
     }
     inline double w_p() const noexcept {
-        return x[idx::WP];
+        return utils::matrix2rpy<double>(utils::so3_exp(Eigen::Matrix<double, 3, 1>(x[idx::C_ROT_X], x[idx::C_ROT_Y], x[idx::C_ROT_Z]))).y();
     }
     inline double w_r() const noexcept {
-        return x[idx::WR];
+        return utils::matrix2rpy<double>(utils::so3_exp(Eigen::Matrix<double, 3, 1>(x[idx::C_ROT_X], x[idx::C_ROT_Y], x[idx::C_ROT_Z]))).x();
     }
 };
 
