@@ -320,7 +320,7 @@ inline ImgPoint undistort_point(
     const ImgPoint& img_point
 ) {
     std::vector<ImgPoint> norm_pts;
-    cv::undistortPoints(std::vector<ImgPoint>{ img_point }, norm_pts, camera_matrix, dist_coeffs);
+    cv::undistortPoints(std::vector<ImgPoint> { img_point }, norm_pts, camera_matrix, dist_coeffs);
     return norm_pts.front();
 }
 template<typename T>

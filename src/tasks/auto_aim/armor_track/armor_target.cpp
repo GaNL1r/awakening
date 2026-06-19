@@ -27,6 +27,22 @@ namespace awakening::auto_aim {
 using namespace armor_point_motion_model;
 
 namespace {
+    double camera_fx(const CameraInfo& camera_info) noexcept {
+        return camera_info.camera_matrix.at<double>(0, 0);
+    }
+
+    double camera_fy(const CameraInfo& camera_info) noexcept {
+        return camera_info.camera_matrix.at<double>(1, 1);
+    }
+
+    double camera_cx(const CameraInfo& camera_info) noexcept {
+        return camera_info.camera_matrix.at<double>(0, 2);
+    }
+
+    double camera_cy(const CameraInfo& camera_info) noexcept {
+        return camera_info.camera_matrix.at<double>(1, 2);
+    }
+
     void fill_uv_measurement(
         Eigen::Matrix<double, UVZ_N, 1>& z,
         const cv::Point2f& top,
@@ -212,7 +228,6 @@ void ArmorTarget::reset(
     }
     track_state.reset();
     this_id = GOBAL_ID++; //全局状态标记，下游控制对同一id的不重复构建轨迹
-    update_count++;
 }
 
 void ArmorTarget::armor_pnp(
@@ -291,10 +306,20 @@ void ArmorTarget::armor_pnp(
 Eigen::Matrix<double, UVZ_N, UVZ_N>
 ArmorTarget::uvmeasurement_covariance(const Eigen::Matrix<double, UVZ_N, 1>& z) const noexcept {
     Eigen::Matrix<double, UVZ_N, UVZ_N> r;
+    const double fx = camera_fx(uvmeasure_ctx.camera_info);
+    const double fy = camera_fy(uvmeasure_ctx.camera_info);
+
+    const double du_px = (z[idx::TOP_X] - z[idx::BOTTOM_X]) * fx;
+    const double dv_px = (z[idx::TOP_Y] - z[idx::BOTTOM_Y]) * fy;
+    const double length_px = std::hypot(du_px, dv_px);
+    const double sigma_px = std::max(length_px * cfg.r_pix_err_ratio, cfg.r_pix_err_min);
+
     r.setZero();
-    r(idx::TOP_X, idx::TOP_X) = r(idx::BOTTOM_X, idx::BOTTOM_X) = cfg.r_u;
-    r(idx::TOP_Y, idx::TOP_Y) = r(idx::BOTTOM_Y, idx::BOTTOM_Y) = cfg.r_v;
-    return r;   
+    r(idx::TOP_X, idx::TOP_X) = r(idx::BOTTOM_X, idx::BOTTOM_X) = std::pow(sigma_px / fx, 2);
+
+    r(idx::TOP_Y, idx::TOP_Y) = r(idx::BOTTOM_Y, idx::BOTTOM_Y) = std::pow(sigma_px / fy, 2);
+
+    return r;
 }
 
 [[nodiscard]] Eigen::
@@ -479,7 +504,6 @@ int ArmorTarget::update(
         }
     };
 
-    int updated = 0;
     std::vector<bool> used_id(armor_num(), false);
     for (auto& [id, armor]: matched_armors) {
         jumped |= (id != 0);
@@ -488,8 +512,7 @@ int ArmorTarget::update(
         used_id[id] = true;
         add_armor_uv_obs(armor, id, true);
         add_armor_uv_obs(armor, id, false);
-        ++updated;
-        ++update_count;
+        // add_armor_ypd_obs(armor, id);
     }
     for (const auto& [id, is_left, light]: matched_lights) {
         auto ctx = uvmeasure_ctx;
@@ -507,8 +530,8 @@ int ArmorTarget::update(
         last_update = timestamp;
         this_id = GOBAL_ID++; //全局状态标记，下游控制对同一id的不重复构建轨迹
     }
-
-    return updated;
+    update_count+=obs.size();
+    return obs.size();
 }
 std::vector<std::pair<int, Armor>> ArmorTarget::match_armor(
     std::vector<Armor>& armors,

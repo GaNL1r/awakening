@@ -27,8 +27,8 @@ struct ArmorTrackerCfg {
     double q_h;
     double q_wpr;
     double q_outpost_dz;
-    double r_u;
-    double r_v;
+    double r_pix_err_ratio;
+    double r_pix_err_min;
     bool enable_lights_measure = false;
     double light_match_length_ratio_gate;
     double light_match_angle_gate;
@@ -51,8 +51,8 @@ struct ArmorTrackerCfg {
         q_h = config["q_h"].as<double>();
         q_wpr = config["q_wpr"].as<double>();
         q_outpost_dz = config["q_outpost_dz"].as<double>();
-        r_u = config["r_u"].as<double>();
-        r_v = config["r_v"].as<double>();
+        r_pix_err_ratio = config["r_pix_err_ratio"].as<double>();
+        r_pix_err_min = config["r_pix_err_min"].as<double>();
         enable_lights_measure = config["enable_lights_measure"].as<bool>();
         light_match_length_ratio_gate = config["light_match_length_ratio_gate"].as<double>();
         light_match_angle_gate = config["light_match_angle_gate"].as<double>();
@@ -172,7 +172,7 @@ public:
     TimePoint last_update;
     ArmorClass target_number = ArmorClass::UNKNOWN;
     int this_id = -1;
-    int update_count = 0;
+    int update_count =0;
     [[nodiscard]] inline ArmorTarget fast_copy_without_ekf() const noexcept {
         ArmorTarget target;
         target.target_number = this->target_number;
