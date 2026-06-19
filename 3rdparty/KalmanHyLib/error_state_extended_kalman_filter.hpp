@@ -28,11 +28,13 @@ public:
         const PredicFunc& f,
         const UpdateQFunc& u_q,
         const InjectFunc& inject,
+        const BoxMinusFunc& box_minus,
         const MatrixXX& P0
     ) noexcept:
         f(f),
         update_Q(u_q),
         inject_state(inject),
+        box_minus_state(box_minus),
         P_delta(P0) {}
 
     void set_state(const MatrixX1& x0) noexcept {
@@ -189,16 +191,11 @@ public:
         virtual ~ObsBase() = default;
         virtual int dim() const = 0;
 
-        virtual void predict(
-            const Eigen::VectorXd& x,
-            Eigen::VectorXd& z_pred
-        ) const = 0;
+        virtual void predict(const Eigen::VectorXd& x, Eigen::VectorXd& z_pred) const = 0;
 
-        virtual void residual_and_R(
-            const Eigen::VectorXd& z_pred,
-            Eigen::VectorXd& residual,
-            Eigen::MatrixXd& R
-        ) const = 0;
+        virtual void
+        residual_and_R(const Eigen::VectorXd& z_pred, Eigen::VectorXd& residual, Eigen::MatrixXd& R)
+            const = 0;
 
         virtual void evaluate(
             const Eigen::VectorXd& x,
@@ -232,10 +229,7 @@ public:
             return N_Z;
         }
 
-        void predict(
-            const Eigen::VectorXd& x,
-            Eigen::VectorXd& z_pred
-        ) const override {
+        void predict(const Eigen::VectorXd& x, Eigen::VectorXd& z_pred) const override {
             assert(x.size() == N_X);
 
             std::array<double, N_X> x_data;
@@ -250,11 +244,9 @@ public:
                 z_pred[i] = z_data[i];
         }
 
-        void residual_and_R(
-            const Eigen::VectorXd& z_pred,
-            Eigen::VectorXd& residual,
-            Eigen::MatrixXd& R
-        ) const override {
+        void
+        residual_and_R(const Eigen::VectorXd& z_pred, Eigen::VectorXd& residual, Eigen::MatrixXd& R)
+            const override {
             assert(z_pred.size() == N_Z);
 
             MatrixZ1 z_pred_fixed;

@@ -107,8 +107,7 @@ inline void se3_log(
         D = T(1) / theta2 - (T(1) + ceres::cos(theta)) / (T(2) * theta * ceres::sin(theta));
     }
 
-    const Eigen::Matrix<T, 3, 3> V_inv =
-        Eigen::Matrix<T, 3, 3>::Identity() - T(0.5) * W + D * W2;
+    const Eigen::Matrix<T, 3, 3> V_inv = Eigen::Matrix<T, 3, 3>::Identity() - T(0.5) * W + D * W2;
     rho = V_inv * T_se3.translation();
 }
 enum class RPYOrder { XYZ, ZYX };

@@ -177,8 +177,23 @@ bool RuneTarget::reset(
             nominal[idx::YAW] = angles::normalize_angle(nominal[idx::YAW] + delta[idx::YAW]);
             nominal[idx::ROLL] = angles::normalize_angle(nominal[idx::ROLL] + delta[idx::ROLL]);
         };
+    const auto box_minus = [](const Eigen::Matrix<double, X_N, 1>& nominal,
+                              const Eigen::Matrix<double, X_N, 1>& value,
+                              Eigen::Matrix<double, X_N, 1>& delta) {
+        for (int i = 0; i < X_N; i++) {
+            if (i == idx::YAW || i == idx::ROLL)
+                continue;
+
+            delta[i] = value[i] - nominal[i];
+        }
+
+        // angle difference must be wrapped
+        delta[idx::YAW] = angles::normalize_angle(value[idx::YAW] - nominal[idx::YAW]);
+        delta[idx::ROLL] = angles::normalize_angle(value[idx::ROLL] - nominal[idx::ROLL]);
+    };
+
     voter.reset(timestamp);
-    esekf = ESEKF(Predict { .dt = 0.005, .voter = voter }, u_q, inject, p0);
+    esekf = ESEKF(Predict { .dt = 0.005, .voter = voter }, u_q, inject, box_minus, p0);
 
     esekf.value().set_iteration_num(cfg.esekf_iter_num);
 

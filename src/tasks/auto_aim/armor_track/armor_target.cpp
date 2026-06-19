@@ -90,31 +90,29 @@ void ArmorTarget::reset(
         return q;
     };
 
-    const auto inject = [this](
-                            const Eigen::Matrix<double, X_N, 1>& delta,
-                            Eigen::Matrix<double, X_N, 1>& nominal
-                        ) {
-        for (int i = 0; i < X_N; i++) {
-            if (i == idx::CX || i == idx::CY || i == idx::CZ || i == idx::C_ROT_Z
-                || i == idx::C_ROT_Y || i == idx::C_ROT_X)
-                continue;
-            nominal[i] += delta[i];
-        }
-        Vec3 delta_rho(delta[idx::CX], delta[idx::CY], delta[idx::CZ]);
-        Vec3 delta_rot(delta[idx::C_ROT_X], delta[idx::C_ROT_Y], delta[idx::C_ROT_Z]);
-        ISO3 nominal_pose = ISO3::Identity();
-        nominal_pose.translation() = Vec3(nominal[idx::CX], nominal[idx::CY], nominal[idx::CZ]);
-        Vec3 nominal_rot(nominal[idx::C_ROT_X], nominal[idx::C_ROT_Y], nominal[idx::C_ROT_Z]);
-        nominal_pose.linear() = utils::so3_exp(nominal_rot);
-        const ISO3 injected_pose = nominal_pose * utils::se3_exp(delta_rho, delta_rot);
-        const Vec3 injected_rot = utils::so3_log(injected_pose.linear().eval());
-        nominal[idx::CX] = injected_pose.translation().x();
-        nominal[idx::CY] = injected_pose.translation().y();
-        nominal[idx::CZ] = injected_pose.translation().z();
-        nominal[idx::C_ROT_X] = injected_rot.x();
-        nominal[idx::C_ROT_Y] = injected_rot.y();
-        nominal[idx::C_ROT_Z] = injected_rot.z();
-    };
+    const auto inject =
+        [this](const Eigen::Matrix<double, X_N, 1>& delta, Eigen::Matrix<double, X_N, 1>& nominal) {
+            for (int i = 0; i < X_N; i++) {
+                if (i == idx::CX || i == idx::CY || i == idx::CZ || i == idx::C_ROT_Z
+                    || i == idx::C_ROT_Y || i == idx::C_ROT_X)
+                    continue;
+                nominal[i] += delta[i];
+            }
+            Vec3 delta_rho(delta[idx::CX], delta[idx::CY], delta[idx::CZ]);
+            Vec3 delta_rot(delta[idx::C_ROT_X], delta[idx::C_ROT_Y], delta[idx::C_ROT_Z]);
+            ISO3 nominal_pose = ISO3::Identity();
+            nominal_pose.translation() = Vec3(nominal[idx::CX], nominal[idx::CY], nominal[idx::CZ]);
+            Vec3 nominal_rot(nominal[idx::C_ROT_X], nominal[idx::C_ROT_Y], nominal[idx::C_ROT_Z]);
+            nominal_pose.linear() = utils::so3_exp(nominal_rot);
+            const ISO3 injected_pose = nominal_pose * utils::se3_exp(delta_rho, delta_rot);
+            const Vec3 injected_rot = utils::so3_log(injected_pose.linear().eval());
+            nominal[idx::CX] = injected_pose.translation().x();
+            nominal[idx::CY] = injected_pose.translation().y();
+            nominal[idx::CZ] = injected_pose.translation().z();
+            nominal[idx::C_ROT_X] = injected_rot.x();
+            nominal[idx::C_ROT_Y] = injected_rot.y();
+            nominal[idx::C_ROT_Z] = injected_rot.z();
+        };
     const auto box_minus = [](const Eigen::Matrix<double, X_N, 1>& nominal,
                               const Eigen::Matrix<double, X_N, 1>& value,
                               Eigen::Matrix<double, X_N, 1>& delta) {
@@ -122,9 +120,9 @@ void ArmorTarget::reset(
 
         ISO3 nominal_pose = ISO3::Identity();
         nominal_pose.translation() = Vec3(nominal[idx::CX], nominal[idx::CY], nominal[idx::CZ]);
-        nominal_pose.linear() = utils::so3_exp(
-            Vec3(nominal[idx::C_ROT_X], nominal[idx::C_ROT_Y], nominal[idx::C_ROT_Z])
-        );
+        nominal_pose.linear() =
+            utils::so3_exp(Vec3(nominal[idx::C_ROT_X], nominal[idx::C_ROT_Y], nominal[idx::C_ROT_Z])
+            );
 
         ISO3 value_pose = ISO3::Identity();
         value_pose.translation() = Vec3(value[idx::CX], value[idx::CY], value[idx::CZ]);
@@ -141,9 +139,13 @@ void ArmorTarget::reset(
         delta[idx::C_ROT_Y] = delta_rot.y();
         delta[idx::C_ROT_Z] = delta_rot.z();
     };
-    esekf =
-        RobotStateESEKF(Predict { .dt = 0.005, .armor_number = target_number }, u_q, inject, p0);
-    esekf.value().set_box_minus_state(box_minus);
+    esekf = RobotStateESEKF(
+        Predict { .dt = 0.005, .armor_number = target_number },
+        u_q,
+        inject,
+        box_minus,
+        p0
+    );
 
     esekf.value().set_iteration_num(cfg.esekf_iter_num);
 

@@ -128,12 +128,20 @@ public:
                 nominal[i] += delta[i];
             }
         };
+        const auto box_minus = [](const Eigen::Matrix<double, wheel_motion_model::X_N, 1>& nominal,
+                                  const Eigen::Matrix<double, wheel_motion_model::X_N, 1>& value,
+                                  Eigen::Matrix<double, wheel_motion_model::X_N, 1>& delta) {
+            for (int i = 0; i < wheel_motion_model::X_N; i++) {
+                delta[i] = value[i] - nominal[i];
+            }
+        };
         esekf = wheel_motion_model::RobotStateESEKF(
             wheel_motion_model::Predict {
                 .dt = 0.005,
             },
             u_q,
             inject,
+            box_minus,
             p0
         );
 
