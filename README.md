@@ -119,18 +119,18 @@ flowchart TD
         AT1 -->|"是"| AT2["init_target"]
         AT2 --> AT21["选择有效装甲板<br/>过滤 NONE / PURPLE / 低质量目标"]
         AT21 --> AT22["IPPE PnP 初始化装甲板位姿<br/>前哨站做 yaw 搜索修正"]
-        AT22 --> AT23["由装甲板位姿 + 预设半径<br/>反推整车中心"]
+        AT22 --> AT23["由装甲板位姿 + 预设半径<br/>反推整车位姿"]
         AT23 --> AT24["初始化 ArmorTarget ESEKF<br/>x = cx vcx cy vcy cz vcz rot_z vyaw r p1 p2 rot_y rot_x"]
         AT24 --> AT25["初始化目标编号 / frame_id / last_update<br/>TrackState -> DETECTING"]
 
         AT1 -->|"否"| AT3["update_target"]
         AT3 --> AT31["按已跟踪目标数字过滤候选装甲板<br/>保留同类且颜色有效观测"]
-        AT31 --> AT32["predict_ekf<br/>常速度平移 + 常角速度 yaw<br/>过程噪声从 car 系旋转到 odom 系"]
+        AT31 --> AT32["predict_ekf<br/>常速度平移 + SO(3) 右乘 yaw 增量<br/>平移/姿态噪声映射到 odom 切空间"]
         AT32 --> AT33["生成整车几何预测<br/>T_car_odom = t(cx,cy,cz) * Exp_SO3(rot)<br/>逐编号生成 T_armor_odom"]
         AT33 --> AT34["match_armor"]
         AT34 --> AT341["每个候选装甲板做 IPPE PnP<br/>仅用于粗匹配和门控"]
         AT341 --> AT342["构造 YPD + SO(3) 观测<br/>yaw / pitch / distance / Log(R)"]
-        AT342 --> AT343["与预测编号装甲板比较<br/>角度 wrap + SO(3) residual<br/>马氏距离门控"]
+        AT342 --> AT343["与预测编号装甲板比较<br/>角度 wrap + Log(R_meas R_pred^T)<br/>马氏距离门控"]
         AT343 --> AT344["greedy_match<br/>得到 matched_armors"]
 
         AT344 --> AT35["match_light"]
@@ -297,7 +297,27 @@ T_car_odom.translation = [cx, cy, cz]^T
 R_car_odom = Exp_SO3([rot_x, rot_y, rot_z])
 ```
 
-预测时先由旋转向量恢复 `R_car_odom`，再右乘 `Exp_SO3([0, 0, vyaw * dt])` 推进姿态；滤波误差注入时使用 `Exp_SO3(delta_rot) * R_car_odom` 组合，而不是直接相加欧拉角。平移过程噪声按 car 坐标系前后、左右、上下定义，构造过程噪声时会通过当前 `R_car_odom` 旋转到 odom 坐标系，再填入 `[position, velocity]` 的常加速度噪声块。
+预测时先由旋转向量恢复 `R_car_odom`，再右乘 `Exp_SO3([0, 0, vyaw * dt])` 推进姿态；滤波误差注入时使用 `Exp_SO3(delta_rot) * R_car_odom` 组合，而不是直接相加欧拉角。由于注入函数采用左扰动，旋转误差协方差也按 odom 切空间解释。
+
+过程噪声分为平移和姿态两部分。平移噪声按 car 坐标系前后、左右、上下定义，构造 `Q` 时通过当前 `R_car_odom` 旋转到 odom 坐标系，再填入 `[position, velocity]` 的常加速度噪声块：
+
+```text
+Q_accel_odom = R_car_odom * diag(q_xyz) * R_car_odom^T
+Q_pp = 1/4 dt^4 Q_accel_odom
+Q_pv = 1/2 dt^3 Q_accel_odom
+Q_vv = dt^2 Q_accel_odom
+```
+
+姿态噪声不再只给 `rot_z` 一个标量常加速度块，而是将绕车体 z 轴的 yaw 角加速度投影到 odom 切空间：
+
+```text
+a_yaw_odom = R_car_odom * [0, 0, 1]^T
+Q_rot_rot += 1/4 dt^4 q_yaw * a_yaw_odom * a_yaw_odom^T
+Q_rot_vyaw += 1/2 dt^3 q_yaw * a_yaw_odom
+Q_vyaw_vyaw += dt^2 q_yaw
+```
+
+这里 `Q_rot_rot` 是 `rot_x/rot_y/rot_z` 对应的 `3x3` 协方差块，`Q_rot_vyaw` 是姿态误差与 `vyaw` 的交叉协方差。`q_wpr` 作为非 yaw 姿态漂移强度，以 `dt * q_wpr` 的形式加到 `rot_x/rot_y` 对角项，用于吸收车体 roll/pitch 小幅误差、地面坡度和外参残差。这个处理保留了当前状态量只有一个 `vyaw` 的轻量模型，同时比直接把 `rot_x/rot_y/rot_z` 当普通欧拉角独立加噪更符合 SO(3) 误差状态。
 
 对于第 `i` 块装甲板，其相对车体中心的位置由整车状态直接给出：
 
@@ -332,7 +352,8 @@ residual = z - h(x)
 
 ```text
 K = P H^T (H P H^T + R)^-1
-x = x + K (z - h(x))
+delta_x = K (z - h(x))
+x <- inject(delta_x, x)
 ```
 
 当一帧中加入更多有效观测时，`H^T R^-1 H` 提供的信息量增加，后验状态的不确定性会下降。也就是说，“同时观测装甲板和灯条”不是简单堆特征点，而是在滤波理论上增加了对整车状态的约束。
