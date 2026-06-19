@@ -1,4 +1,4 @@
-mode: auto_buff
+mode: auto_aim
 enemy_color: blue
 bullet_speed: 23.5
 
@@ -98,8 +98,8 @@ armor_tracker:
   light_match_length_ratio_gate: 0.2
   light_match_angle_gate: 0.2
   light_match_pos_gate_by_length_ratio: 5.0
-  r_uv_at_1m: 70.0
-  r_uv_min: 30.0
+  r_u: 0.000001
+  r_v: 0.000001
   esekf_iter_num: 5
 
   
@@ -173,8 +173,8 @@ rune_tracker:
   q_xyz: [0.0001, 0.0001, 0.0001]
   q_yaw: 0.1
   q_roll: 10.0
-  q_a: 0.01
-  q_w: 0.01
+  q_a_raw: 0.01
+  q_w_raw: 0.01
   q_tau: 0.01
   match_gate: 30.0
   voter_state_need_count: 50

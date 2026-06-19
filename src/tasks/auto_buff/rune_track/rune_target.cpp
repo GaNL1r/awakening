@@ -163,7 +163,7 @@ bool RuneTarget::reset(
     Eigen::DiagonalMatrix<double, X_N> p0;
     p0.diagonal().setZero();
     p0.diagonal()[idx::CX] = p0.diagonal()[idx::CY] = p0.diagonal()[idx::CZ] = 1;
-    p0.diagonal()[idx::A] = p0.diagonal()[idx::W] = 1;
+    p0.diagonal()[idx::A_RAW] = p0.diagonal()[idx::W_RAW] = 1;
     p0.diagonal()[idx::ROLL] = p0.diagonal()[idx::YAW] = 1;
     p0.diagonal()[idx::V_ROLL] = 100;
     p0.diagonal()[idx::TAU] = 100;
@@ -209,8 +209,8 @@ bool RuneTarget::reset(
     double tau = 0;
     if (std::chrono::duration<double>(timestamp - last_update).count() < cfg.big_args_continue_time)
     {
-        a_guess = target_state.x[idx::A];
-        w_guess = target_state.x[idx::W];
+        a_guess = target_state.a();
+        w_guess = target_state.w();
         tau = target_state.x[idx::TAU]
             + std::chrono::duration<double>(timestamp - target_state.timestamp).count();
     }
@@ -218,8 +218,8 @@ bool RuneTarget::reset(
     target_state.set_pos(pos);
     target_state.x[idx::ROLL] = rpy[0];
     target_state.x[idx::YAW] = rpy[2];
-    target_state.x[idx::A] = a_guess;
-    target_state.x[idx::W] = w_guess;
+    target_state.x[idx::A_RAW] = unbounded_from_bounded(a_guess, A_LOWER, A_UPPER);
+    target_state.x[idx::W_RAW] = unbounded_from_bounded(w_guess, W_LOWER, W_UPPER);
     target_state.x[idx::TAU] = tau;
     target_state.timestamp = timestamp;
     target_state.frame_id = frame_id;
@@ -277,8 +277,8 @@ RuneTarget::process_noise(double dt, const Voter& v) const noexcept {
 
     utils::fill_constant_accel_noise(q, idx::ROLL, idx::V_ROLL, cfg.q_roll, dt);
 
-    q(idx::A, idx::A) = dt * cfg.q_a;
-    q(idx::W, idx::W) = dt * cfg.q_w;
+    q(idx::A_RAW, idx::A_RAW) = dt * cfg.q_a_raw;
+    q(idx::W_RAW, idx::W_RAW) = dt * cfg.q_w_raw;
     q(idx::TAU, idx::TAU) = dt * cfg.q_tau;
 
     return q;

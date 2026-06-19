@@ -18,6 +18,7 @@
 #include <cstdint>
 #include <memory>
 #include <mutex>
+#include <opencv2/highgui.hpp>
 #include <optional>
 #include <string>
 #include <utility>
@@ -468,12 +469,11 @@ int main(int argc, char** argv) {
                         camera_info,
                         frame.img_frame.src_img.size()
                     );
-                    detect_light->x -= detect_light->width * 0.3;
-                    detect_light->y -= detect_light->height * 0.3;
-                    detect_light->width *= 1.6;
-                    detect_light->height *= 1.6;
-                    detect_light.value() &=
-                        cv::Rect(0, 0, frame.img_frame.src_img.cols, frame.img_frame.src_img.rows);
+                    detect_light = utils::expand_and_clip_rect(
+                        detect_light.value(),
+                        1.6,
+                        frame.img_frame.src_img.size()
+                    );
                 }
             }
 

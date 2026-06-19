@@ -4,6 +4,7 @@
 #include "tasks/auto_aim/type.hpp"
 #include "utils/common/type_common.hpp"
 #include <chrono>
+#include <opencv2/core/types.hpp>
 #include <optional>
 #include <string>
 #include <utility>
@@ -26,8 +27,8 @@ struct ArmorTrackerCfg {
     double q_h;
     double q_wpr;
     double q_outpost_dz;
-    double r_uv_at_1m;
-    double r_uv_min;
+    double r_u;
+    double r_v;
     bool enable_lights_measure = false;
     double light_match_length_ratio_gate;
     double light_match_angle_gate;
@@ -50,8 +51,8 @@ struct ArmorTrackerCfg {
         q_h = config["q_h"].as<double>();
         q_wpr = config["q_wpr"].as<double>();
         q_outpost_dz = config["q_outpost_dz"].as<double>();
-        r_uv_at_1m = config["r_uv_at_1m"].as<double>();
-        r_uv_min = config["r_uv_min"].as<double>();
+        r_u = config["r_u"].as<double>();
+        r_v = config["r_v"].as<double>();
         enable_lights_measure = config["enable_lights_measure"].as<bool>();
         light_match_length_ratio_gate = config["light_match_length_ratio_gate"].as<double>();
         light_match_angle_gate = config["light_match_angle_gate"].as<double>();
@@ -108,6 +109,11 @@ public:
         const ISO3& camera_cv_in_odom,
         const CameraInfo& camera_info,
         const cv::Size& image_size
+    ) const noexcept;
+    [[nodiscard]] std::vector<cv::Point2f> expanded_pts(
+        const TimePoint& timestamp,
+        const ISO3& camera_cv_in_odom,
+        const CameraInfo& camera_info
     ) const noexcept;
     [[nodiscard]] Eigen::
         Matrix<double, armor_point_motion_model::X_N, armor_point_motion_model::X_N>
@@ -197,7 +203,7 @@ public:
         return check() && cfg.enable_lights_measure;
     }
     [[nodiscard]] inline int armor_num() const noexcept {
-        return uvmeasure_ctx.armor_num;
+        return armor_num_by_armor_class(target_number);
     }
     void write_log();
 

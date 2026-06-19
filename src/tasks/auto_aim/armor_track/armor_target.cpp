@@ -26,6 +26,30 @@
 namespace awakening::auto_aim {
 using namespace armor_point_motion_model;
 
+namespace {
+    void fill_uv_measurement(
+        Eigen::Matrix<double, UVZ_N, 1>& z,
+        const cv::Point2f& top,
+        const cv::Point2f& bottom,
+        const CameraInfo& camera_info
+    ) noexcept {
+        const cv::Point2f normalized_top = utils::undistort_point(
+            camera_info.camera_matrix,
+            camera_info.distortion_coefficients,
+            top
+        );
+        const cv::Point2f normalized_bottom = utils::undistort_point(
+            camera_info.camera_matrix,
+            camera_info.distortion_coefficients,
+            bottom
+        );
+        z[idx::TOP_X] = normalized_top.x;
+        z[idx::TOP_Y] = normalized_top.y;
+        z[idx::BOTTOM_X] = normalized_bottom.x;
+        z[idx::BOTTOM_Y] = normalized_bottom.y;
+    }
+} // namespace
+
 void ArmorTarget::write_log() {
     Web::write_log("armor_target", [&](auto& j) {
         j["timestamp"] =
@@ -58,25 +82,28 @@ void ArmorTarget::reset(
     const ISO3& camera_cv_in_odom
 ) {
     cfg = c;
+    target_number = a.number;
     uvmeasure_ctx = {
-        .armor_num = armor_num_by_armor_class(a.number),
+        .armor_num = armor_num_by_armor_class(target_number),
         .id = 0,
         .camera_cv_in_odom = camera_cv_in_odom,
         .camera_info = camera_info.clone(),
-        .armor_number = a.number,
+        .armor_number = target_number,
     };
-
-    ypdmeasure_ctx = { .armor_num = armor_num_by_armor_class(a.number),
+    ypdmeasure_ctx = { .armor_num = armor_num_by_armor_class(target_number),
                        .id = 0,
-                       .armor_number = a.number };
+                       .armor_number = target_number };
 
-    target_number = a.number;
     double r_pre;
     Eigen::DiagonalMatrix<double, X_N> p0;
     p0.diagonal().setZero();
     p0.diagonal()[idx::CX] = p0.diagonal()[idx::CY] = p0.diagonal()[idx::CZ] = 1;
     p0.diagonal()[idx::VCX] = p0.diagonal()[idx::VCY] = p0.diagonal()[idx::VCZ] = 64;
     p0.diagonal()[idx::C_ROT_Z] = p0.diagonal()[idx::C_ROT_Y] = p0.diagonal()[idx::C_ROT_X] = 0.4;
+    p0.diagonal()[idx::L] = p0.diagonal()[idx::R] = 1;
+    if (target_number == ArmorClass::OUTPOST) {
+        p0.diagonal()[idx::OUTPOST01DZ] = p0.diagonal()[idx::OUTPOST02DZ] = 1;
+    }
     p0.diagonal()[idx::VYAW] = 100;
     if (a.number == ArmorClass::OUTPOST) {
         r_pre = 0.2765;
@@ -264,13 +291,10 @@ void ArmorTarget::armor_pnp(
 Eigen::Matrix<double, UVZ_N, UVZ_N>
 ArmorTarget::uvmeasurement_covariance(const Eigen::Matrix<double, UVZ_N, 1>& z) const noexcept {
     Eigen::Matrix<double, UVZ_N, UVZ_N> r;
-    double u_r = std::max(
-        cfg.r_uv_at_1m * log((1.0 / target_state.pos().norm()) + 1),
-        cfg.r_uv_min
-    ); //比较简陋的逻辑或许应该和预测灯条长度存在比例
     r.setZero();
-    r.diagonal().setConstant(u_r);
-    return r;
+    r(idx::TOP_X, idx::TOP_X) = r(idx::BOTTOM_X, idx::BOTTOM_X) = cfg.r_u;
+    r(idx::TOP_Y, idx::TOP_Y) = r(idx::BOTTOM_Y, idx::BOTTOM_Y) = cfg.r_v;
+    return r;   
 }
 
 [[nodiscard]] Eigen::
@@ -309,17 +333,12 @@ Eigen::Matrix<double, X_N, X_N> ArmorTarget::process_noise(double dt) const noex
     Eigen::Matrix<double, X_N, X_N> q;
     Vec3 q_xyz;
     double q_yaw;
-    double q_l, q_h;
     if (target_number == ArmorClass::OUTPOST) {
         q_xyz = cfg.qxyz_output; // 前哨站加速度方差
         q_yaw = cfg.qyaw_output; // 前哨站角加速度方差
-        q_l = cfg.q_outpost_dz;
-        q_h = cfg.q_outpost_dz;
     } else {
         q_xyz = cfg.qxyz_common; // 加速度方差
         q_yaw = cfg.qyaw_common; // 角加速度方差
-        q_l = cfg.q_l;
-        q_h = cfg.q_h;
     }
 
     q.setZero();
@@ -347,8 +366,13 @@ Eigen::Matrix<double, X_N, X_N> ArmorTarget::process_noise(double dt) const noex
     utils::fill_constant_accel_noise(q, idx::C_ROT_Z, idx::VYAW, q_yaw, dt);
 
     q(idx::R, idx::R) = dt * cfg.q_r;
-    q(idx::L, idx::L) = dt * q_l;
-    q(idx::H, idx::H) = dt * q_h;
+    if (target_number == ArmorClass::OUTPOST) {
+        q(idx::OUTPOST01DZ, idx::OUTPOST01DZ) = dt * cfg.q_outpost_dz;
+        q(idx::OUTPOST02DZ, idx::OUTPOST02DZ) = dt * cfg.q_outpost_dz;
+    } else {
+        q(idx::L, idx::L) = dt * cfg.q_l;
+        q(idx::H, idx::H) = dt * cfg.q_h;
+    }
     q(idx::C_ROT_Y, idx::C_ROT_Y) = dt * cfg.q_wpr;
     q(idx::C_ROT_X, idx::C_ROT_X) = dt * cfg.q_wpr;
     return q;
@@ -377,6 +401,8 @@ int ArmorTarget::update(
         return 0;
     }
 
+    uvmeasure_ctx.camera_cv_in_odom = camera_cv_in_odom;
+
     std::vector<std::shared_ptr<RobotStateESEKF::ObsBase>> obs;
 
     const auto u_r = [&](const Eigen::Matrix<double, UVZ_N, 1>& z) {
@@ -390,19 +416,23 @@ int ArmorTarget::update(
         auto ctx = uvmeasure_ctx;
         ctx.id = id;
         ctx.is_left = is_left;
-        ctx.camera_cv_in_odom = camera_cv_in_odom;
+        ctx.normalized = true;
         Eigen::Matrix<double, UVZ_N, 1> z;
         auto key_points = armor.key_points.landmarks();
         if (is_left) {
-            z[idx::TOP_X] = key_points[ArmorKeyPointsIndex::LEFT_TOP].x;
-            z[idx::TOP_Y] = key_points[ArmorKeyPointsIndex::LEFT_TOP].y;
-            z[idx::BOTTOM_X] = key_points[ArmorKeyPointsIndex::LEFT_BOTTOM].x;
-            z[idx::BOTTOM_Y] = key_points[ArmorKeyPointsIndex::LEFT_BOTTOM].y;
+            fill_uv_measurement(
+                z,
+                key_points[ArmorKeyPointsIndex::LEFT_TOP],
+                key_points[ArmorKeyPointsIndex::LEFT_BOTTOM],
+                camera_info
+            );
         } else {
-            z[idx::BOTTOM_X] = key_points[ArmorKeyPointsIndex::RIGHT_BOTTOM].x;
-            z[idx::BOTTOM_Y] = key_points[ArmorKeyPointsIndex::RIGHT_BOTTOM].y;
-            z[idx::TOP_X] = key_points[ArmorKeyPointsIndex::RIGHT_TOP].x;
-            z[idx::TOP_Y] = key_points[ArmorKeyPointsIndex::RIGHT_TOP].y;
+            fill_uv_measurement(
+                z,
+                key_points[ArmorKeyPointsIndex::RIGHT_TOP],
+                key_points[ArmorKeyPointsIndex::RIGHT_BOTTOM],
+                camera_info
+            );
         }
         UVMeasure measure { .ctx = ctx };
         obs.push_back(esekf.value().make_obs(z, measure, u_r, cal_residual));
@@ -465,13 +495,10 @@ int ArmorTarget::update(
         auto ctx = uvmeasure_ctx;
         ctx.id = id;
         ctx.is_left = is_left;
-        ctx.camera_cv_in_odom = camera_cv_in_odom;
+        ctx.normalized = true;
         UVMeasure measure { .ctx = ctx };
         Eigen::Matrix<double, UVZ_N, 1> z;
-        z[std::to_underlying(idx::TOP_X)] = light.top.x;
-        z[std::to_underlying(idx::TOP_Y)] = light.top.y;
-        z[std::to_underlying(idx::BOTTOM_X)] = light.bottom.x;
-        z[std::to_underlying(idx::BOTTOM_Y)] = light.bottom.y;
+        fill_uv_measurement(z, light.top, light.bottom, camera_info);
         obs.push_back(esekf.value().make_obs(z, measure, u_r, cal_residual));
     }
     if (obs.size() > 0) {
@@ -673,11 +700,8 @@ std::vector<std::tuple<int, bool, Light>> ArmorTarget::match_light(
     }
 
     cv::Rect rect = expanded(timestamp, camera_cv_in_odom, camera_info, image_size);
-    constexpr double expansion_ratio = 0.2;
-    rect.x -= rect.width * expansion_ratio;
-    rect.y -= rect.height * expansion_ratio;
-    rect.width *= (1.0 + 2.0 * expansion_ratio);
-    rect.height *= (1.0 + 2.0 * expansion_ratio);
+    constexpr double expand_ratio = 1.6;
+    rect = utils::expand_and_clip_rect(rect, expand_ratio, image_size);
     const cv::Rect img_rect = cv::Rect(0, 0, image_size.width, image_size.height);
 
     if ((rect & img_rect).area() <= 0) {
@@ -751,5 +775,39 @@ std::vector<std::tuple<int, bool, Light>> ArmorTarget::match_light(
         return img_rect;
     }
     return rect;
+}
+[[nodiscard]] std::vector<cv::Point2f> ArmorTarget::expanded_pts(
+    const TimePoint& timestamp,
+    const ISO3& camera_cv_in_odom,
+    const CameraInfo& camera_info
+) const noexcept {
+    std::vector<cv::Point2f> pts;
+    auto tmp_target_state = target_state;
+    tmp_target_state.predict(timestamp, target_number);
+    const int armors_num = armor_num();
+    for (int id = 0; id < armors_num; ++id) {
+        UVMeasure::Ctx tmp_ctx {
+            .armor_num = armors_num,
+            .id = id,
+            .camera_cv_in_odom = camera_cv_in_odom,
+            .camera_info = camera_info,
+            .armor_number = target_number,
+        };
+        UVMeasure measure { .ctx = tmp_ctx };
+        UVVecZ z_pred;
+        {
+            measure.ctx.is_left = true;
+            measure.h(tmp_target_state.x, z_pred);
+            pts.push_back(cv::Point2f(z_pred[idx::TOP_X], z_pred[idx::TOP_Y]));
+            pts.push_back(cv::Point2f(z_pred[idx::BOTTOM_X], z_pred[idx::BOTTOM_Y]));
+        }
+        {
+            measure.ctx.is_left = false;
+            measure.h(tmp_target_state.x, z_pred);
+            pts.push_back(cv::Point2f(z_pred[idx::TOP_X], z_pred[idx::TOP_Y]));
+            pts.push_back(cv::Point2f(z_pred[idx::BOTTOM_X], z_pred[idx::BOTTOM_Y]));
+        }
+    }
+    return pts;
 }
 } // namespace awakening::auto_aim

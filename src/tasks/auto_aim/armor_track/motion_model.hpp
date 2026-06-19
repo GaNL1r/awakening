@@ -212,12 +212,13 @@ _armor_pose(const T x[X_N], int id, int armor_num, ArmorClass armor_number) {
 }
 struct UVMeasure {
     struct Ctx {
-        int armor_num { 4 };
-        int id { 0 };
+        int armor_num;
+        int id;
         ISO3 camera_cv_in_odom = ISO3::Identity();
         CameraInfo camera_info;
         auto_aim::ArmorClass armor_number = auto_aim::ArmorClass::UNKNOWN;
         bool is_left;
+        bool normalized = false;
     } ctx;
 
     template<typename T>
@@ -232,19 +233,28 @@ struct UVMeasure {
         std::vector<cv::Point3f> object_points =
             getArmorLightKeyPoints3D<cv::Point3f>(ctx.armor_number, ctx.is_left);
 
-        std::vector<Eigen::Matrix<T, 2, 1>> img_pts_jet;
-        utils::project_points_jets(
-            object_points,
-            pose_in_camera_cv,
-            ctx.camera_info.camera_matrix,
-            ctx.camera_info.distortion_coefficients,
-            img_pts_jet
-        );
+        std::vector<Eigen::Matrix<T, 2, 1>> pts_jet;
+        if (ctx.normalized) {
+            utils::project_points_jets_normalized(
+                object_points,
+                pose_in_camera_cv,
+                ctx.camera_info.distortion_coefficients,
+                pts_jet
+            );
+        } else {
+            utils::project_points_jets(
+                object_points,
+                pose_in_camera_cv,
+                ctx.camera_info.camera_matrix,
+                ctx.camera_info.distortion_coefficients,
+                pts_jet
+            );
+        }
 
-        z[idx::TOP_X] = img_pts_jet[0].x();
-        z[idx::TOP_Y] = img_pts_jet[0].y();
-        z[idx::BOTTOM_X] = img_pts_jet[1].x();
-        z[idx::BOTTOM_Y] = img_pts_jet[1].y();
+        z[idx::TOP_X] = pts_jet[0].x();
+        z[idx::TOP_Y] = pts_jet[0].y();
+        z[idx::BOTTOM_X] = pts_jet[1].x();
+        z[idx::BOTTOM_Y] = pts_jet[1].y();
     }
 
     inline void h(const VecX& x, UVVecZ& z) const {
@@ -253,8 +263,8 @@ struct UVMeasure {
 };
 struct YPDMeasure {
     struct Ctx {
-        int armor_num { 4 };
-        int id { 0 };
+        int armor_num;
+        int id;
         auto_aim::ArmorClass armor_number = auto_aim::ArmorClass::UNKNOWN;
     } ctx;
 

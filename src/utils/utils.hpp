@@ -303,15 +303,25 @@ inline std::vector<cv::Point2f> reprojection(
     cv::projectPoints(object_points, rvec, tvec, camera_matrix, dist_coeffs, pts_2d);
     return pts_2d;
 }
-template<class ImgPoints>
-inline std::vector<cv::Point2f> undistort_points(
+template<typename ImgPoints>
+inline ImgPoints undistort_points(
     const cv::Mat& camera_matrix,
     const cv::Mat& dist_coeffs,
     const ImgPoints& img_points
 ) {
-    std::vector<cv::Point2f> norm_pts;
+    ImgPoints norm_pts;
     cv::undistortPoints(img_points, norm_pts, camera_matrix, dist_coeffs);
     return norm_pts;
+}
+template<typename ImgPoint>
+inline ImgPoint undistort_point(
+    const cv::Mat& camera_matrix,
+    const cv::Mat& dist_coeffs,
+    const ImgPoint& img_point
+) {
+    std::vector<ImgPoint> norm_pts;
+    cv::undistortPoints(std::vector<ImgPoint>{ img_point }, norm_pts, camera_matrix, dist_coeffs);
+    return norm_pts.front();
 }
 template<typename T>
 inline void project_points_jets(
@@ -573,5 +583,16 @@ golden_section_search(Func&& f, T left, T right, T eps = static_cast<T>(1e-4)) {
 
     return (f1 < f2) ? x1 : x2;
 }
-
+template<typename RectType>
+inline RectType
+expand_and_clip_rect(const RectType& rect, double expand_ratio, const cv::Size& img_size) {
+    RectType r = rect;
+    r.x -= (r.width * (expand_ratio - 1.0) * 0.5);
+    r.y -= (r.height * (expand_ratio - 1.0) * 0.5);
+    r.width = (r.width * expand_ratio);
+    r.height = (r.height * expand_ratio);
+    RectType img_rect(0, 0, img_size.width, img_size.height);
+    r = r & img_rect;
+    return r;
+}
 } // namespace awakening::utils
