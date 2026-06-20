@@ -17,12 +17,14 @@ namespace awakening::auto_aim::armor_point_motion_model {
 
 namespace idx {
     enum { CX, VCX, CY, VCY, CZ, VCZ, C_ROT_Z, VYAW, R, P1, P2, C_ROT_Y, C_ROT_X, X_N };
+    // enum { CX, VCX, CY, VCY, CZ, VCZ, YAW, VYAW, R, P1, P2, ROLL, PITCH, X_N };
     constexpr int L = P1;
     constexpr int H = P2;
     constexpr int OUTPOST01DZ = P1;
     constexpr int OUTPOST02DZ = P2;
     enum { TOP_X, TOP_Y, BOTTOM_X, BOTTOM_Y, _UVZ_N };
-    enum { YPD_Y, YPD_P, YPD_D, A_ROT_X, A_ROT_Y, A_ROT_Z, _YPD_Z_N };
+    // enum { YPD_Y, YPD_P, YPD_D, A_ROT_X, A_ROT_Y, A_ROT_Z, _YPD_Z_N };
+    enum { YPD_Y, YPD_P, YPD_D, A_ROT_YAW, _YPD_Z_N };
 } // namespace idx
 constexpr int X_N = idx::X_N;
 constexpr int UVZ_N = idx::_UVZ_N;
@@ -40,16 +42,22 @@ inline T normalize_angle(T a) {
 
 template<typename T>
 inline Eigen::Matrix<T, 3, 3> _car_rotation(const T x[X_N], ArmorClass armor_number) {
-    const bool building =
+    bool building =
         (armor_number == auto_aim::ArmorClass::OUTPOST || armor_number == auto_aim::ArmorClass::BASE
         );
+    // building = true;
     if (building) {
         Eigen::Matrix<T, 3, 1> yaw_rotvec;
         yaw_rotvec << T(0), T(0), x[idx::C_ROT_Z];
         return utils::so3_exp(yaw_rotvec);
+        // return utils::rpy2matrix<T>(Eigen::Matrix<T, 3, 1>(T(0), T(0), x[idx::YAW]), utils::RPYOrder::XYZ);
     }
     return utils::so3_exp(Eigen::Matrix<T, 3, 1>(x[idx::C_ROT_X], x[idx::C_ROT_Y], x[idx::C_ROT_Z])
     );
+    // return utils::rpy2matrix<T>(
+    //     Eigen::Matrix<T, 3, 1>(x[idx::ROLL], x[idx::PITCH], x[idx::YAW]),
+    //     utils::RPYOrder::XYZ
+    // );
 }
 
 struct Predict {
@@ -78,6 +86,7 @@ struct Predict {
             x1[idx::C_ROT_X] = rot_vec.x();
             x1[idx::C_ROT_Y] = rot_vec.y();
             x1[idx::C_ROT_Z] = rot_vec.z();
+            // x1[idx::YAW] += x0[idx::VYAW] * T(dt);
         }
 
         clamp(x1);
@@ -101,11 +110,6 @@ struct Predict {
         } else {
             r = T(OUTPOST_R);
             // constrain_outpost_dz(x);
-        }
-        if (armor_number == auto_aim::ArmorClass::BASE
-            || armor_number == auto_aim::ArmorClass::OUTPOST) {
-            x[idx::C_ROT_Y] = T(0.0);
-            x[idx::C_ROT_X] = T(0.0);
         }
 
         if (ceres::abs(vyaw) > T(20.0)) {
@@ -274,16 +278,18 @@ struct YPDMeasure {
         T ax = pose_in_odom.translation().x();
         T ay = pose_in_odom.translation().y();
         T az = pose_in_odom.translation().z();
-        auto rot_vec = utils::so3_log<T>(pose_in_odom.linear());
+        // auto rot_vec = utils::so3_log<T>(pose_in_odom.linear());
+        auto rpy = utils::matrix2rpy<T>(pose_in_odom.linear().eval());
         T xy_dist = ceres::sqrt(ax * ax + ay * ay);
         T dist = ceres::sqrt(xy_dist * xy_dist + az * az);
         // Observation model
         z[idx::YPD_Y] = ceres::atan2(ay, ax); // yaw
         z[idx::YPD_P] = ceres::atan2(az, xy_dist); // pitch
         z[idx::YPD_D] = dist; // distance
-        z[idx::A_ROT_X] = rot_vec.x();
-        z[idx::A_ROT_Y] = rot_vec.y();
-        z[idx::A_ROT_Z] = rot_vec.z();
+        z[idx::A_ROT_YAW] = rpy[2];
+        // z[idx::A_ROT_X] = rot_vec.x();
+        // z[idx::A_ROT_Y] = rot_vec.y();
+        // z[idx::A_ROT_Z] = rot_vec.z();
     }
 
     inline void h(const VecX& x, YPDVecZ& z) const {
@@ -346,6 +352,7 @@ struct State {
                                              x[idx::C_ROT_Z]
                                          )))
             .z();
+        // return x[idx::YAW];
     }
     inline double vyaw() const noexcept {
         return x[idx::VYAW];
@@ -373,6 +380,7 @@ struct State {
                                              x[idx::C_ROT_Z]
                                          )))
             .y();
+        // return x[idx::PITCH];
     }
     inline double w_r() const noexcept {
         return utils::matrix2rpy<double>(utils::so3_exp(Eigen::Matrix<double, 3, 1>(
@@ -381,6 +389,7 @@ struct State {
                                              x[idx::C_ROT_Z]
                                          )))
             .x();
+        // return x[idx::ROLL];
     }
 };
 

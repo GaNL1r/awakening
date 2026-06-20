@@ -27,21 +27,6 @@ namespace awakening::auto_aim {
 using namespace armor_point_motion_model;
 
 namespace {
-    double camera_fx(const CameraInfo& camera_info) noexcept {
-        return camera_info.camera_matrix.at<double>(0, 0);
-    }
-
-    double camera_fy(const CameraInfo& camera_info) noexcept {
-        return camera_info.camera_matrix.at<double>(1, 1);
-    }
-
-    double camera_cx(const CameraInfo& camera_info) noexcept {
-        return camera_info.camera_matrix.at<double>(0, 2);
-    }
-
-    double camera_cy(const CameraInfo& camera_info) noexcept {
-        return camera_info.camera_matrix.at<double>(1, 2);
-    }
 
     void fill_uv_measurement(
         Eigen::Matrix<double, UVZ_N, 1>& z,
@@ -49,20 +34,33 @@ namespace {
         const cv::Point2f& bottom,
         const CameraInfo& camera_info
     ) noexcept {
-        const cv::Point2f normalized_top = utils::undistort_point(
-            camera_info.camera_matrix,
-            camera_info.distortion_coefficients,
-            top
-        );
-        const cv::Point2f normalized_bottom = utils::undistort_point(
-            camera_info.camera_matrix,
-            camera_info.distortion_coefficients,
-            bottom
-        );
-        z[idx::TOP_X] = normalized_top.x;
-        z[idx::TOP_Y] = normalized_top.y;
-        z[idx::BOTTOM_X] = normalized_bottom.x;
-        z[idx::BOTTOM_Y] = normalized_bottom.y;
+        // const cv::Point2f normalized_top = utils::undistort_point(
+        //     camera_info.camera_matrix,
+        //     camera_info.distortion_coefficients,
+        //     top
+        // );
+        // const cv::Point2f normalized_bottom = utils::undistort_point(
+        //     camera_info.camera_matrix,
+        //     camera_info.distortion_coefficients,
+        //     bottom
+        // );
+        // z[idx::TOP_X] = top.x;
+        // z[idx::TOP_Y] = top.y;
+        // z[idx::BOTTOM_X] = bottom.x;
+        // z[idx::BOTTOM_Y] = bottom.y;
+        static thread_local std::mt19937 rng(std::random_device{}());
+        static thread_local std::uniform_real_distribution<double> mag_dist(1.0, 10.0);
+        static thread_local std::bernoulli_distribution sign_dist(0.5);
+
+        auto rand_noise = [&]() {
+            double n = mag_dist(rng);
+            return sign_dist(rng) ? n : -n;
+        };
+
+        z[idx::TOP_X] = top.x + rand_noise();
+        z[idx::TOP_Y] = top.y + rand_noise();
+        z[idx::BOTTOM_X] = bottom.x + rand_noise();
+        z[idx::BOTTOM_Y] = bottom.y + rand_noise();
     }
 } // namespace
 
@@ -116,6 +114,7 @@ void ArmorTarget::reset(
     p0.diagonal()[idx::CX] = p0.diagonal()[idx::CY] = p0.diagonal()[idx::CZ] = 1;
     p0.diagonal()[idx::VCX] = p0.diagonal()[idx::VCY] = p0.diagonal()[idx::VCZ] = 64;
     p0.diagonal()[idx::C_ROT_Z] = p0.diagonal()[idx::C_ROT_Y] = p0.diagonal()[idx::C_ROT_X] = 0.4;
+    // p0.diagonal()[idx::YAW] = p0.diagonal()[idx::PITCH] = p0.diagonal()[idx::ROLL] = 0.4;
     p0.diagonal()[idx::L] = p0.diagonal()[idx::R] = 1;
     if (target_number == ArmorClass::OUTPOST) {
         p0.diagonal()[idx::OUTPOST01DZ] = p0.diagonal()[idx::OUTPOST02DZ] = 1;
@@ -155,12 +154,17 @@ void ArmorTarget::reset(
             nominal[idx::C_ROT_X] = injected_rot.x();
             nominal[idx::C_ROT_Y] = injected_rot.y();
             nominal[idx::C_ROT_Z] = injected_rot.z();
+            // for (int i = 0; i < X_N; i++) {
+            //     if (i == idx::YAW)
+            //         continue;
+            //     nominal[i] += delta[i];
+            // }
+            // nominal[idx::YAW] = angles::normalize_angle(nominal[idx::YAW] + delta[idx::YAW]);
         };
     const auto box_minus = [](const Eigen::Matrix<double, X_N, 1>& nominal,
                               const Eigen::Matrix<double, X_N, 1>& value,
                               Eigen::Matrix<double, X_N, 1>& delta) {
         delta = value - nominal;
-
         ISO3 nominal_pose = ISO3::Identity();
         nominal_pose.translation() = Vec3(nominal[idx::CX], nominal[idx::CY], nominal[idx::CZ]);
         nominal_pose.linear() =
@@ -181,6 +185,8 @@ void ArmorTarget::reset(
         delta[idx::C_ROT_X] = delta_rot.x();
         delta[idx::C_ROT_Y] = delta_rot.y();
         delta[idx::C_ROT_Z] = delta_rot.z();
+        // delta = value - nominal;
+        // delta[idx::YAW] = angles::normalize_angle(delta[idx::YAW]);
     };
     esekf = RobotStateESEKF(
         Predict { .dt = 0.005, .armor_number = target_number },
@@ -212,6 +218,9 @@ void ArmorTarget::reset(
     target_state.x[idx::C_ROT_Z] = car_rot.z();
     target_state.x[idx::C_ROT_Y] = car_rot.y();
     target_state.x[idx::C_ROT_X] = car_rot.x();
+    // target_state.x[idx::YAW] = yaw;
+    // target_state.x[idx::PITCH] = rpy[1];
+    // target_state.x[idx::ROLL] = rpy[0];
     target_state.timestamp = timestamp;
     target_state.frame_id = frame_id;
     esekf.value().set_state(target_state.x);
@@ -306,19 +315,24 @@ void ArmorTarget::armor_pnp(
 Eigen::Matrix<double, UVZ_N, UVZ_N>
 ArmorTarget::uvmeasurement_covariance(const Eigen::Matrix<double, UVZ_N, 1>& z) const noexcept {
     Eigen::Matrix<double, UVZ_N, UVZ_N> r;
-    const double fx = camera_fx(uvmeasure_ctx.camera_info);
-    const double fy = camera_fy(uvmeasure_ctx.camera_info);
+    const double fx = uvmeasure_ctx.camera_info.camera_fx();
+    const double fy = uvmeasure_ctx.camera_info.camera_fy();
 
     const double du_px = (z[idx::TOP_X] - z[idx::BOTTOM_X]) * fx;
     const double dv_px = (z[idx::TOP_Y] - z[idx::BOTTOM_Y]) * fy;
     const double length_px = std::hypot(du_px, dv_px);
-    const double sigma_px = std::max(length_px * cfg.r_pix_err_ratio, cfg.r_pix_err_min);
+    // const double sigma_px = std::max(length_px * 0.2, cfg.r_pix_err_min);
+    const double length_ref = cfg.r_pix_err_ref_len;
+    const double sigma_px =
+        cfg.r_pix_err_min + cfg.r_pix_err_log_gain * std::log1p(length_px / length_ref);
+    // r.setZero();
+    // r(idx::TOP_X, idx::TOP_X) = r(idx::BOTTOM_X, idx::BOTTOM_X) = std::pow(sigma_px / fx, 2);
 
+    // r(idx::TOP_Y, idx::TOP_Y) = r(idx::BOTTOM_Y, idx::BOTTOM_Y) = std::pow(sigma_px / fy, 2);
     r.setZero();
-    r(idx::TOP_X, idx::TOP_X) = r(idx::BOTTOM_X, idx::BOTTOM_X) = std::pow(sigma_px / fx, 2);
+    r(idx::TOP_X, idx::TOP_X) = r(idx::BOTTOM_X, idx::BOTTOM_X) = 70.0;
 
-    r(idx::TOP_Y, idx::TOP_Y) = r(idx::BOTTOM_Y, idx::BOTTOM_Y) = std::pow(sigma_px / fy, 2);
-
+    r(idx::TOP_Y, idx::TOP_Y) = r(idx::BOTTOM_Y, idx::BOTTOM_Y) = 70.0;
     return r;
 }
 
@@ -331,10 +345,13 @@ ArmorTarget::uvmeasurement_covariance(const Eigen::Matrix<double, UVZ_N, 1>& z) 
     r.setZero(); //copy下sp_vision_25 这个参数不用在观测，差不多就行
     r(idx::YPD_Y, idx::YPD_Y) = 4e-3;
     r(idx::YPD_P, idx::YPD_P) = 4e-3;
-    r(idx::YPD_D, idx::YPD_D) = std::log(z[idx::YPD_D] * z[idx::YPD_D] * 0.1 + 1) + 0.01;
-    r(idx::A_ROT_X, idx::A_ROT_X) = 0.1;
-    r(idx::A_ROT_Y, idx::A_ROT_Y) = 0.1;
-    r(idx::A_ROT_Z, idx::A_ROT_Z) = 0.03;
+    auto delta_angle = angles::normalize_angle(z[idx::A_ROT_YAW] - z[idx::YPD_Y]);
+    r(idx::YPD_D, idx::YPD_D) = log(std::abs(delta_angle) + 1) + 1;
+    r(idx::A_ROT_YAW, idx::A_ROT_YAW) = log(std::abs(z[idx::YPD_D]) + 1) / 200 + 9e-2;
+    // r(idx::YPD_D, idx::YPD_D) = std::log(z[idx::YPD_D] * z[idx::YPD_D] * 0.1 + 1) + 0.01;
+    // r(idx::A_ROT_X, idx::A_ROT_X) = 0.1;
+    // r(idx::A_ROT_Y, idx::A_ROT_Y) = 0.1;
+    // r(idx::A_ROT_Z, idx::A_ROT_Z) = 0.1;
     return r;
 }
 [[nodiscard]] Eigen::Matrix<double, armor_point_motion_model::YPDZ_N, 1>
@@ -348,10 +365,12 @@ ArmorTarget::get_ypdmeasurement(Armor& a) const noexcept {
     z[idx::YPD_Y] = ypd_y;
     z[idx::YPD_P] = ypd_p;
     z[idx::YPD_D] = ypd_d;
-    auto rot_vec = utils::so3_log(a.pose.linear().eval());
-    z[idx::A_ROT_X] = rot_vec.x();
-    z[idx::A_ROT_Y] = rot_vec.y();
-    z[idx::A_ROT_Z] = rot_vec.z();
+    // auto rot_vec = utils::so3_log(a.pose.linear().eval());
+    // z[idx::A_ROT_X] = rot_vec.x();
+    // z[idx::A_ROT_Y] = rot_vec.y();
+    // z[idx::A_ROT_Z] = rot_vec.z();
+    auto rpy = utils::matrix2rpy(a.pose.linear().eval());
+    z[idx::A_ROT_YAW] = rpy[2];
     return z;
 }
 Eigen::Matrix<double, X_N, X_N> ArmorTarget::process_noise(double dt) const noexcept {
@@ -379,27 +398,44 @@ Eigen::Matrix<double, X_N, X_N> ArmorTarget::process_noise(double dt) const noex
     const Mat3 pos_vel_noise = accel_noise_car * car_in_odom_R.transpose();
     const Mat3 vel_pos_noise = car_in_odom_R * accel_noise_car;
 
-    for (int i = 0; i < 3; ++i) {
-        for (int j = 0; j < 3; ++j) {
-            q(pos_idx[i], pos_idx[j]) = dt4 * 0.25 * accel_noise_car(i, j);
-            q(pos_idx[i], vel_idx[j]) = dt3 * 0.5 * pos_vel_noise(i, j);
-            q(vel_idx[i], pos_idx[j]) = dt3 * 0.5 * vel_pos_noise(i, j);
-            q(vel_idx[i], vel_idx[j]) = dt2 * accel_noise_odom(i, j);
-        }
-    }
-
-    utils::fill_constant_accel_noise(q, idx::C_ROT_Z, idx::VYAW, q_yaw, dt);
-
-    q(idx::R, idx::R) = dt * cfg.q_r;
+    // for (int i = 0; i < 3; ++i) {
+    //     for (int j = 0; j < 3; ++j) {
+    //         q(pos_idx[i], pos_idx[j]) = dt4 * 0.25 * accel_noise_car(i, j);
+    //         q(pos_idx[i], vel_idx[j]) = dt3 * 0.5 * pos_vel_noise(i, j);
+    //         q(vel_idx[i], pos_idx[j]) = dt3 * 0.5 * vel_pos_noise(i, j);
+    //         q(vel_idx[i], vel_idx[j]) = dt2 * accel_noise_odom(i, j);
+    //     }
+    // }
+    utils::fill_constant_accel_noise(q, idx::CX, idx::VCX, q_xyz.x(), dt);
+    utils::fill_constant_accel_noise(q, idx::CY, idx::VCY, q_xyz.y(), dt);
+    utils::fill_constant_accel_noise(q, idx::CZ, idx::VCZ, q_xyz.z(), dt);
+    q(idx::R, idx::R) = cfg.q_r;
     if (target_number == ArmorClass::OUTPOST) {
         q(idx::OUTPOST01DZ, idx::OUTPOST01DZ) = dt * cfg.q_outpost_dz;
         q(idx::OUTPOST02DZ, idx::OUTPOST02DZ) = dt * cfg.q_outpost_dz;
     } else {
-        q(idx::L, idx::L) = dt * cfg.q_l;
-        q(idx::H, idx::H) = dt * cfg.q_h;
+        q(idx::L, idx::L) = cfg.q_l;
+        q(idx::H, idx::H) = cfg.q_h;
     }
-    q(idx::C_ROT_Y, idx::C_ROT_Y) = dt * cfg.q_wpr;
-    q(idx::C_ROT_X, idx::C_ROT_X) = dt * cfg.q_wpr;
+    // constexpr std::array<int, 3> rot_idx { idx::C_ROT_X, idx::C_ROT_Y, idx::C_ROT_Z };
+    // const Vec3 yaw_axis_odom = car_in_odom_R * Vec3::UnitZ();
+    // for (int i = 0; i < 3; ++i) {
+    //     const int ri = rot_idx[i];
+    //     q(ri, idx::VYAW) += dt3 * 0.5 * q_yaw * yaw_axis_odom[i];
+    //     q(idx::VYAW, ri) += dt3 * 0.5 * q_yaw * yaw_axis_odom[i];
+    //     for (int j = 0; j < 3; ++j) {
+    //         q(ri, rot_idx[j]) += dt4 * 0.25 * q_yaw * yaw_axis_odom[i] * yaw_axis_odom[j];
+    //     }
+    // }
+    // q(idx::VYAW, idx::VYAW) += dt2 * q_yaw;
+    // q(idx::C_ROT_Y, idx::C_ROT_Y) += dt * cfg.q_wpr;
+    // q(idx::C_ROT_X, idx::C_ROT_X) += dt * cfg.q_wpr;
+    utils::fill_constant_accel_noise(q, idx::C_ROT_Z, idx::VYAW, q_yaw, dt);
+    q(idx::C_ROT_Y, idx::C_ROT_Y) = cfg.q_wpr;
+    q(idx::C_ROT_X, idx::C_ROT_X) = cfg.q_wpr;
+    // utils::fill_constant_accel_noise(q, idx::YAW, idx::VYAW, q_yaw, dt);
+    // q(idx::PITCH, idx::PITCH) = cfg.q_wpr;
+    // q(idx::ROLL, idx::ROLL) = cfg.q_wpr;
     return q;
 }
 
@@ -441,7 +477,7 @@ int ArmorTarget::update(
         auto ctx = uvmeasure_ctx;
         ctx.id = id;
         ctx.is_left = is_left;
-        ctx.normalized = true;
+        ctx.normalized = false;
         Eigen::Matrix<double, UVZ_N, 1> z;
         auto key_points = armor.key_points.landmarks();
         if (is_left) {
@@ -474,17 +510,18 @@ int ArmorTarget::update(
             Eigen::Matrix<double, YPDZ_N, 1> v = z - z_pred;
 
             v[idx::YPD_Y] = angles::normalize_angle(v[idx::YPD_Y]);
-            auto so3_residual = utils::so3_log(
-                (utils::so3_exp(Vec3(z[idx::A_ROT_X], z[idx::A_ROT_Y], z[idx::A_ROT_Z]))
-                 * utils::so3_exp(
-                       Vec3(z_pred[idx::A_ROT_X], z_pred[idx::A_ROT_Y], z_pred[idx::A_ROT_Z])
-                 )
-                       .transpose())
-                    .eval()
-            );
-            v[idx::A_ROT_X] = so3_residual.x();
-            v[idx::A_ROT_Y] = so3_residual.y();
-            v[idx::A_ROT_Z] = so3_residual.z();
+            v[idx::A_ROT_YAW] = angles::normalize_angle(v[idx::A_ROT_YAW]);
+            // auto so3_residual = utils::so3_log(
+            //     (utils::so3_exp(Vec3(z[idx::A_ROT_X], z[idx::A_ROT_Y], z[idx::A_ROT_Z]))
+            //      * utils::so3_exp(
+            //            Vec3(z_pred[idx::A_ROT_X], z_pred[idx::A_ROT_Y], z_pred[idx::A_ROT_Z])
+            //      )
+            //            .transpose())
+            //         .eval()
+            // );
+            // v[idx::A_ROT_X] = so3_residual.x();
+            // v[idx::A_ROT_Y] = so3_residual.y();
+            // v[idx::A_ROT_Z] = so3_residual.z();
             return v;
         };
         YPDMeasure measure { .ctx = ctx };
@@ -518,7 +555,7 @@ int ArmorTarget::update(
         auto ctx = uvmeasure_ctx;
         ctx.id = id;
         ctx.is_left = is_left;
-        ctx.normalized = true;
+        ctx.normalized = false;
         UVMeasure measure { .ctx = ctx };
         Eigen::Matrix<double, UVZ_N, 1> z;
         fill_uv_measurement(z, light.top, light.bottom, camera_info);
@@ -530,7 +567,7 @@ int ArmorTarget::update(
         last_update = timestamp;
         this_id = GOBAL_ID++; //全局状态标记，下游控制对同一id的不重复构建轨迹
     }
-    update_count+=obs.size();
+    update_count += obs.size();
     return obs.size();
 }
 std::vector<std::pair<int, Armor>> ArmorTarget::match_armor(
@@ -580,21 +617,22 @@ std::vector<std::pair<int, Armor>> ArmorTarget::match_armor(
 
             YPDVecZ nu = meas_list[j] - z_pred;
             nu[idx::YPD_Y] = angles::normalize_angle(nu[idx::YPD_Y]);
-            auto so3_residual = utils::so3_log(
-                (utils::so3_exp(Vec3(
-                     meas_list[j][idx::A_ROT_X],
-                     meas_list[j][idx::A_ROT_Y],
-                     meas_list[j][idx::A_ROT_Z]
-                 ))
-                 * utils::so3_exp(
-                       Vec3(z_pred[idx::A_ROT_X], z_pred[idx::A_ROT_Y], z_pred[idx::A_ROT_Z])
-                 )
-                       .transpose())
-                    .eval()
-            );
-            nu[idx::A_ROT_X] = so3_residual.x();
-            nu[idx::A_ROT_Y] = so3_residual.y();
-            nu[idx::A_ROT_Z] = so3_residual.z();
+            nu[idx::YPD_D] = angles::normalize_angle(nu[idx::YPD_D]);
+            // auto so3_residual = utils::so3_log(
+            //     (utils::so3_exp(Vec3(
+            //          meas_list[j][idx::A_ROT_X],
+            //          meas_list[j][idx::A_ROT_Y],
+            //          meas_list[j][idx::A_ROT_Z]
+            //      ))
+            //      * utils::so3_exp(
+            //            Vec3(z_pred[idx::A_ROT_X], z_pred[idx::A_ROT_Y], z_pred[idx::A_ROT_Z])
+            //      )
+            //            .transpose())
+            //         .eval()
+            // );
+            // nu[idx::A_ROT_X] = so3_residual.x();
+            // nu[idx::A_ROT_Y] = so3_residual.y();
+            // nu[idx::A_ROT_Z] = so3_residual.z();
 
             auto R = ypdmeasurement_covariance(z_pred);
             double d2 = nu.transpose() * R.ldlt().solve(nu);

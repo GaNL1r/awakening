@@ -17,6 +17,7 @@ option(BUILD_SENTRY "Enable Sentry"   ON)
 option(BUILD_RADAR "Enable Radar"   ON)
 option(BUILD_RUNTIME_TESTS "Build runtime test executables by default" ON)
 option(BUILD_WITH_PCH "Enable precompiled headers for C++ targets" ON)
+option(BUILD_WITH_Daedalus "Enable Daedalus interface" ON)
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} ${PROJECT_SOURCE_DIR}/cmake)
 
 set(AWAKENING_PCH_HEADER ${PROJECT_SOURCE_DIR}/src/pch.hpp)
@@ -43,7 +44,9 @@ find_package(spdlog REQUIRED)
 
 set(BUILD_DEFINITIONS "")
 set(BUILD_LIBS "")
-
+if(BUILD_WITH_Daedalus)
+    list(APPEND BUILD_DEFINITIONS USE_Daedalus)
+endif()
 
 if(BUILD_WITH_OPENVINO)
     find_package(OpenVINO REQUIRED COMPONENTS Runtime ONNX)

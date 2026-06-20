@@ -185,12 +185,7 @@ bool RuneTarget::reset(
     const auto box_minus = [](const Eigen::Matrix<double, X_N, 1>& nominal,
                               const Eigen::Matrix<double, X_N, 1>& value,
                               Eigen::Matrix<double, X_N, 1>& delta) {
-        for (int i = 0; i < X_N; i++) {
-            if (i == idx::YAW || i == idx::ROLL)
-                continue;
-
-            delta[i] = value[i] - nominal[i];
-        }
+        delta = value - nominal;
 
         // angle difference must be wrapped
         delta[idx::YAW] = angles::normalize_angle(value[idx::YAW] - nominal[idx::YAW]);

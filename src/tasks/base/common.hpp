@@ -45,6 +45,22 @@ struct CameraInfo {
         camera_matrix = K.clone();
         distortion_coefficients = D.clone();
     }
+    double camera_fx() const noexcept {
+        return camera_matrix.at<double>(0, 0);
+    }
+
+    double camera_fy() const noexcept {
+        return camera_matrix.at<double>(1, 1);
+    }
+
+    double camera_cx() const noexcept {
+        return camera_matrix.at<double>(0, 2);
+    }
+
+    double camera_cy() const noexcept {
+        return camera_matrix.at<double>(1, 2);
+    }
+
     CameraInfo clone() const {
         return { .camera_matrix = this->camera_matrix.clone(),
                  .distortion_coefficients = this->distortion_coefficients.clone() };

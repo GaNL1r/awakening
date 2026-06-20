@@ -46,6 +46,25 @@ inline Eigen::Matrix<T, 3, 3> so3_exp(const Eigen::Matrix<T, 3, 1>& phi) {
 
     return R;
 }
+template<typename T>
+Eigen::Matrix<T, 3, 3> so3_right_jacobian_inv(const Eigen::Matrix<T, 3, 1>& phi) {
+    using Mat3 = Eigen::Matrix<T, 3, 3>;
+
+    const T theta = phi.norm();
+
+    Mat3 I = Mat3::Identity();
+    Mat3 W = utils::so3_hat(phi);
+
+    if (theta < T(1e-6)) {
+        return I + T(0.5) * W + T(1.0 / 12.0) * W * W;
+    }
+
+    const T half_theta = theta * T(0.5);
+
+    const T coeff = T(1) - theta * ceres::cos(half_theta) / (T(2) * ceres::sin(half_theta));
+
+    return I + T(0.5) * W + coeff / (theta * theta) * W * W;
+}
 template<class T>
 inline Eigen::Transform<T, 3, Eigen::Isometry>
 se3_exp(const Eigen::Matrix<T, 3, 1>& rho, const Eigen::Matrix<T, 3, 1>& phi) {

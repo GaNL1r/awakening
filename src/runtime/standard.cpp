@@ -32,7 +32,9 @@
     #include <rclcpp/qos.hpp>
 #endif
 #include "backward-cpp/backward.hpp"
-#include "daedalus_interface/shm_client.hpp"
+#ifdef USE_Daedalus
+    #include "daedalus_interface/shm_client.hpp"
+#endif
 #include "param_deliver.h"
 #include "runtime/config.hpp"
 #include "tasks/auto_aim/armor_control/very_aimer.hpp"
@@ -171,6 +173,8 @@ int main(int argc, char** argv) {
     rcl::RclcppNode rcl_node("awakening");
     rcl::TF rcl_tf(rcl_node);
 #endif
+    bool use_daedalus = false;
+#ifdef USE_Daedalus
     std::unique_ptr<talos::ipc::ShmClient> daedalus_shm_client;
     if (config["use_sim"].as<bool>()) {
         auto client = talos::ipc::ShmClient::connect();
@@ -178,11 +182,13 @@ int main(int argc, char** argv) {
             AWAKENING_ERROR("Failed to connect to talos::ipc::ShmClient");
             return 1;
         } else {
+            use_daedalus = true;
             daedalus_shm_client = std::make_unique<talos::ipc::ShmClient>(std::move(*client));
         }
     }
+#endif
     std::unique_ptr<SerialDriver> serial;
-    if (!daedalus_shm_client && config["serial"]["enable"].as<bool>()) {
+    if (!use_daedalus && config["serial"]["enable"].as<bool>()) {
         serial = std::make_unique<SerialDriver>(config["serial"], s);
     }
 
@@ -193,7 +199,7 @@ int main(int argc, char** argv) {
             camera->stop();
         }
     });
-    if (!daedalus_shm_client) {
+    if (!use_daedalus) {
         camera = std::make_unique<HikCamera>(camera_config["hik_camera"], s);
         camera->init();
         if (!camera->running_) {
@@ -258,6 +264,7 @@ int main(int argc, char** argv) {
         );
     }
     auto serial_send_to_image_microseconds = config["serial_send_to_image_microseconds"].as<int>();
+#ifdef USE_Daedalus
     if (daedalus_shm_client) {
         auto daedalus_imgs = s.register_source<CameraIO>("daedalus_img");
 
@@ -319,7 +326,7 @@ int main(int argc, char** argv) {
             );
         });
     }
-
+#endif
     if (video_saver) {
         s.register_task<CameraIO>("save_video", [&](CameraIO::second_type&& f) {
             if (!f.src_img.empty()) {
@@ -369,7 +376,7 @@ int main(int argc, char** argv) {
                     angles::from_degrees(robo.roll),
                     angles::from_degrees(robo.pitch),
                     angles::from_degrees(robo.yaw)
-                ));
+                ),utils::RPYOrder::XYZ);
                 tf->push(
                     SimpleFrame::GIMBAL_ODOM,
                     SimpleFrame::GIMBAL,
@@ -380,12 +387,12 @@ int main(int argc, char** argv) {
                                     angles::from_degrees(robo.operator_pitch_offset) };
                 auto gimbal_odom_in_odom = ISO3::Identity();
                 gimbal_odom_in_odom.translation() = Vec3(robo.v_x, robo.v_y, robo.v_z);
-                tf->push(
-                    SimpleFrame::ODOM,
-                    SimpleFrame::GIMBAL_ODOM,
-                    packet_time,
-                    gimbal_odom_in_odom
-                );
+                // tf->push(
+                //     SimpleFrame::ODOM,
+                //     SimpleFrame::GIMBAL_ODOM,
+                //     packet_time,
+                //     gimbal_odom_in_odom
+                // );
                 enemy_color = EnemyColor(robo.detect_color);
                 bullet_speed = robo.bullet_speed;
                 robo.update_log(delay);
@@ -700,6 +707,7 @@ int main(int argc, char** argv) {
             send.enable_pitch_diff = cmd.enable_pitch_diff;
             serial->write(std::move(utils::to_vector(send)));
         }
+#ifdef USE_Daedalus
         if (daedalus_shm_client) {
             auto gimbal_in_gimbal_odom =
                 tf->pose_a_in_b(SimpleFrame::GIMBAL, SimpleFrame::GIMBAL_ODOM, Clock::now());
@@ -721,6 +729,7 @@ int main(int argc, char** argv) {
             // daedalus_shm_client
             //     ->send_gimbal_cmd(cmd.yaw, -cmd.pitch, cmd.appear ? 1.0 : -1.0, false);
         }
+#endif
         auto old_in_camera_cv = tf->pose_a_in_b(
             SimpleFrame(cmd.aim_point.frame_id),
             SimpleFrame::CAMERA_CV,

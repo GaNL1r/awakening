@@ -98,8 +98,9 @@ armor_tracker:
   light_match_length_ratio_gate: 0.2
   light_match_angle_gate: 0.2
   light_match_pos_gate_by_length_ratio: 5.0
-  r_pix_err_ratio: 0.2
+  r_pix_err_ref_len: 100.0
   r_pix_err_min: 1.0
+  r_pix_err_log_gain: 27.4
   esekf_iter_num: 5
 
   
