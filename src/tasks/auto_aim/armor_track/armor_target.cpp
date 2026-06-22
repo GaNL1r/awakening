@@ -188,7 +188,7 @@ void ArmorTarget::reset(
 
     esekf.value().set_iteration_num(cfg.esekf_iter_num);
 
-    armor_pnp(a, camera_info, camera_cv_in_odom, true);
+    armor_pnp(a, camera_info, camera_cv_in_odom);
     auto armor_in_odom = a.pose;
     auto armor_in_car = ISO3::Identity();
     const double r = r_pre;
