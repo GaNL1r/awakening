@@ -83,10 +83,8 @@ armor_tracker:
   lost_time_thres: 1.5
   lost_time_thres_outpost: 2.0
   tracking_thres: 10
-  match_gate_armor: 30.0
-  match_gate_not_all_init_armor: 100.0
   qxyz_common: [30.0, 30.0, 1.0]
-  qyaw_common: 100.0
+  qyaw_common: 30.0
   qxyz_output: [1.0, 1.0, 1.0]
   qyaw_output: 0.01
   q_r: 0.0000001
@@ -95,12 +93,14 @@ armor_tracker:
   q_wpr: 0.000001
   q_outpost_dz: 0.01
   enable_lights_measure: true
+  armor_match_pos_gate_by_length_ratio: 20.0
+  armor_match_pos_gate_all_init_by_length_ratio: 50.0
   light_match_length_ratio_gate: 0.2
   light_match_angle_gate: 0.2
   light_match_pos_gate_by_length_ratio: 5.0
-  r_pix_err_ref_len: 100.0
-  r_pix_err_min: 1.0
-  r_pix_err_log_gain: 27.4
+  r_sigma_px: 4.0
+  r_sigma_half_length: 5.0
+  r_sigma_angle: 0.1
   esekf_iter_num: 5
 
   

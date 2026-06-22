@@ -372,11 +372,14 @@ int main(int argc, char** argv) {
                 auto packet_time =
                     now - std::chrono::microseconds(serial_send_to_image_microseconds);
                 ISO3 gimbal_in_gimbal_odom = ISO3::Identity();
-                gimbal_in_gimbal_odom.linear() = utils::rpy2matrix(Vec3(
-                    angles::from_degrees(robo.roll),
-                    angles::from_degrees(robo.pitch),
-                    angles::from_degrees(robo.yaw)
-                ),utils::RPYOrder::XYZ);
+                gimbal_in_gimbal_odom.linear() = utils::rpy2matrix(
+                    Vec3(
+                        angles::from_degrees(robo.roll),
+                        angles::from_degrees(robo.pitch),
+                        angles::from_degrees(robo.yaw)
+                    ),
+                    utils::RPYOrder::XYZ
+                );
                 tf->push(
                     SimpleFrame::GIMBAL_ODOM,
                     SimpleFrame::GIMBAL,

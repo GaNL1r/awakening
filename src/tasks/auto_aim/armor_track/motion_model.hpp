@@ -6,6 +6,7 @@
 #include "utils/utils.hpp"
 #include <Eigen/src/Core/Matrix.h>
 #include <algorithm>
+#include <array>
 #include <ceres/ceres.h>
 #include <ceres/jet.h>
 #include <chrono>
@@ -22,18 +23,14 @@ namespace idx {
     constexpr int H = P2;
     constexpr int OUTPOST01DZ = P1;
     constexpr int OUTPOST02DZ = P2;
-    enum { TOP_X, TOP_Y, BOTTOM_X, BOTTOM_Y, _UVZ_N };
-    // enum { YPD_Y, YPD_P, YPD_D, A_ROT_X, A_ROT_Y, A_ROT_Z, _YPD_Z_N };
-    enum { YPD_Y, YPD_P, YPD_D, A_ROT_YAW, _YPD_Z_N };
+    enum { UV_ANGLE, UV_CENTER_X, UV_CENTER_Y, UV_HALF_LENGTH, _UVZ_N };
 } // namespace idx
 constexpr int X_N = idx::X_N;
 constexpr int UVZ_N = idx::_UVZ_N;
-constexpr int YPDZ_N = idx::_YPD_Z_N;
 constexpr double OUTPOST_R = 0.27;
 constexpr double OUTPOST_LEVEL_DZ = 0.1;
 using VecX = Eigen::Matrix<double, X_N, 1>;
 using UVVecZ = Eigen::Matrix<double, UVZ_N, 1>;
-using YPDVecZ = Eigen::Matrix<double, YPDZ_N, 1>;
 template<typename T>
 inline T normalize_angle(T a) {
     const T two_pi = T(2.0 * M_PI);
@@ -45,7 +42,7 @@ inline Eigen::Matrix<T, 3, 3> _car_rotation(const T x[X_N], ArmorClass armor_num
     bool building =
         (armor_number == auto_aim::ArmorClass::OUTPOST || armor_number == auto_aim::ArmorClass::BASE
         );
-    // building = true;
+    building = true;
     if (building) {
         Eigen::Matrix<T, 3, 1> yaw_rotvec;
         yaw_rotvec << T(0), T(0), x[idx::C_ROT_Z];
@@ -215,6 +212,9 @@ _armor_pose(const T x[X_N], int id, int armor_num, ArmorClass armor_number) {
     return pose_in_odom;
 }
 struct UVMeasure {
+    template<typename T>
+    using ImagePoint = Eigen::Matrix<T, 2, 1>;
+
     struct Ctx {
         int armor_num;
         int id;
@@ -226,7 +226,7 @@ struct UVMeasure {
     } ctx;
 
     template<typename T>
-    inline void operator()(const T x[X_N], T z[UVZ_N]) const {
+    inline std::array<ImagePoint<T>, 2> project_points(const T x[X_N]) const {
         auto pose_in_odom = _armor_pose(x, ctx.id, ctx.armor_num, ctx.armor_number);
 
         Eigen::Transform<T, 3, Eigen::Isometry> camera_cv_in_odom_jet;
@@ -237,7 +237,7 @@ struct UVMeasure {
         std::vector<cv::Point3f> object_points =
             getArmorLightKeyPoints3D<cv::Point3f>(ctx.armor_number, ctx.is_left);
 
-        std::vector<Eigen::Matrix<T, 2, 1>> pts_jet;
+        std::vector<ImagePoint<T>> pts_jet;
         if (ctx.normalized) {
             utils::project_points_jets_normalized(
                 object_points,
@@ -255,44 +255,40 @@ struct UVMeasure {
             );
         }
 
-        z[idx::TOP_X] = pts_jet[0].x();
-        z[idx::TOP_Y] = pts_jet[0].y();
-        z[idx::BOTTOM_X] = pts_jet[1].x();
-        z[idx::BOTTOM_Y] = pts_jet[1].y();
+        return { pts_jet[0], pts_jet[1] };
     }
-
-    inline void h(const VecX& x, UVVecZ& z) const {
-        operator()(x.data(), z.data());
-    }
-};
-struct YPDMeasure {
-    struct Ctx {
-        int armor_num;
-        int id;
-        auto_aim::ArmorClass armor_number = auto_aim::ArmorClass::UNKNOWN;
-    } ctx;
 
     template<typename T>
-    inline void operator()(const T x[X_N], T z[YPDZ_N]) const {
-        auto pose_in_odom = _armor_pose(x, ctx.id, ctx.armor_num, ctx.armor_number);
-        T ax = pose_in_odom.translation().x();
-        T ay = pose_in_odom.translation().y();
-        T az = pose_in_odom.translation().z();
-        // auto rot_vec = utils::so3_log<T>(pose_in_odom.linear());
-        auto rpy = utils::matrix2rpy<T>(pose_in_odom.linear().eval());
-        T xy_dist = ceres::sqrt(ax * ax + ay * ay);
-        T dist = ceres::sqrt(xy_dist * xy_dist + az * az);
-        // Observation model
-        z[idx::YPD_Y] = ceres::atan2(ay, ax); // yaw
-        z[idx::YPD_P] = ceres::atan2(az, xy_dist); // pitch
-        z[idx::YPD_D] = dist; // distance
-        z[idx::A_ROT_YAW] = rpy[2];
-        // z[idx::A_ROT_X] = rot_vec.x();
-        // z[idx::A_ROT_Y] = rot_vec.y();
-        // z[idx::A_ROT_Z] = rot_vec.z();
+    static inline void
+    points_to_observation(const ImagePoint<T>& top, const ImagePoint<T>& bottom, T z[UVZ_N]) {
+        const ImagePoint<T> delta = top - bottom;
+        const ImagePoint<T> center = (top + bottom) / T(2);
+        z[idx::UV_ANGLE] = ceres::atan2(delta.x(), delta.y());
+        z[idx::UV_CENTER_X] = center.x();
+        z[idx::UV_CENTER_Y] = center.y();
+        z[idx::UV_HALF_LENGTH] = ceres::sqrt(delta.squaredNorm()) / T(2);
     }
 
-    inline void h(const VecX& x, YPDVecZ& z) const {
+    template<typename T>
+    inline void operator()(const T x[X_N], T z[UVZ_N]) const {
+        const auto points = project_points(x);
+        points_to_observation(points[0], points[1], z);
+    }
+
+    inline std::pair<cv::Point2f, cv::Point2f> projected_points(const VecX& x) const {
+        const auto points = project_points(x.data());
+        return { cv::Point2f(points[0].x(), points[0].y()),
+                 cv::Point2f(points[1].x(), points[1].y()) };
+    }
+
+    template<typename T>
+    static inline Eigen::Matrix<T, UVZ_N, 1>
+    residual(const Eigen::Matrix<T, UVZ_N, 1>& z_pred, const Eigen::Matrix<T, UVZ_N, 1>& z) {
+        Eigen::Matrix<T, UVZ_N, 1> v = z - z_pred;
+        v[idx::UV_ANGLE] = normalize_angle(v[idx::UV_ANGLE]);
+        return v;
+    }
+    inline void h(const VecX& x, UVVecZ& z) const {
         operator()(x.data(), z.data());
     }
 };
