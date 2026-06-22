@@ -112,8 +112,8 @@ void ArmorTarget::reset(
     p0.diagonal().setZero();
     p0.diagonal()[idx::CX] = p0.diagonal()[idx::CY] = p0.diagonal()[idx::CZ] = 1;
     p0.diagonal()[idx::VCX] = p0.diagonal()[idx::VCY] = p0.diagonal()[idx::VCZ] = 10;
-    p0.diagonal()[idx::C_ROT_Z] = p0.diagonal()[idx::C_ROT_Y] = p0.diagonal()[idx::C_ROT_X] = 0.0;
-    p0.diagonal()[idx::L] = p0.diagonal()[idx::R] = 1;
+    p0.diagonal()[idx::C_ROT_Z] = p0.diagonal()[idx::C_ROT_Y] = p0.diagonal()[idx::C_ROT_X] = 1;
+    p0.diagonal()[idx::L] = p0.diagonal()[idx::R] = p0.diagonal()[idx::H] = 1;
     if (target_number == ArmorClass::OUTPOST) {
         p0.diagonal()[idx::OUTPOST01DZ] = p0.diagonal()[idx::OUTPOST02DZ] = 1;
     }
@@ -308,28 +308,6 @@ Eigen::Matrix<double, UVZ_N, UVZ_N> ArmorTarget::uvmeasurement_covariance(
     Eigen::Matrix<double, UVZ_N, UVZ_N> r;
     r.setZero();
 
-    // const double length_ref = cfg.r_pix_err_ref_len;
-    // const double sigma_px =
-    //     cfg.r_pix_err_min + cfg.r_pix_err_log_gain * std::log1p(length_px / length_ref);
-
-    // double sigma_x = sigma_px;
-    // double sigma_y = sigma_px;
-    // if (measure_normalized) {
-    //     sigma_x /= uvmeasure_ctx.camera_info.camera_fx();
-    //     sigma_y /= uvmeasure_ctx.camera_info.camera_fy();
-    // }
-
-    // const double angle = z[idx::UV_ANGLE];
-    // const double safe_length = std::max(measurement_length, 1e-9);
-    // const double sin_angle = std::sin(angle);
-    // const double cos_angle = std::cos(angle);
-    // r(idx::UV_ANGLE, idx::UV_ANGLE) =
-    //     2.0
-    //     * (cos_angle * cos_angle * sigma_x * sigma_x
-    //        + sin_angle * sin_angle * sigma_y * sigma_y)
-    //     / (safe_length * safe_length);
-    // r(idx::UV_CENTER_X, idx::UV_CENTER_X) = sigma_x * sigma_x / 2.0;
-    // r(idx::UV_CENTER_Y, idx::UV_CENTER_Y) = sigma_y * sigma_y / 2.0;
     const double sigma_px = cfg.r_sigma_px;
     double sigma_x = sigma_px;
     double sigma_y = sigma_px;
@@ -338,10 +316,13 @@ Eigen::Matrix<double, UVZ_N, UVZ_N> ArmorTarget::uvmeasurement_covariance(
         sigma_y /= uvmeasure_ctx.camera_info.camera_fy();
     }
     double sigma_half_length = cfg.r_sigma_half_length;
+
     if (measure_normalized) {
         sigma_half_length /= uvmeasure_ctx.camera_info.camera_fx();
     }
-    r(idx::UV_ANGLE, idx::UV_ANGLE) = cfg.r_sigma_angle * cfg.r_sigma_angle/2.0;
+    double sigma_angle = cfg.r_sigma_angle;
+    sigma_angle *= std::cos(z(idx::UV_ANGLE));
+    r(idx::UV_ANGLE, idx::UV_ANGLE) = sigma_angle * sigma_angle / 2.0;
     r(idx::UV_CENTER_X, idx::UV_CENTER_X) = sigma_x * sigma_x / 2.0;
     r(idx::UV_CENTER_Y, idx::UV_CENTER_Y) = sigma_y * sigma_y / 2.0;
     r(idx::UV_HALF_LENGTH, idx::UV_HALF_LENGTH) = sigma_half_length * sigma_half_length / 2.0;
@@ -373,44 +354,35 @@ Eigen::Matrix<double, X_N, X_N> ArmorTarget::process_noise(double dt) const noex
     const Mat3 pos_vel_noise = accel_noise_car * car_in_odom_R.transpose();
     const Mat3 vel_pos_noise = car_in_odom_R * accel_noise_car;
 
-    // for (int i = 0; i < 3; ++i) {
-    //     for (int j = 0; j < 3; ++j) {
-    //         q(pos_idx[i], pos_idx[j]) = dt4 * 0.25 * accel_noise_car(i, j);
-    //         q(pos_idx[i], vel_idx[j]) = dt3 * 0.5 * pos_vel_noise(i, j);
-    //         q(vel_idx[i], pos_idx[j]) = dt3 * 0.5 * vel_pos_noise(i, j);
-    //         q(vel_idx[i], vel_idx[j]) = dt2 * accel_noise_odom(i, j);
-    //     }
-    // }
-    utils::fill_constant_accel_noise(q, idx::CX, idx::VCX, q_xyz.x(), dt);
-    utils::fill_constant_accel_noise(q, idx::CY, idx::VCY, q_xyz.y(), dt);
-    utils::fill_constant_accel_noise(q, idx::CZ, idx::VCZ, q_xyz.z(), dt);
+    for (int i = 0; i < 3; ++i) {
+        for (int j = 0; j < 3; ++j) {
+            q(pos_idx[i], pos_idx[j]) = dt4 * 0.25 * accel_noise_car(i, j);
+            q(pos_idx[i], vel_idx[j]) = dt3 * 0.5 * pos_vel_noise(i, j);
+            q(vel_idx[i], pos_idx[j]) = dt3 * 0.5 * vel_pos_noise(i, j);
+            q(vel_idx[i], vel_idx[j]) = dt2 * accel_noise_odom(i, j);
+        }
+    }
     q(idx::R, idx::R) = cfg.q_r;
     if (target_number == ArmorClass::OUTPOST) {
-        q(idx::OUTPOST01DZ, idx::OUTPOST01DZ) = dt * cfg.q_outpost_dz;
-        q(idx::OUTPOST02DZ, idx::OUTPOST02DZ) = dt * cfg.q_outpost_dz;
+        q(idx::OUTPOST01DZ, idx::OUTPOST01DZ) = cfg.q_outpost_dz;
+        q(idx::OUTPOST02DZ, idx::OUTPOST02DZ) = cfg.q_outpost_dz;
     } else {
         q(idx::L, idx::L) = cfg.q_l;
         q(idx::H, idx::H) = cfg.q_h;
     }
-    // constexpr std::array<int, 3> rot_idx { idx::C_ROT_X, idx::C_ROT_Y, idx::C_ROT_Z };
-    // const Vec3 yaw_axis_odom = car_in_odom_R * Vec3::UnitZ();
-    // for (int i = 0; i < 3; ++i) {
-    //     const int ri = rot_idx[i];
-    //     q(ri, idx::VYAW) += dt3 * 0.5 * q_yaw * yaw_axis_odom[i];
-    //     q(idx::VYAW, ri) += dt3 * 0.5 * q_yaw * yaw_axis_odom[i];
-    //     for (int j = 0; j < 3; ++j) {
-    //         q(ri, rot_idx[j]) += dt4 * 0.25 * q_yaw * yaw_axis_odom[i] * yaw_axis_odom[j];
-    //     }
-    // }
-    // q(idx::VYAW, idx::VYAW) += dt2 * q_yaw;
-    // q(idx::C_ROT_Y, idx::C_ROT_Y) += dt * cfg.q_wpr;
-    // q(idx::C_ROT_X, idx::C_ROT_X) += dt * cfg.q_wpr;
-    utils::fill_constant_accel_noise(q, idx::C_ROT_Z, idx::VYAW, q_yaw, dt);
-    q(idx::C_ROT_Y, idx::C_ROT_Y) = cfg.q_wpr;
-    q(idx::C_ROT_X, idx::C_ROT_X) = cfg.q_wpr;
-    // utils::fill_constant_accel_noise(q, idx::YAW, idx::VYAW, q_yaw, dt);
-    // q(idx::PITCH, idx::PITCH) = cfg.q_wpr;
-    // q(idx::ROLL, idx::ROLL) = cfg.q_wpr;
+    constexpr std::array<int, 3> rot_idx { idx::C_ROT_X, idx::C_ROT_Y, idx::C_ROT_Z };
+    const Vec3 yaw_axis_odom = car_in_odom_R * Vec3::UnitZ();
+    for (int i = 0; i < 3; ++i) {
+        const int ri = rot_idx[i];
+        q(ri, idx::VYAW) += dt3 * 0.5 * q_yaw * yaw_axis_odom[i];
+        q(idx::VYAW, ri) += dt3 * 0.5 * q_yaw * yaw_axis_odom[i];
+        for (int j = 0; j < 3; ++j) {
+            q(ri, rot_idx[j]) += dt4 * 0.25 * q_yaw * yaw_axis_odom[i] * yaw_axis_odom[j];
+        }
+    }
+    q(idx::VYAW, idx::VYAW) += dt2 * q_yaw;
+    q(idx::C_ROT_Y, idx::C_ROT_Y) += dt * cfg.q_wpr;
+    q(idx::C_ROT_X, idx::C_ROT_X) += dt * cfg.q_wpr;
     return q;
 }
 
@@ -497,28 +469,26 @@ int ArmorTarget::update(
         add_armor_uv_obs(armor, id, true);
         add_armor_uv_obs(armor, id, false);
     }
-    if (matched_lights.size() >= 2) {
-        for (const auto& [id, is_left, light]: matched_lights) {
-            if (used_id[id]) {
-                continue;
-            }
-            auto ctx = uvmeasure_ctx;
-            ctx.id = id;
-            used_id[id] = true;
-            ctx.is_left = is_left;
-            ctx.normalized = measure_normalized;
-            UVMeasure measure { .ctx = ctx };
-            const auto observation = get_uv_measurement(light.top, light.bottom, camera_info);
-            const auto u_r = [this,
-                              length_px = observation.length_px,
-                              measurement_length = observation.measurement_length](
-                                 const Eigen::Matrix<double, UVZ_N, 1>& z
-                             ) {
-                return uvmeasurement_covariance(z, length_px, measurement_length);
-            };
-            obs.push_back(esekf.value().make_obs(observation.z, measure, u_r, cal_residual));
+    // if (matched_lights.size() >= 2) {
+    for (const auto& [id, is_left, light]: matched_lights) {
+        if (used_id[id]) {
+            continue;
         }
+        auto ctx = uvmeasure_ctx;
+        ctx.id = id;
+        used_id[id] = true;
+        ctx.is_left = is_left;
+        ctx.normalized = measure_normalized;
+        UVMeasure measure { .ctx = ctx };
+        const auto observation = get_uv_measurement(light.top, light.bottom, camera_info);
+        const auto u_r = [this,
+                          length_px = observation.length_px,
+                          measurement_length = observation.measurement_length](
+                             const Eigen::Matrix<double, UVZ_N, 1>& z
+                         ) { return uvmeasurement_covariance(z, length_px, measurement_length); };
+        obs.push_back(esekf.value().make_obs(observation.z, measure, u_r, cal_residual));
     }
+    // }
 
     if (obs.size() > 0) {
         target_state.x = esekf.value().update_multi(obs);
