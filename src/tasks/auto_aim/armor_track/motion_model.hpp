@@ -22,7 +22,7 @@ namespace idx {
     constexpr int H = P2;
     constexpr int OUTPOST01DZ = P1;
     constexpr int OUTPOST02DZ = P2;
-    enum { UV_ANGLE, UV_CENTER_X, UV_CENTER_Y, UV_HALF_LENGTH, _UVZ_N };
+    enum { UV_ANGLE, UV_CENTER_X, UV_CENTER_Y, UV_LENGTH, _UVZ_N };
 } // namespace idx
 constexpr int X_N = idx::X_N;
 constexpr int UVZ_N = idx::_UVZ_N;
@@ -141,6 +141,12 @@ struct Predict {
                 h = T(0.0);
             }
         } else {
+            if (ceres::abs(x[idx::OUTPOST01DZ]) > T(0.3)) {
+                x[idx::OUTPOST01DZ] = T(0.0);
+            }
+            if (ceres::abs(x[idx::OUTPOST02DZ]) > T(0.3)) {
+                x[idx::OUTPOST02DZ] = T(0.0);
+            }
             r = T(OUTPOST_R);
         }
 
@@ -253,7 +259,7 @@ struct UVMeasure {
         z[idx::UV_ANGLE] = ceres::atan2(delta.x(), delta.y());
         z[idx::UV_CENTER_X] = center.x();
         z[idx::UV_CENTER_Y] = center.y();
-        z[idx::UV_HALF_LENGTH] = ceres::sqrt(delta.squaredNorm()) / T(2);
+        z[idx::UV_LENGTH] = ceres::sqrt(delta.squaredNorm());
     }
 
     template<typename T>

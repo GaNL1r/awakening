@@ -17,6 +17,10 @@
 #include <optional>
 #include <string>
 #include <utility>
+#ifdef USE_RERUN
+    #include "_rerun/recorder.hpp"
+    #include "_rerun/tf.hpp"
+#endif
 #ifdef USE_ROS2
     #include "_rcl/visual/armor.hpp"
     #include "_rcl/visual/armor_target.hpp"
@@ -127,7 +131,11 @@ bool is_web_running() {
         },
         std::chrono::duration<double>(1.0)
     );
-    return cached.load();
+    bool running = cached.load();
+#ifdef USE_RERUN
+    running = running || rerun_visual::Recorder::instance().enabled();
+#endif
+    return running;
 }
 static constexpr auto RECORD_FOLDER_PATH_ARR = utils::concat(ROOT_DIR, "/record/auto_aim");
 static constexpr std::string_view RECORD_FOLDER_PATH(RECORD_FOLDER_PATH_ARR.data());
@@ -852,6 +860,15 @@ int main(int argc, char** argv) {
                 rcl_tf.pub_robot_tf(*tf, [](SentryFrame frame) {
                     return SentryFrame_to_str(frame);
                 });
+            });
+        }
+#endif
+#ifdef USE_RERUN
+        if (debug) {
+            s.add_rate_source<>("rerun_tf", 15.0, [&]() {
+                rerun_visual::log_robot_tf(
+                    *tf, [](SentryFrame frame) { return SentryFrame_to_str(frame); }
+                );
             });
         }
 #endif

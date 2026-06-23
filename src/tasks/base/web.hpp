@@ -18,6 +18,9 @@
 #include <sys/mman.h>
 #include <sys/types.h>
 #include <unistd.h>
+#ifdef USE_RERUN
+    #include "_rerun/recorder.hpp"
+#endif
 namespace awakening {
 struct VisionDebugCtx {
     CameraInfo camera_info_; // 基本不变数据，无锁
@@ -106,6 +109,9 @@ public:
             auto& j = buf.j[key];
             f(j);
             buf.dirty = true;
+#ifdef USE_RERUN
+            rerun_visual::Recorder::instance().log_json(key, j);
+#endif
         }
 
         buf.flush();

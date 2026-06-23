@@ -325,7 +325,7 @@ Eigen::Matrix<double, UVZ_N, UVZ_N> ArmorTarget::uvmeasurement_covariance(
     r(idx::UV_ANGLE, idx::UV_ANGLE) = sigma_angle * sigma_angle / 2.0;
     r(idx::UV_CENTER_X, idx::UV_CENTER_X) = sigma_x * sigma_x / 2.0;
     r(idx::UV_CENTER_Y, idx::UV_CENTER_Y) = sigma_y * sigma_y / 2.0;
-    r(idx::UV_HALF_LENGTH, idx::UV_HALF_LENGTH) = sigma_half_length * sigma_half_length / 2.0;
+    r(idx::UV_LENGTH, idx::UV_LENGTH) = sigma_half_length * sigma_half_length / 2.0;
     return r;
 }
 
@@ -340,7 +340,6 @@ Eigen::Matrix<double, X_N, X_N> ArmorTarget::process_noise(double dt) const noex
         q_xyz = cfg.qxyz_common; // 加速度方差
         q_yaw = cfg.qyaw_common; // 角加速度方差
     }
-
     q.setZero();
     const Mat3 car_in_odom_R = _whole_car_pose(target_state.x.data(), target_number).linear();
     const Mat3 accel_noise_car = q_xyz.asDiagonal();
@@ -353,7 +352,6 @@ Eigen::Matrix<double, X_N, X_N> ArmorTarget::process_noise(double dt) const noex
     constexpr std::array<int, 3> vel_idx { idx::VCX, idx::VCY, idx::VCZ };
     const Mat3 pos_vel_noise = accel_noise_car * car_in_odom_R.transpose();
     const Mat3 vel_pos_noise = car_in_odom_R * accel_noise_car;
-
     for (int i = 0; i < 3; ++i) {
         for (int j = 0; j < 3; ++j) {
             q(pos_idx[i], pos_idx[j]) = dt4 * 0.25 * accel_noise_car(i, j);
@@ -374,15 +372,20 @@ Eigen::Matrix<double, X_N, X_N> ArmorTarget::process_noise(double dt) const noex
     const Vec3 yaw_axis_odom = car_in_odom_R * Vec3::UnitZ();
     for (int i = 0; i < 3; ++i) {
         const int ri = rot_idx[i];
-        q(ri, idx::VYAW) += dt3 * 0.5 * q_yaw * yaw_axis_odom[i];
-        q(idx::VYAW, ri) += dt3 * 0.5 * q_yaw * yaw_axis_odom[i];
+        q(ri, idx::VYAW) += 0.5 * dt3 * q_yaw * yaw_axis_odom[i];
+        q(idx::VYAW, ri) += 0.5 * dt3 * q_yaw * yaw_axis_odom[i];
         for (int j = 0; j < 3; ++j) {
-            q(ri, rot_idx[j]) += dt4 * 0.25 * q_yaw * yaw_axis_odom[i] * yaw_axis_odom[j];
+            q(ri, rot_idx[j]) += 0.25 * dt4 * q_yaw * yaw_axis_odom[i] * yaw_axis_odom[j];
         }
     }
     q(idx::VYAW, idx::VYAW) += dt2 * q_yaw;
-    q(idx::C_ROT_Y, idx::C_ROT_Y) += dt * cfg.q_wpr;
-    q(idx::C_ROT_X, idx::C_ROT_X) += dt * cfg.q_wpr;
+    const Mat3 Q_wpr_body = (Vec3(cfg.q_wpr, cfg.q_wpr, 0.0)).asDiagonal();
+    const Mat3 Q_wpr_odom = car_in_odom_R * Q_wpr_body * car_in_odom_R.transpose();
+    for (int i = 0; i < 3; ++i) {
+        for (int j = 0; j < 3; ++j) {
+            q(rot_idx[i], rot_idx[j]) += dt * Q_wpr_odom(i, j);
+        }
+    }
     return q;
 }
 
@@ -688,19 +691,19 @@ std::vector<std::tuple<int, bool, Light>> ArmorTarget::match_light(
     }
 
     cv::Rect rect = expanded(timestamp, camera_cv_in_odom, camera_info, image_size);
-    constexpr double expand_ratio = 1.6;
+    constexpr double expand_ratio = 1.4;
     rect = utils::expand_and_clip_rect(rect, expand_ratio, image_size);
     const cv::Rect img_rect = cv::Rect(0, 0, image_size.width, image_size.height);
 
-    if ((rect & img_rect).area() <= 0) {
+    if ((rect & img_rect).area() <= 100) {
         return img_rect;
     }
 
-    cv::Rect expanded_rect = rect & img_rect;
+    rect &= img_rect;
 
-    const double rect_w = std::max<double>(expanded_rect.width, 1.0);
-    const double rect_h = std::max<double>(expanded_rect.height, 1.0);
-    const double ratio =
+    double rect_w = std::max<double>(rect.width, 1.0);
+    double rect_h = std::max<double>(rect.height, 1.0);
+    double ratio =
         (std::isfinite(target_wh_ratio) && target_wh_ratio > 0.0) ? target_wh_ratio : 1.0;
 
     double target_w = rect_w;
@@ -710,8 +713,9 @@ std::vector<std::tuple<int, bool, Light>> ArmorTarget::match_light(
     } else {
         target_h = target_w / ratio;
     }
-    const double cx = expanded_rect.x + expanded_rect.width / 2.0;
-    const double cy = expanded_rect.y + expanded_rect.height / 2.0;
+
+    double cx = rect.x + rect.width / 2.0;
+    double cy = rect.y + rect.height / 2.0;
     cv::Rect ratio_rect(
         static_cast<int>(cx - target_w / 2.0),
         static_cast<int>(cy - target_h / 2.0),
@@ -719,10 +723,23 @@ std::vector<std::tuple<int, bool, Light>> ArmorTarget::match_light(
         static_cast<int>(target_h)
     );
     ratio_rect &= img_rect;
-    if ((rect & img_rect).area() <= 0) {
-        return img_rect;
-    }
-    return ratio_rect;
+
+    double dt = std::chrono::duration<double>(timestamp - last_update).count();
+    double lost_dt = cfg.lost_time_thres;
+    double dt_clamped = std::max(0.0, std::min(dt, lost_dt));
+
+    int base_side = std::max(ratio_rect.width, ratio_rect.height);
+    int max_side = std::max(image_size.width, image_size.height);
+    int side = static_cast<int>(base_side + (max_side - base_side) * (dt_clamped / lost_dt));
+    if (dt >= lost_dt)
+        side = max_side;
+
+    int square_cx = ratio_rect.x + ratio_rect.width / 2;
+    int square_cy = ratio_rect.y + ratio_rect.height / 2;
+    cv::Rect square(square_cx - side / 2, square_cy - side / 2, side, side);
+    square &= img_rect;
+
+    return square;
 }
 [[nodiscard]] cv::Rect ArmorTarget::expanded(
     const TimePoint& timestamp,

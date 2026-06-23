@@ -569,7 +569,7 @@ std::vector<std::pair<int, RuneFanTarget>> RuneTarget::match_fan_target(
     cv::Rect rect = cv::boundingRect(pts);
     cv::Rect img_rect(0, 0, image_size.width, image_size.height);
 
-    if ((rect & img_rect).area() <= 0) {
+    if ((rect & img_rect).area() <= 100) {
         return img_rect;
     }
     rect &= img_rect;

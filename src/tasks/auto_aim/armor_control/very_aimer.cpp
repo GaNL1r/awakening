@@ -60,13 +60,14 @@ struct VeryAimer::Impl {
         const auto armors_pose = target_state.get_armors_pose(target.target_number);
         const int armor_num = static_cast<int>(armors_pose.size());
         int i_chosen = 0;
-        // const double center_yaw = std::atan2(target_state.pos().y(), target_state.pos().x());
+        const double center_yaw = std::atan2(target_state.pos().y(), target_state.pos().x());
         auto delta_angle = [&](int i) {
             auto rpy = utils::matrix2rpy<double>(armors_pose[i].linear());
-            return angles::normalize_angle(
-                rpy[2]
-                - std::atan2(armors_pose[i].translation().y(), armors_pose[i].translation().x())
-            );
+            // return angles::normalize_angle(
+            //     rpy[2]
+            //     - std::atan2(armors_pose[i].translation().y(), armors_pose[i].translation().x())
+            // );
+            return angles::normalize_angle(rpy[2] - center_yaw);
         };
         auto abs_delta_angle = [&](int i) { return std::abs(delta_angle(i)); };
         auto pick_best_range = [&](int first, int last, auto&& accept) -> int {

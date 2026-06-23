@@ -22,6 +22,10 @@
 #include <optional>
 #include <string>
 #include <utility>
+#ifdef USE_RERUN
+    #include "_rerun/recorder.hpp"
+    #include "_rerun/tf.hpp"
+#endif
 #ifdef USE_ROS2
     #include "_rcl/node.hpp"
     #include "_rcl/tf.hpp"
@@ -138,7 +142,11 @@ bool is_web_running() {
         },
         std::chrono::duration<double>(1.0)
     );
-    return cached.load();
+    bool running = cached.load();
+#ifdef USE_RERUN
+    running = running || rerun_visual::Recorder::instance().enabled();
+#endif
+    return running;
 }
 static constexpr auto RECORD_FOLDER_PATH_ARR = utils::concat(ROOT_DIR, "/record/auto_aim");
 static constexpr std::string_view RECORD_FOLDER_PATH(RECORD_FOLDER_PATH_ARR.data());
@@ -779,7 +787,7 @@ int main(int argc, char** argv) {
             dbg->auto_aim_fsm_state.set(auto_aim_fsm_controller.get_state());
             auto gimbal_in_gimbal_odom =
                 tf->pose_a_in_b(SimpleFrame::GIMBAL, SimpleFrame::GIMBAL_ODOM, Clock::now());
-            auto rpy = utils::matrix2rpy<double>(gimbal_in_gimbal_odom.linear());
+            auto rpy = utils::matrix2rpy<double>(gimbal_in_gimbal_odom.linear(),utils::RPYOrder::ZYX);
             auto gimbal_yaw_pitch =
                 std::make_pair(angles::to_degrees(rpy[2]), -angles::to_degrees(rpy[1]));
             dbg->gimbal_yaw_pitch.set(gimbal_yaw_pitch);
@@ -816,6 +824,15 @@ int main(int argc, char** argv) {
             });
         }
 
+#endif
+#ifdef USE_RERUN
+        if (debug) {
+            s.add_rate_source<>("rerun_tf", 15.0, [&]() {
+                rerun_visual::log_robot_tf(
+                    *tf, [](SimpleFrame frame) { return SimpleFrame_to_str(frame); }
+                );
+            });
+        }
 #endif
     }
 

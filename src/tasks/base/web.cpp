@@ -529,6 +529,9 @@ struct Web::Impl {
         }
     }
     void write_debug_data(const VisionDebugCtx& ctx) const {
+#ifdef USE_RERUN
+        rerun_visual::Recorder::instance().log_vision(ctx);
+#endif
         static TimePoint start_time = Clock::now();
         static DebugDatas d;
         const auto now = Clock::now();
@@ -578,9 +581,15 @@ struct Web::Impl {
         d.rune_a_diff_log.handle_once(rune_target_state.a() - big_rune.sin_amplitude);
         d.rune_w_diff_log.handle_once(rune_target_state.w() - big_rune.sin_omega);
         d.write();
+#ifdef USE_RERUN
+        rerun_visual::Recorder::instance().log_json("debug", d.j);
+#endif
     }
 
     inline void write_shm(const cv::Mat& img) const {
+#ifdef USE_RERUN
+        rerun_visual::Recorder::instance().log_image(img);
+#endif
         constexpr size_t shm_max_size = 2 * 1024 * 1024;
         struct writer {
             writer(const char* name, mode_t mode = 0666) {
