@@ -7,6 +7,7 @@
 #include <opencv2/core/types.hpp>
 #include <optional>
 #include <string>
+#include <tuple>
 #include <utility>
 #include <vector>
 namespace awakening::auto_aim {
@@ -143,11 +144,23 @@ public:
         const CameraInfo& camera_info,
         const ISO3& camera_cv_in_odom
     );
+    std::pair<cv::Point2f, cv::Point2f> predict_light(
+        int armor_id,
+        bool is_left,
+        const armor_point_motion_model::State& state,
+        const CameraInfo& camera_info,
+        const ISO3& camera_cv_in_odom
+    ) const noexcept;
     std::vector<std::pair<int, Armor>> match_armor(
         std::vector<Armor>& armors,
         const TimePoint& timestamp,
         const CameraInfo& camera_info,
         const ISO3& camera_cv_in_odom
+    ) const noexcept;
+    std::vector<std::tuple<int, bool, Light>> match_light(
+        std::vector<Light>& lights,
+        std::vector<std::pair<int, Armor>>& matched_armors,
+        const std::vector<std::tuple<int, bool, std::pair<cv::Point2f, cv::Point2f>>>& visible_light
     ) const noexcept;
     std::vector<std::tuple<int, bool, Light>> match_light(
         std::vector<Light>& lights,

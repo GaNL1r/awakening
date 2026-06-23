@@ -2,6 +2,7 @@
 #include "angles.h"
 #include "tasks/auto_aim/armor_track/motion_model.hpp"
 #include "tasks/auto_aim/type.hpp"
+#include "tasks/base/common.hpp"
 #include "tasks/base/dta_utils.hpp"
 #include "tasks/base/web.hpp"
 #include "utils/common/type_common.hpp"
@@ -578,7 +579,29 @@ std::vector<std::pair<int, Armor>> ArmorTarget::match_armor(
     constexpr double MAX_COST = 1e9;
     std::vector<std::pair<int, Armor>> result;
     const int n_obs = static_cast<int>(armors.size());
+    auto pred_state = target_state;
+    pred_state.predict(timestamp, target_number);
+    auto camera_in_odom = camera_cv_in_odom * R_CV2PHYSICS.inverse();
     const int armors_num = armor_num();
+    std::vector<int> maybe_visible;
+    std::vector<std::pair<double, int>> angle_dis_in_camera;
+    for (int i = 0; i < armors_num; i++) {
+        auto pose_in_odom = _armor_pose(pred_state.x.data(), i, armors_num, target_number);
+        auto pose_in_camera = camera_in_odom.inverse() * pose_in_odom;
+        auto rpy = utils::matrix2rpy(pose_in_camera.linear().eval());
+        angle_dis_in_camera.emplace_back(std::abs(angles::normalize_angle((0) - rpy[2])), i);
+    }
+    std::sort(
+        angle_dis_in_camera.begin(),
+        angle_dis_in_camera.end(),
+        [](const auto& a, const auto& b) { return a.first < b.first; }
+    );
+    for (int i = 0; i < angle_dis_in_camera.size(); ++i) {
+        if (i == 3) {
+            break;
+        }
+        maybe_visible.push_back(angle_dis_in_camera[i].second);
+    }
     bool all_init =
         (outpost_has_all_and_has_set_ids.has_value() ? outpost_has_all_and_has_set_ids.value().first
                                                      : jumped);
@@ -596,27 +619,16 @@ std::vector<std::pair<int, Armor>> ArmorTarget::match_armor(
             key_points[ArmorKeyPointsIndex::RIGHT_BOTTOM]
         );
     }
-    auto pred_state = target_state;
-    pred_state.predict(timestamp, target_number);
+
     for (int j = 0; j < n_obs; ++j) {
         bool in_gate = false;
         double min_pos_err = std::numeric_limits<double>::max();
-        for (int id = 0; id < armors_num; ++id) {
-            UVMeasure::Ctx tmp_ctx {
-                .armor_num = armors_num,
-                .id = id,
-                .camera_cv_in_odom = camera_cv_in_odom,
-                .camera_info = camera_info,
-                .armor_number = target_number,
-                .normalized = false,
-            };
-            UVMeasure measure { .ctx = tmp_ctx };
-            measure.ctx.is_left = true;
-            auto light1 = measure.projected_points(pred_state.x);
-            measure.ctx.is_left = false;
-            auto light2 = measure.projected_points(pred_state.x);
+        for (int i = 0; i < maybe_visible.size(); ++i) {
+            int id = maybe_visible[i];
+            auto lightl = predict_light(id, true, pred_state, camera_info, camera_cv_in_odom);
+            auto lightr = predict_light(id, false, pred_state, camera_info, camera_cv_in_odom);
             auto avg_length_pred =
-                (cv::norm(light1.first - light1.second) + cv::norm(light2.first - light2.second))
+                (cv::norm(lightl.first - lightl.second) + cv::norm(lightr.first - lightr.second))
                 / 2.0;
             // auto avg_length_meas =
             //     (cv::norm(meas_list[j].first.first - meas_list[j].first.second)
@@ -632,17 +644,17 @@ std::vector<std::pair<int, Armor>> ArmorTarget::match_armor(
             // if (std::abs(avg_angle_pred - avg_angle_meas) > 0.2) {
             //     continue;
             // }
-            double pos_err = cv::norm(light1.first - meas_list[j].first.first)
-                + cv::norm(light2.first - meas_list[j].second.first)
-                + cv::norm(light1.second - meas_list[j].first.second)
-                + cv::norm(light2.second - meas_list[j].second.second);
+            double pos_err = cv::norm(lightl.first - meas_list[j].first.first)
+                + cv::norm(lightr.first - meas_list[j].second.first)
+                + cv::norm(lightl.second - meas_list[j].first.second)
+                + cv::norm(lightr.second - meas_list[j].second.second);
 
             if (std::isfinite(pos_err)
                 && pos_err < avg_length_pred
                         * (all_init ? cfg.armor_match_pos_gate_all_init_by_length_ratio
                                     : cfg.armor_match_pos_gate_by_length_ratio))
             {
-                cost[j][id] = pos_err;
+                cost[j][i] = pos_err;
                 in_gate = true;
             }
             if (pos_err < min_pos_err) {
@@ -653,10 +665,26 @@ std::vector<std::pair<int, Armor>> ArmorTarget::match_armor(
             AWAKENING_WARN("match out of gate min pos_err: {}", min_pos_err);
         }
     }
-    for (auto [obs, id]: dta_utils::greedy_match(cost, n_obs, armors_num, MAX_COST)) {
-        result.emplace_back(id, armors[obs]);
+    for (auto [obs, i]: dta_utils::greedy_match(cost, n_obs, maybe_visible.size(), MAX_COST)) {
+        result.emplace_back(maybe_visible[i], armors[obs]);
     }
     return result;
+}
+std::pair<cv::Point2f, cv::Point2f> ArmorTarget::predict_light(
+    int armor_id,
+    bool is_left,
+    const armor_point_motion_model::State& state,
+    const CameraInfo& camera_info,
+    const ISO3& camera_cv_in_odom
+) const noexcept {
+    UVMeasure::Ctx ctx { .armor_num = armor_num(),
+                         .id = armor_id,
+                         .camera_cv_in_odom = camera_cv_in_odom,
+                         .camera_info = camera_info,
+                         .armor_number = target_number,
+                         .is_left = is_left };
+    UVMeasure measure { .ctx = ctx };
+    return measure.projected_points(state.x);
 }
 std::vector<std::tuple<int, bool, Light>> ArmorTarget::match_light(
     std::vector<Light>& lights,
@@ -666,54 +694,77 @@ std::vector<std::tuple<int, bool, Light>> ArmorTarget::match_light(
     const ISO3& camera_cv_in_odom
 ) const noexcept {
     constexpr double MAX_COST = 1e9;
-    std::vector<std::tuple<int, bool, Light>> result;
-
-    if (target_number == ArmorClass::BASE || matched_armors.size() != 1) {
-        return result;
+    if (target_number == ArmorClass::BASE || matched_armors.empty()) {
+        return {};
     }
+
     auto pred_state = target_state;
     pred_state.predict(timestamp, target_number);
     const int armors_num = armor_num();
-    const int armor_id = matched_armors.front().first;
-    auto& matched_armor = matched_armors.front().second;
-    auto predict_light = [&](int id, bool is_left) -> std::pair<cv::Point2f, cv::Point2f> {
-        UVMeasure::Ctx ctx { .armor_num = armors_num,
-                             .id = id,
-                             .camera_cv_in_odom = camera_cv_in_odom,
-                             .camera_info = camera_info,
-                             .armor_number = target_number,
-                             .is_left = is_left };
-        UVMeasure measure { .ctx = ctx };
-        return measure.projected_points(pred_state.x);
-    };
-    struct VisibleLight {
-        int armor_id;
-        bool is_left;
-        std::pair<cv::Point2f, cv::Point2f> projected_points;
-    };
-    const std::array visible_mapping {
-        std::pair { (armor_id + armors_num - 1) % armors_num, false }, // 左可见
-        std::pair { (armor_id + 1) % armors_num, true }, // 右可见
-    };
-    std::array<VisibleLight, visible_mapping.size()> visible_lights {
-        VisibleLight { .armor_id = visible_mapping[0].first,
-                       .is_left = visible_mapping[0].second,
-                       .projected_points =
-                           predict_light(visible_mapping[0].first, visible_mapping[0].second) },
-        VisibleLight { .armor_id = visible_mapping[1].first,
-                       .is_left = visible_mapping[1].second,
-                       .projected_points =
-                           predict_light(visible_mapping[1].first, visible_mapping[1].second) }
-    };
+    std::vector<bool> matched(armors_num, false);
+    for (auto& [id, _]: matched_armors) {
+        matched[id] = true;
+    }
+    auto camera_in_odom = camera_cv_in_odom * R_CV2PHYSICS.inverse();
+    std::vector<std::pair<double, int>> angle_dis_in_camera;
+    for (int i = 0; i < armors_num; i++) {
+        auto pose_in_odom = _armor_pose(pred_state.x.data(), i, armors_num, target_number);
+        auto pose_in_camera = camera_in_odom.inverse() * pose_in_odom;
+        auto rpy = utils::matrix2rpy(pose_in_camera.linear().eval());
+        angle_dis_in_camera.emplace_back(std::abs(angles::normalize_angle((0) - rpy[2])), i);
+    }
 
-    const int n_obs = static_cast<int>(lights.size());
-    std::vector<std::array<double, visible_lights.size()>> cost(
-        n_obs,
-        { MAX_COST + 1, MAX_COST + 1 }
+    if (angle_dis_in_camera.empty()) {
+        return {};
+    }
+    std::sort(
+        angle_dis_in_camera.begin(),
+        angle_dis_in_camera.end(),
+        [](const auto& a, const auto& b) { return a.first < b.first; }
     );
+    std::vector<std::tuple<int, bool, std::pair<cv::Point2f, cv::Point2f>>> visible_lights;
+    auto maybe_visible = [&](int armor_id) {
+        int left_id = (armor_id + armors_num - 1) % armors_num;
+        int right_id = (armor_id + 1) % armors_num;
+        if (!matched[left_id]) {
+            visible_lights.emplace_back(
+                left_id,
+                false,
+                predict_light(left_id, false, pred_state, camera_info, camera_cv_in_odom)
+            );
+        }
+        if (!matched[right_id]) {
+            visible_lights.emplace_back(
+                right_id,
+                true,
+                predict_light(right_id, true, pred_state, camera_info, camera_cv_in_odom)
+            );
+        }
+    };
+    maybe_visible(angle_dis_in_camera.front().second);
 
-    auto calc_cost = [&](const Light& light, const VisibleLight& visible_light) -> double {
-        const auto& pred = visible_light.projected_points;
+    return match_light(lights, matched_armors, visible_lights);
+}
+std::vector<std::tuple<int, bool, Light>> ArmorTarget::match_light(
+    std::vector<Light>& lights,
+    std::vector<std::pair<int, Armor>>& matched_armors,
+    const std::vector<std::tuple<int, bool, std::pair<cv::Point2f, cv::Point2f>>>& visible_lights
+) const noexcept {
+    std::vector<std::tuple<int, bool, Light>> result;
+    if (visible_lights.empty()) {
+        return result;
+    }
+    const int n_obs = static_cast<int>(lights.size());
+    constexpr double MAX_COST = 1e9;
+    std::vector<std::vector<double>> cost(
+        n_obs,
+        std::vector<double>(visible_lights.size(), MAX_COST + 1)
+    );
+    auto calc_cost =
+        [&](const Light& light,
+            const std::tuple<int, bool, std::pair<cv::Point2f, cv::Point2f>>& visible_light
+        ) -> double {
+        const auto& pred = std::get<2>(visible_light);
         for (auto& [_, armor]: matched_armors) {
             if (!is_light_in_armor(armor.key_points, light)) {
                 return MAX_COST + 1;
@@ -750,11 +801,11 @@ std::vector<std::tuple<int, bool, Light>> ArmorTarget::match_light(
         }
     }
 
-    for (auto [obs, id]: dta_utils::greedy_match(cost, n_obs, 2, MAX_COST)) {
-        const auto& matched_light = visible_lights[id];
-        result.emplace_back(matched_light.armor_id, matched_light.is_left, lights[obs]);
+    for (auto [obs, id]: dta_utils::greedy_match(cost, n_obs, visible_lights.size(), MAX_COST)) {
+        const auto& [armor_id, is_left, _] = visible_lights[id];
+        lights[obs].laji = false;
+        result.emplace_back(armor_id, is_left, lights[obs]);
     }
-
     return result;
 }
 [[nodiscard]] cv::Rect ArmorTarget::get_net_focus_roi(
@@ -773,7 +824,7 @@ std::vector<std::tuple<int, bool, Light>> ArmorTarget::match_light(
     rect = utils::expand_and_clip_rect(rect, expand_ratio, image_size);
     const cv::Rect img_rect = cv::Rect(0, 0, image_size.width, image_size.height);
 
-    if ((rect & img_rect).area() <= 100) {
+    if ((rect & img_rect).area() <= 0) {
         return img_rect;
     }
 
@@ -825,32 +876,7 @@ std::vector<std::tuple<int, bool, Light>> ArmorTarget::match_light(
     const CameraInfo& camera_info,
     const cv::Size& image_size
 ) const noexcept {
-    std::vector<cv::Point2f> pts;
-    auto tmp_target_state = target_state;
-    tmp_target_state.predict(timestamp, target_number);
-    const int armors_num = armor_num();
-    for (int id = 0; id < armors_num; ++id) {
-        UVMeasure::Ctx tmp_ctx {
-            .armor_num = armors_num,
-            .id = id,
-            .camera_cv_in_odom = camera_cv_in_odom,
-            .camera_info = camera_info,
-            .armor_number = target_number,
-        };
-        UVMeasure measure { .ctx = tmp_ctx };
-        {
-            measure.ctx.is_left = true;
-            const auto light = measure.projected_points(tmp_target_state.x);
-            pts.push_back(light.first);
-            pts.push_back(light.second);
-        }
-        {
-            measure.ctx.is_left = false;
-            const auto light = measure.projected_points(tmp_target_state.x);
-            pts.push_back(light.first);
-            pts.push_back(light.second);
-        }
-    }
+    auto pts = expanded_pts(timestamp, camera_cv_in_odom, camera_info);
     cv::Rect rect = cv::boundingRect(pts);
     const cv::Rect img_rect = cv::Rect(0, 0, image_size.width, image_size.height);
     if ((rect & img_rect).area() <= 0) {
@@ -868,23 +894,15 @@ std::vector<std::tuple<int, bool, Light>> ArmorTarget::match_light(
     tmp_target_state.predict(timestamp, target_number);
     const int armors_num = armor_num();
     for (int id = 0; id < armors_num; ++id) {
-        UVMeasure::Ctx tmp_ctx {
-            .armor_num = armors_num,
-            .id = id,
-            .camera_cv_in_odom = camera_cv_in_odom,
-            .camera_info = camera_info,
-            .armor_number = target_number,
-        };
-        UVMeasure measure { .ctx = tmp_ctx };
         {
-            measure.ctx.is_left = true;
-            const auto light = measure.projected_points(tmp_target_state.x);
+            const auto light =
+                predict_light(id, true, tmp_target_state, camera_info, camera_cv_in_odom);
             pts.push_back(light.first);
             pts.push_back(light.second);
         }
         {
-            measure.ctx.is_left = false;
-            const auto light = measure.projected_points(tmp_target_state.x);
+            const auto light =
+                predict_light(id, false, tmp_target_state, camera_info, camera_cv_in_odom);
             pts.push_back(light.first);
             pts.push_back(light.second);
         }

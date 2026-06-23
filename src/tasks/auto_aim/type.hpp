@@ -249,7 +249,9 @@ struct Light: public cv::RotatedRect {
         }
     }
     inline void draw(cv::Mat& img) const noexcept {
-        cv::line(img, top, bottom, cv::Scalar(100, 255, 100), 2);
+        // cv::line(img, top, bottom, cv::Scalar(100, 255, 100), 2);
+        cv::circle(img, top, 3, cv::Scalar(0, 255, 0), -1);
+        cv::circle(img, bottom, 3, cv::Scalar(0, 255, 0), -1);
     }
     std::optional<std::pair<cv::Point2f, cv::Point2f>> corrected;
     cv::Point2f top, bottom;
@@ -259,6 +261,7 @@ struct Light: public cv::RotatedRect {
     double width = 0;
     float tilt_angle = 0;
     size_t id;
+    bool laji = true;
 };
 struct Armor {
     ArmorColor color = ArmorColor::NONE;
@@ -390,12 +393,16 @@ struct Armor {
         cv::Point lb = get(I::LEFT_BOTTOM);
         // cv::Point lm = get(I::LEFT_MID);
         // cv::Point rm = get(I::RIGHT_MID);
-        cv::line(img, lt, rb, cv::Scalar(0, 255, 0), 2);
-        cv::line(img, rb, rt, cv::Scalar(0, 255, 0), 2);
-        cv::line(img, rt, lb, cv::Scalar(0, 255, 0), 2);
-        cv::line(img, lb, lt, cv::Scalar(0, 255, 0), 2);
+        // cv::line(img, lt, rb, cv::Scalar(0, 255, 0), 2);
+        // cv::line(img, rb, rt, cv::Scalar(0, 255, 0), 2);
+        // cv::line(img, rt, lb, cv::Scalar(0, 255, 0), 2);
+        // cv::line(img, lb, lt, cv::Scalar(0, 255, 0), 2);
         // cv::circle(img, lm, 5, cv::Scalar(0, 255, 0), -1);
         // cv::circle(img, rm, 5, cv::Scalar(0, 255, 0), -1);
+        cv::circle(img, lt, 3, cv::Scalar(0, 255, 0), -1);
+        cv::circle(img, rt, 3, cv::Scalar(0, 255, 0), -1);
+        cv::circle(img, rb, 3, cv::Scalar(0, 255, 0), -1);
+        cv::circle(img, lb, 3, cv::Scalar(0, 255, 0), -1);
         cv::Point bottom_center = (lb + rb) * 0.5;
 
         bottom_center.y += 20;

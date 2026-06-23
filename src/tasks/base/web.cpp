@@ -3,6 +3,7 @@
 #include "tasks/auto_buff/type.hpp"
 #include "utils/common/type_common.hpp"
 #include "utils/utils.hpp"
+#include <array>
 #include <memory>
 #include <opencv2/core/types.hpp>
 #include <opencv2/imgproc.hpp>
@@ -174,15 +175,12 @@ struct Web::Impl {
                         armor_pose_in_camera_cv
                     );
                     using I = auto_aim::ArmorKeyPointsIndex;
+                    static const std::array<cv::Scalar, 4> colors = { cv::Scalar(255, 255, 255),
+                                                                      cv::Scalar(255, 0, 255),
+                                                                      cv::Scalar(255, 0, 0),
+                                                                      cv::Scalar(0, 0, 255) };
                     auto draw_line = [&](auto _i, auto _j) {
-                        cv::line(
-                            img,
-                            image_points[_i],
-                            image_points[_j],
-                            (i == cmd.select_id) ? cv::Scalar(255, 0, 255)
-                                                 : cv::Scalar(200, 255, 200),
-                            2
-                        );
+                        cv::line(img, image_points[_i], image_points[_j], colors[i], 2);
                     };
                     draw_line(I::LEFT_TOP, I::LEFT_BOTTOM);
                     draw_line(I::LEFT_BOTTOM, I::RIGHT_BOTTOM);

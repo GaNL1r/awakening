@@ -91,7 +91,7 @@ armor_tracker:
   q_l: 0.0000001
   q_h: 0.0000001
   q_wpr: 0.00000
-  q_outpost_dz: 0.01
+  q_outpost_dz: 0.0
   enable_lights_measure: true
   armor_match_pos_gate_by_length_ratio: 20.0
   armor_match_pos_gate_all_init_by_length_ratio: 50.0

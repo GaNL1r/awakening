@@ -52,6 +52,14 @@ struct ArmorTracker::Impl {
         } else if (cur.track_state.tracker_state == ArmorTarget::TrackState::TRACKING) {
             pre.track_state.tracker_state = ArmorTarget::TrackState::LOST; //cur恢复就重置
         }
+        armors.lights.erase(
+            std::remove_if(
+                armors.lights.begin(),
+                armors.lights.end(),
+                [](const Light& l) { return l.laji; }
+            ),
+            armors.lights.end()
+        );
 
         return target_buf_[cur_target_idx_].fast_copy_without_ekf(); //下游不让用ekf
     }
