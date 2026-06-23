@@ -17,6 +17,10 @@
 #include <optional>
 #include <string>
 #include <utility>
+#ifdef USE_RERUN
+    #include "_rerun/recorder.hpp"
+    #include "_rerun/tf.hpp"
+#endif
 #ifdef USE_ROS2
     #include "_rcl/visual/armor.hpp"
     #include "_rcl/visual/armor_target.hpp"
@@ -128,7 +132,11 @@ bool is_web_running() {
         },
         std::chrono::duration<double>(1.0)
     );
-    return cached.load();
+    bool running = cached.load();
+#ifdef USE_RERUN
+    running = running || rerun_visual::Recorder::instance().enabled();
+#endif
+    return running;
 }
 static constexpr auto RECORD_FOLDER_PATH_ARR = utils::concat(ROOT_DIR, "/record/auto_aim");
 static constexpr std::string_view RECORD_FOLDER_PATH(RECORD_FOLDER_PATH_ARR.data());
@@ -447,12 +455,11 @@ int main(int argc, char** argv) {
                         camera_info,
                         frame.img_frame.src_img.size()
                     );
-                    detect_light->x -= detect_light->width * 0.3;
-                    detect_light->y -= detect_light->height * 0.3;
-                    detect_light->width *= 1.6;
-                    detect_light->height *= 1.6;
-                    detect_light.value() &=
-                        cv::Rect(0, 0, frame.img_frame.src_img.cols, frame.img_frame.src_img.rows);
+                    detect_light = utils::expand_and_clip_rect(
+                        detect_light.value(),
+                        1.6,
+                        frame.img_frame.src_img.size()
+                    );
                 }
             }
 
@@ -859,6 +866,15 @@ int main(int argc, char** argv) {
         if (debug) {
             s.add_rate_source<>("tf_pub", 100.0, [&]() {
                 rcl_tf.pub_robot_tf(*tf, [](SentryFrame frame) {
+                    return SentryFrame_to_str(frame);
+                });
+            });
+        }
+#endif
+#ifdef USE_RERUN
+        if (debug) {
+            s.add_rate_source<>("rerun_tf", 15.0, [&]() {
+                rerun_visual::log_robot_tf(*tf, [](SentryFrame frame) {
                     return SentryFrame_to_str(frame);
                 });
             });

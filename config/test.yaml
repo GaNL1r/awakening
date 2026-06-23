@@ -54,12 +54,12 @@ armor_detector:
       execution_mode: "PERFORMANCE"
       infer_request_buffer_num: 10
     tensorrt:
-      model_path: ${ROOT_DIR}/model/opt-1208-001.onnx
+      model_path: ${ROOT_DIR}/model/0708.onnx
       copy_context_num: 3
       min_free_mem_ratio: 0.1
       use_cuda_preproces: true
     armor_infer:
-      model_type: tup
+      model_type: rp
       conf_threshold: 0.2
   number_classifier:
     enable: true
@@ -83,10 +83,8 @@ armor_tracker:
   lost_time_thres: 1.5
   lost_time_thres_outpost: 2.0
   tracking_thres: 10
-  match_gate_armor: 30.0
-  match_gate_not_all_init_armor: 100.0
   qxyz_common: [30.0, 30.0, 1.0]
-  qyaw_common: 100.0
+  qyaw_common: 30.0
   qxyz_output: [1.0, 1.0, 1.0]
   qyaw_output: 0.01
   q_r: 0.0000001
@@ -95,12 +93,18 @@ armor_tracker:
   q_wpr: 0.0000001
   q_outpost_dz: 0.01
   enable_lights_measure: true
+  armor_match_pos_gate_by_length_ratio: 20.0
+  armor_match_pos_gate_all_init_by_length_ratio: 50.0
   light_match_length_ratio_gate: 0.2
   light_match_angle_gate: 0.2
   light_match_pos_gate_by_length_ratio: 5.0
-  r_uv_at_1m: 70.0
-  r_uv_min: 30.0
+  r_sigma_px: 3.0
+  r_sigma_half_length: 4.0
+  r_sigma_angle: 0.2
   esekf_iter_num: 5
+
+
+
 
   
 auto_aim_fsm:
@@ -173,10 +177,10 @@ rune_tracker:
   q_xyz: [0.0001, 0.0001, 0.0001]
   q_yaw: 0.1
   q_roll: 10.0
-  q_a: 0.00001
-  q_w: 0.00001
-  q_tau: 0.000001
-  match_gate: 50.0
+  q_a_raw: 0.01
+  q_w_raw: 0.01
+  q_tau: 0.01
+  match_gate: 30.0
   voter_state_need_count: 50
   voter_mode_need_count: 20
   big_args_continue_time: 1.0

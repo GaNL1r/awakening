@@ -162,6 +162,11 @@ bool RuneTarget::reset(
     };
     Eigen::DiagonalMatrix<double, X_N> p0;
     p0.diagonal().setZero();
+    p0.diagonal()[idx::CX] = p0.diagonal()[idx::CY] = p0.diagonal()[idx::CZ] = 1;
+    p0.diagonal()[idx::A_RAW] = p0.diagonal()[idx::W_RAW] = 1;
+    p0.diagonal()[idx::ROLL] = p0.diagonal()[idx::YAW] = 1;
+    p0.diagonal()[idx::V_ROLL] = 100;
+    p0.diagonal()[idx::TAU] = 100;
     const auto u_q = [this]() {
         Eigen::Matrix<double, X_N, X_N> q;
         return q;
@@ -177,8 +182,18 @@ bool RuneTarget::reset(
             nominal[idx::YAW] = angles::normalize_angle(nominal[idx::YAW] + delta[idx::YAW]);
             nominal[idx::ROLL] = angles::normalize_angle(nominal[idx::ROLL] + delta[idx::ROLL]);
         };
+    const auto box_minus = [](const Eigen::Matrix<double, X_N, 1>& nominal,
+                              const Eigen::Matrix<double, X_N, 1>& value,
+                              Eigen::Matrix<double, X_N, 1>& delta) {
+        delta = value - nominal;
+
+        // angle difference must be wrapped
+        delta[idx::YAW] = angles::normalize_angle(value[idx::YAW] - nominal[idx::YAW]);
+        delta[idx::ROLL] = angles::normalize_angle(value[idx::ROLL] - nominal[idx::ROLL]);
+    };
+
     voter.reset(timestamp);
-    esekf = ESEKF(Predict { .dt = 0.005, .voter = voter }, u_q, inject, p0);
+    esekf = ESEKF(Predict { .dt = 0.005, .voter = voter }, u_q, inject, box_minus, p0);
 
     esekf.value().set_iteration_num(cfg.esekf_iter_num);
 
@@ -189,13 +204,18 @@ bool RuneTarget::reset(
     double tau = 0;
     if (std::chrono::duration<double>(timestamp - last_update).count() < cfg.big_args_continue_time)
     {
-        a_guess = target_state.x[idx::A];
-        w_guess = target_state.x[idx::W];
+        a_guess = target_state.a();
+        w_guess = target_state.w();
         tau = target_state.x[idx::TAU]
             + std::chrono::duration<double>(timestamp - target_state.timestamp).count();
     }
     target_state.x = Eigen::VectorXd::Zero(X_N);
-    target_state.x << pos.x(), pos.y(), pos.z(), rpy[2], rpy[0], 0, tau, a_guess, w_guess;
+    target_state.set_pos(pos);
+    target_state.x[idx::ROLL] = rpy[0];
+    target_state.x[idx::YAW] = rpy[2];
+    target_state.x[idx::A_RAW] = unbounded_from_bounded(a_guess, A_LOWER, A_UPPER);
+    target_state.x[idx::W_RAW] = unbounded_from_bounded(w_guess, W_LOWER, W_UPPER);
+    target_state.x[idx::TAU] = tau;
     target_state.timestamp = timestamp;
     target_state.frame_id = frame_id;
     esekf.value().set_state(target_state.x);
@@ -245,16 +265,16 @@ void RuneTarget::fan_target_pnp(
 RuneTarget::process_noise(double dt, const Voter& v) const noexcept {
     Eigen::Matrix<double, X_N, X_N> q;
     q.setZero();
-    q(idx::CX, idx::CX) = cfg.q_xyz.x();
-    q(idx::CY, idx::CY) = cfg.q_xyz.y();
-    q(idx::CZ, idx::CZ) = cfg.q_xyz.z();
-    q(idx::YAW, idx::YAW) = cfg.q_yaw;
+    q(idx::CX, idx::CX) = dt * cfg.q_xyz.x();
+    q(idx::CY, idx::CY) = dt * cfg.q_xyz.y();
+    q(idx::CZ, idx::CZ) = dt * cfg.q_xyz.z();
+    q(idx::YAW, idx::YAW) = dt * cfg.q_yaw;
 
     utils::fill_constant_accel_noise(q, idx::ROLL, idx::V_ROLL, cfg.q_roll, dt);
 
-    q(idx::A, idx::A) = cfg.q_a;
-    q(idx::W, idx::W) = cfg.q_w;
-    q(idx::TAU, idx::TAU) = cfg.q_tau;
+    q(idx::A_RAW, idx::A_RAW) = dt * cfg.q_a_raw;
+    q(idx::W_RAW, idx::W_RAW) = dt * cfg.q_w_raw;
+    q(idx::TAU, idx::TAU) = dt * cfg.q_tau;
 
     return q;
 }
@@ -549,7 +569,7 @@ std::vector<std::pair<int, RuneFanTarget>> RuneTarget::match_fan_target(
     cv::Rect rect = cv::boundingRect(pts);
     cv::Rect img_rect(0, 0, image_size.width, image_size.height);
 
-    if ((rect & img_rect).area() <= 0) {
+    if ((rect & img_rect).area() <= 100) {
         return img_rect;
     }
     rect &= img_rect;

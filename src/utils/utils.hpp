@@ -23,55 +23,160 @@ inline Eigen::Matrix<T, 3, 3> so3_hat(const Eigen::Matrix<T, 3, 1>& w) {
 }
 template<class T>
 inline Eigen::Matrix<T, 3, 3> so3_exp(const Eigen::Matrix<T, 3, 1>& phi) {
-    const T theta = phi.norm();
+    const T theta2 = phi.squaredNorm();
+    const T theta = ceres::sqrt(theta2);
 
     const auto W = so3_hat(phi);
     const auto W2 = W * W;
 
     Eigen::Matrix<T, 3, 3> R = Eigen::Matrix<T, 3, 3>::Identity();
 
-    const T A = ceres::sin(theta) / theta;
-    const T B = (T(1) - ceres::cos(theta)) / (theta * theta);
+    T A;
+    T B;
+    if (theta2 < T(1e-12)) {
+        const T theta4 = theta2 * theta2;
+        A = T(1) - theta2 / T(6) + theta4 / T(120);
+        B = T(0.5) - theta2 / T(24) + theta4 / T(720);
+    } else {
+        A = ceres::sin(theta) / theta;
+        B = (T(1) - ceres::cos(theta)) / theta2;
+    }
 
     R += A * W + B * W2;
 
     return R;
 }
+template<typename T>
+Eigen::Matrix<T, 3, 3> so3_right_jacobian_inv(const Eigen::Matrix<T, 3, 1>& phi) {
+    using Mat3 = Eigen::Matrix<T, 3, 3>;
+
+    const T theta = phi.norm();
+
+    Mat3 I = Mat3::Identity();
+    Mat3 W = utils::so3_hat(phi);
+
+    if (theta < T(1e-6)) {
+        return I + T(0.5) * W + T(1.0 / 12.0) * W * W;
+    }
+
+    const T half_theta = theta * T(0.5);
+
+    const T coeff = T(1) - theta * ceres::cos(half_theta) / (T(2) * ceres::sin(half_theta));
+
+    return I + T(0.5) * W + coeff / (theta * theta) * W * W;
+}
+template<class T>
+inline Eigen::Transform<T, 3, Eigen::Isometry>
+se3_exp(const Eigen::Matrix<T, 3, 1>& rho, const Eigen::Matrix<T, 3, 1>& phi) {
+    const T theta2 = phi.squaredNorm();
+    const T theta = ceres::sqrt(theta2);
+
+    const auto W = so3_hat(phi);
+    const auto W2 = W * W;
+
+    T B;
+    T C;
+    if (theta2 < T(1e-12)) {
+        const T theta4 = theta2 * theta2;
+        B = T(0.5) - theta2 / T(24) + theta4 / T(720);
+        C = T(1.0 / 6.0) - theta2 / T(120) + theta4 / T(5040);
+    } else {
+        B = (T(1) - ceres::cos(theta)) / theta2;
+        C = (theta - ceres::sin(theta)) / (theta2 * theta);
+    }
+
+    const Eigen::Matrix<T, 3, 3> V = Eigen::Matrix<T, 3, 3>::Identity() + B * W + C * W2;
+
+    Eigen::Transform<T, 3, Eigen::Isometry> T_se3 =
+        Eigen::Transform<T, 3, Eigen::Isometry>::Identity();
+    T_se3.linear() = so3_exp(phi);
+    T_se3.translation() = V * rho;
+    return T_se3;
+}
 template<class T>
 inline Eigen::Matrix<T, 3, 1> so3_log(const Eigen::Matrix<T, 3, 3>& R) {
     const T cos_theta = (R.trace() - T(1.0)) * T(0.5);
-    const T theta = ceres::acos(cos_theta);
-    const T scale = theta / (T(2.0) * ceres::sin(theta));
     Eigen::Matrix<T, 3, 1> w;
     w << R(2, 1) - R(1, 2), R(0, 2) - R(2, 0), R(1, 0) - R(0, 1);
+    if (cos_theta > T(1.0 - 1e-12)) {
+        return T(0.5) * w;
+    }
+    const T theta = ceres::acos(cos_theta);
+    const T scale = theta / (T(2.0) * ceres::sin(theta));
     return scale * w;
 }
 template<class T>
-inline Eigen::Quaternion<T> rpy2quat(const Eigen::Vector3<T>& rpy) {
+inline void se3_log(
+    const Eigen::Transform<T, 3, Eigen::Isometry>& T_se3,
+    Eigen::Matrix<T, 3, 1>& rho,
+    Eigen::Matrix<T, 3, 1>& phi
+) {
+    phi = so3_log(T_se3.linear().eval());
+
+    const T theta2 = phi.squaredNorm();
+    const T theta = ceres::sqrt(theta2);
+    const auto W = so3_hat(phi);
+    const auto W2 = W * W;
+
+    T D;
+    if (theta2 < T(1e-12)) {
+        const T theta4 = theta2 * theta2;
+        D = T(1.0 / 12.0) + theta2 / T(720) + theta4 / T(30240);
+    } else {
+        D = T(1) / theta2 - (T(1) + ceres::cos(theta)) / (T(2) * theta * ceres::sin(theta));
+    }
+
+    const Eigen::Matrix<T, 3, 3> V_inv = Eigen::Matrix<T, 3, 3>::Identity() - T(0.5) * W + D * W2;
+    rho = V_inv * T_se3.translation();
+}
+enum class RPYOrder { XYZ, ZYX };
+template<class T>
+inline Eigen::Quaternion<T> rpy2quat(const Eigen::Vector3<T>& rpy, RPYOrder order = RPYOrder::ZYX) {
     Eigen::AngleAxis<T> roll(rpy.x(), Eigen::Vector3<T>::UnitX());
     Eigen::AngleAxis<T> pitch(rpy.y(), Eigen::Vector3<T>::UnitY());
     Eigen::AngleAxis<T> yaw(rpy.z(), Eigen::Vector3<T>::UnitZ());
-    Eigen::Quaternion<T> q { yaw * pitch * roll };
+    Eigen::Quaternion<T> q;
+    switch (order) {
+        case RPYOrder::ZYX:
+            q = { yaw * pitch * roll };
+            break;
+        case RPYOrder::XYZ:
+            q = { roll * pitch * yaw };
+            break;
+    }
     q.normalize();
     return q;
 }
 
 template<class T>
-inline Eigen::Matrix3<T> rpy2matrix(const Eigen::Vector3<T>& rpy) {
-    return rpy2quat(rpy).toRotationMatrix();
+inline Eigen::Matrix3<T> rpy2matrix(const Eigen::Vector3<T>& rpy, RPYOrder order = RPYOrder::ZYX) {
+    return rpy2quat(rpy, order).toRotationMatrix();
 }
 
 template<class T>
-inline Eigen::Vector3<T> matrix2rpy(const Eigen::Matrix3<T>& R) {
-    const T roll = ceres::atan2(R(2, 1), R(2, 2));
-    const T pitch = ceres::atan2(-R(2, 0), ceres::hypot(R(2, 1), R(2, 2)));
-    const T yaw = ceres::atan2(R(1, 0), R(0, 0));
-    return { roll, pitch, yaw };
+inline Eigen::Vector3<T> matrix2rpy(const Eigen::Matrix3<T>& R, RPYOrder order = RPYOrder::ZYX) {
+    switch (order) {
+        case RPYOrder::ZYX: {
+            const T roll = ceres::atan2(R(2, 1), R(2, 2));
+            const T pitch = ceres::atan2(-R(2, 0), ceres::hypot(R(2, 1), R(2, 2)));
+            const T yaw = ceres::atan2(R(1, 0), R(0, 0));
+            return { roll, pitch, yaw };
+        }
+
+        case RPYOrder::XYZ: {
+            const T pitch = ceres::asin(-R(0, 2));
+            const T roll = ceres::atan2(R(1, 2), R(2, 2));
+            const T yaw = ceres::atan2(R(0, 1), R(0, 0));
+            return { roll, pitch, yaw };
+        }
+    }
+
+    return { T(0), T(0), T(0) };
 }
 
 template<class T>
-inline Eigen::Vector3<T> quat2rpy(const Eigen::Quaternion<T>& q) {
-    return matrix2rpy(q.normalized().toRotationMatrix());
+inline Eigen::Vector3<T> quat2rpy(const Eigen::Quaternion<T>& q, RPYOrder order = RPYOrder::ZYX) {
+    return matrix2rpy(q.normalized().toRotationMatrix(), order);
 }
 
 inline std::string expand_env(const std::string& s) {
@@ -217,15 +322,25 @@ inline std::vector<cv::Point2f> reprojection(
     cv::projectPoints(object_points, rvec, tvec, camera_matrix, dist_coeffs, pts_2d);
     return pts_2d;
 }
-template<class ImgPoints>
-inline std::vector<cv::Point2f> undistort_points(
+template<typename ImgPoints>
+inline ImgPoints undistort_points(
     const cv::Mat& camera_matrix,
     const cv::Mat& dist_coeffs,
     const ImgPoints& img_points
 ) {
-    std::vector<cv::Point2f> norm_pts;
+    ImgPoints norm_pts;
     cv::undistortPoints(img_points, norm_pts, camera_matrix, dist_coeffs);
     return norm_pts;
+}
+template<typename ImgPoint>
+inline ImgPoint undistort_point(
+    const cv::Mat& camera_matrix,
+    const cv::Mat& dist_coeffs,
+    const ImgPoint& img_point
+) {
+    std::vector<ImgPoint> norm_pts;
+    cv::undistortPoints(std::vector<ImgPoint> { img_point }, norm_pts, camera_matrix, dist_coeffs);
+    return norm_pts.front();
 }
 template<typename T>
 inline void project_points_jets(
@@ -437,7 +552,7 @@ fill_constant_accel_noise(Mat& q, int pos_idx, int vel_idx, double noise, double
 
     q(pos_idx, pos_idx) = dt4 * 0.25 * noise;
     q(pos_idx, vel_idx) = dt3 * 0.5 * noise;
-    q(vel_idx, pos_idx) = q(pos_idx, vel_idx);
+    q(vel_idx, pos_idx) = dt3 * 0.5 * noise;
     q(vel_idx, vel_idx) = dt2 * noise;
 }
 [[nodiscard]] inline double sigmoid(double x) noexcept {
@@ -487,5 +602,16 @@ golden_section_search(Func&& f, T left, T right, T eps = static_cast<T>(1e-4)) {
 
     return (f1 < f2) ? x1 : x2;
 }
-
+template<typename RectType>
+inline RectType
+expand_and_clip_rect(const RectType& rect, double expand_ratio, const cv::Size& img_size) {
+    RectType r = rect;
+    r.x -= (r.width * (expand_ratio - 1.0) * 0.5);
+    r.y -= (r.height * (expand_ratio - 1.0) * 0.5);
+    r.width = (r.width * expand_ratio);
+    r.height = (r.height * expand_ratio);
+    RectType img_rect(0, 0, img_size.width, img_size.height);
+    r = r & img_rect;
+    return r;
+}
 } // namespace awakening::utils

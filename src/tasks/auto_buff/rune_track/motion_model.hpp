@@ -22,8 +22,7 @@
 namespace awakening::auto_buff::motion_model {
 
 namespace idx {
-    enum { CX, CY, CZ, YAW, ROLL, V_ROLL, TAU, A, W, X_N };
-
+    enum { CX, CY, CZ, YAW, ROLL, V_ROLL, TAU, A_RAW, W_RAW, X_N };
     enum { R_X, R_Y, _R_Z_N };
     enum { TOP_X, TOP_Y, LEFT_X, LEFT_Y, BOTTOM_X, BOTTOM_Y, RIGHT_X, RIGHT_Y, _FanBlade_Z_N };
     enum { LT_X, LT_Y, LB_X, LB_Y, RB_X, RB_Y, RT_X, RT_Y, CEN_X, CEN_Y, _FanTarget_Z_N };
@@ -50,6 +49,23 @@ template<typename T>
 inline T normalize_angle(T a) {
     const T two_pi = T(2.0 * M_PI);
     return a - two_pi * floor((a + T(M_PI)) / two_pi);
+}
+template<typename T>
+inline T bounded_sigmoid(T raw, double lower, double upper) {
+    const T s = T(1) / (T(1) + ceres::exp(-raw));
+    return T(lower) + T(upper - lower) * s;
+}
+inline double unbounded_from_bounded(double value, double lower, double upper) {
+    const double ratio = std::clamp((value - lower) / (upper - lower), 1e-6, 1.0 - 1e-6);
+    return std::log(ratio / (1.0 - ratio));
+}
+template<typename T>
+inline T physical_a(const T x[X_N]) {
+    return bounded_sigmoid(x[idx::A_RAW], A_LOWER, A_UPPER);
+}
+template<typename T>
+inline T physical_w(const T x[X_N]) {
+    return bounded_sigmoid(x[idx::W_RAW], W_LOWER, W_UPPER);
 }
 struct Voter {
     enum {
@@ -112,12 +128,11 @@ struct Predict {
         std::copy(x0, x0 + X_N, x1);
         T delta_theta_abs;
         T delta_theta;
-        clamp(x1);
 
         x1[idx::TAU] += dt;
         if (voter.mode == Voter::Big) {
-            auto a = x0[idx::A];
-            auto w = x0[idx::W];
+            auto a = physical_a(x0);
+            auto w = physical_w(x0);
             auto b = T(AMPLITUDE_SUM) - a;
             delta_theta_abs =
                 ((a / w) * (ceres::cos(w * x0[idx::TAU]) - ceres::cos(w * x1[idx::TAU])))
@@ -133,18 +148,11 @@ struct Predict {
             delta_theta = -delta_theta_abs;
         }
         x1[idx::ROLL] += delta_theta;
+        apply_mode_constraints(x1);
     }
 
     template<typename T>
-    inline void clamp(T x[X_N]) const {
-        if (x[idx::A] < T(A_LOWER))
-            x[idx::A] = T(A_LOWER);
-        if (x[idx::A] > T(A_UPPER))
-            x[idx::A] = T(A_UPPER);
-        if (x[idx::W] < T(W_LOWER))
-            x[idx::W] = T(W_LOWER);
-        if (x[idx::W] > T(W_UPPER))
-            x[idx::W] = T(W_UPPER);
+    inline void apply_mode_constraints(T x[X_N]) const {
         if (voter.state != Voter::Collecting) {
             x[idx::V_ROLL] = T(0);
         }
@@ -198,8 +206,7 @@ inline Eigen::Transform<T, 3, Eigen::Isometry> rune_pose(const T x[X_N], int id)
     auto yaw = ceres::atan2(x[idx::CY], x[idx::CX]);
     // auto yaw = x[idx::YAW];
     Eigen::Quaternion<T> q_yaw_rune_in_odom(Eigen::AngleAxis<T>(yaw, Eigen::Vector3<T>::UnitZ()));
-    Eigen::Quaternion<T> q_pitch_rune_in_odom(
-        Eigen::AngleAxis<T>(T(0.0), Eigen::Vector3<T>::UnitY())
+    Eigen::Quaternion<T> q_pitch_rune_in_odom(Eigen::AngleAxis<T>(T(0), Eigen::Vector3<T>::UnitY())
     );
     Eigen::Quaternion<T> q_roll_rune_in_odom(Eigen::AngleAxis<T>(roll, Eigen::Vector3<T>::UnitX()));
     rune_in_odom.linear() =
@@ -357,6 +364,11 @@ struct State {
         timestamp +=
             std::chrono::duration_cast<TimePoint::duration>(std::chrono::duration<double>(dt));
     }
+    void set_pos(const Vec3& p) {
+        x[idx::CX] = p.x();
+        x[idx::CY] = p.y();
+        x[idx::CZ] = p.z();
+    }
     Vec3 pos() const {
         return Vec3(x[idx::CX], x[idx::CY], x[idx::CZ]);
     }
@@ -372,16 +384,17 @@ struct State {
         }
         int dir = voter.state == Voter::Clockwise ? 1 : -1;
         if (voter.mode == Voter::Big) {
-            return dir
-                * (x[idx::A] * std::sin(x[idx::W] * x[idx::TAU]) + (AMPLITUDE_SUM - x[idx::A]));
+            const double a = this->a();
+            const double w = this->w();
+            return dir * (a * std::sin(w * x[idx::TAU]) + (AMPLITUDE_SUM - a));
         }
         return dir * SMALL_SPEED;
     }
     double a() const {
-        return x[idx::A];
+        return physical_a(x.data());
     }
     double w() const {
-        return x[idx::W];
+        return physical_w(x.data());
     }
     double tau() const {
         return x[idx::TAU];

@@ -18,9 +18,14 @@
 #include <cstdint>
 #include <memory>
 #include <mutex>
+#include <opencv2/highgui.hpp>
 #include <optional>
 #include <string>
 #include <utility>
+#ifdef USE_RERUN
+    #include "_rerun/recorder.hpp"
+    #include "_rerun/tf.hpp"
+#endif
 #ifdef USE_ROS2
     #include "_rcl/node.hpp"
     #include "_rcl/tf.hpp"
@@ -31,7 +36,9 @@
     #include <rclcpp/qos.hpp>
 #endif
 #include "backward-cpp/backward.hpp"
-#include "daedalus_interface/shm_client.hpp"
+#ifdef USE_Daedalus
+    #include "daedalus_interface/shm_client.hpp"
+#endif
 #include "param_deliver.h"
 #include "runtime/config.hpp"
 #include "tasks/auto_aim/armor_control/very_aimer.hpp"
@@ -136,7 +143,11 @@ bool is_web_running() {
         },
         std::chrono::duration<double>(1.0)
     );
-    return cached.load();
+    bool running = cached.load();
+#ifdef USE_RERUN
+    running = running || rerun_visual::Recorder::instance().enabled();
+#endif
+    return running;
 }
 static constexpr auto RECORD_FOLDER_PATH_ARR = utils::concat(ROOT_DIR, "/record/auto_aim");
 static constexpr std::string_view RECORD_FOLDER_PATH(RECORD_FOLDER_PATH_ARR.data());
@@ -171,6 +182,8 @@ int main(int argc, char** argv) {
     rcl::RclcppNode rcl_node("awakening");
     rcl::TF rcl_tf(rcl_node);
 #endif
+    bool use_daedalus = false;
+#ifdef USE_Daedalus
     std::unique_ptr<talos::ipc::ShmClient> daedalus_shm_client;
     if (config["use_sim"].as<bool>()) {
         auto client = talos::ipc::ShmClient::connect();
@@ -178,11 +191,13 @@ int main(int argc, char** argv) {
             AWAKENING_ERROR("Failed to connect to talos::ipc::ShmClient");
             return 1;
         } else {
+            use_daedalus = true;
             daedalus_shm_client = std::make_unique<talos::ipc::ShmClient>(std::move(*client));
         }
     }
+#endif
     std::unique_ptr<SerialDriver> serial;
-    if (!daedalus_shm_client && config["serial"]["enable"].as<bool>()) {
+    if (!use_daedalus && config["serial"]["enable"].as<bool>()) {
         serial = std::make_unique<SerialDriver>(config["serial"], s);
     }
 
@@ -193,7 +208,7 @@ int main(int argc, char** argv) {
             camera->stop();
         }
     });
-    if (!daedalus_shm_client) {
+    if (!use_daedalus) {
         camera = std::make_unique<HikCamera>(camera_config["hik_camera"], s);
         camera->init();
         if (!camera->running_) {
@@ -258,6 +273,7 @@ int main(int argc, char** argv) {
         );
     }
     auto serial_send_to_image_microseconds = config["serial_send_to_image_microseconds"].as<int>();
+#ifdef USE_Daedalus
     if (daedalus_shm_client) {
         auto daedalus_imgs = s.register_source<CameraIO>("daedalus_img");
 
@@ -319,7 +335,7 @@ int main(int argc, char** argv) {
             );
         });
     }
-
+#endif
     if (video_saver) {
         s.register_task<CameraIO>("save_video", [&](CameraIO::second_type&& f) {
             if (!f.src_img.empty()) {
@@ -372,11 +388,14 @@ int main(int argc, char** argv) {
                 auto packet_time =
                     now - std::chrono::microseconds(serial_send_to_image_microseconds);
                 ISO3 gimbal_in_gimbal_odom = ISO3::Identity();
-                gimbal_in_gimbal_odom.linear() = utils::rpy2matrix(Vec3(
-                    angles::from_degrees(robo.roll),
-                    angles::from_degrees(robo.pitch),
-                    angles::from_degrees(robo.yaw)
-                ));
+                gimbal_in_gimbal_odom.linear() = utils::rpy2matrix(
+                    Vec3(
+                        angles::from_degrees(robo.roll),
+                        angles::from_degrees(robo.pitch),
+                        angles::from_degrees(robo.yaw)
+                    ),
+                    utils::RPYOrder::XYZ
+                );
                 tf->push(
                     SimpleFrame::GIMBAL_ODOM,
                     SimpleFrame::GIMBAL,
@@ -387,12 +406,12 @@ int main(int argc, char** argv) {
                                     angles::from_degrees(robo.operator_pitch_offset) };
                 auto gimbal_odom_in_odom = ISO3::Identity();
                 gimbal_odom_in_odom.translation() = Vec3(robo.v_x, robo.v_y, robo.v_z);
-                tf->push(
-                    SimpleFrame::ODOM,
-                    SimpleFrame::GIMBAL_ODOM,
-                    packet_time,
-                    gimbal_odom_in_odom
-                );
+                // tf->push(
+                //     SimpleFrame::ODOM,
+                //     SimpleFrame::GIMBAL_ODOM,
+                //     packet_time,
+                //     gimbal_odom_in_odom
+                // );
                 enemy_color = EnemyColor(robo.detect_color);
                 bullet_speed = robo.bullet_speed;
                 robo.update_log(delay);
@@ -476,12 +495,11 @@ int main(int argc, char** argv) {
                         camera_info,
                         frame.img_frame.src_img.size()
                     );
-                    detect_light->x -= detect_light->width * 0.3;
-                    detect_light->y -= detect_light->height * 0.3;
-                    detect_light->width *= 1.6;
-                    detect_light->height *= 1.6;
-                    detect_light.value() &=
-                        cv::Rect(0, 0, frame.img_frame.src_img.cols, frame.img_frame.src_img.rows);
+                    detect_light = utils::expand_and_clip_rect(
+                        detect_light.value(),
+                        1.6,
+                        frame.img_frame.src_img.size()
+                    );
                 }
             }
 
@@ -598,14 +616,6 @@ int main(int argc, char** argv) {
                 armor_tracker.reset_count();
                 if (dbg) {
                     dbg->armors.set(armors);
-#ifdef USE_ROS2
-                    rcl::pub_armor_marker(rcl_node, SimpleFrame_to_str(armors.frame_id), armors);
-                    rcl::pub_armor_target_marker(
-                        rcl_node,
-                        SimpleFrame_to_str(__armor_target.get_target_state().frame_id),
-                        __armor_target
-                    );
-#endif
                 }
 
                 log_ctx.track_count++;
@@ -708,6 +718,7 @@ int main(int argc, char** argv) {
             send.enable_pitch_diff = cmd.enable_pitch_diff;
             serial->write(control_2026::pack_command_for_control_2026(send, cmd.fire_advice));
         }
+#ifdef USE_Daedalus
         if (daedalus_shm_client) {
             auto gimbal_in_gimbal_odom =
                 tf->pose_a_in_b(SimpleFrame::GIMBAL, SimpleFrame::GIMBAL_ODOM, Clock::now());
@@ -729,6 +740,7 @@ int main(int argc, char** argv) {
             // daedalus_shm_client
             //     ->send_gimbal_cmd(cmd.yaw, -cmd.pitch, cmd.appear ? 1.0 : -1.0, false);
         }
+#endif
         auto old_in_camera_cv = tf->pose_a_in_b(
             SimpleFrame(cmd.aim_point.frame_id),
             SimpleFrame::CAMERA_CV,
@@ -758,50 +770,60 @@ int main(int argc, char** argv) {
     });
     if (dbg) {
         s.add_rate_source<>("debug", 45.0, [&]() {
-            if (!is_web_running()) {
-                return;
-            }
-            static Web web;
-            dbg->type =
-                (mode == Mode::AutoAim) ? VisionDebugCtx::AUTO_AIM : VisionDebugCtx::AUTO_BUFF;
             auto __armor_target = armor_target.read();
-            auto __rune_target = rune_target.read();
-            __armor_target.write_log();
-            __rune_target.write_log();
-            wheel_odometry.write_log();
-            auto img_now = dbg->img_frame.get().timestamp;
-            dbg->armor_target.set(__armor_target);
-            dbg->rune_target.set(__rune_target);
-            dbg->auto_aim_fsm_state.set(auto_aim_fsm_controller.get_state());
-            auto gimbal_in_gimbal_odom =
-                tf->pose_a_in_b(SimpleFrame::GIMBAL, SimpleFrame::GIMBAL_ODOM, Clock::now());
-            auto rpy = utils::matrix2rpy<double>(gimbal_in_gimbal_odom.linear());
-            auto gimbal_yaw_pitch =
-                std::make_pair(angles::to_degrees(rpy[2]), -angles::to_degrees(rpy[1]));
-            dbg->gimbal_yaw_pitch.set(gimbal_yaw_pitch);
-            bullet_pick_up.update(
-                Clock::now(),
-                dbg->gimbal_cmd.get().appear ? dbg->gimbal_cmd.get().fly_time : 0.4
+            if (is_web_running()) {
+                static Web web;
+                dbg->type =
+                    (mode == Mode::AutoAim) ? VisionDebugCtx::AUTO_AIM : VisionDebugCtx::AUTO_BUFF;
+
+                auto __rune_target = rune_target.read();
+                __armor_target.write_log();
+                __rune_target.write_log();
+                wheel_odometry.write_log();
+                auto img_now = dbg->img_frame.get().timestamp;
+                dbg->armor_target.set(__armor_target);
+                dbg->rune_target.set(__rune_target);
+                dbg->auto_aim_fsm_state.set(auto_aim_fsm_controller.get_state());
+                auto gimbal_in_gimbal_odom =
+                    tf->pose_a_in_b(SimpleFrame::GIMBAL, SimpleFrame::GIMBAL_ODOM, Clock::now());
+                auto rpy =
+                    utils::matrix2rpy<double>(gimbal_in_gimbal_odom.linear(), utils::RPYOrder::ZYX);
+                auto gimbal_yaw_pitch =
+                    std::make_pair(angles::to_degrees(rpy[2]), -angles::to_degrees(rpy[1]));
+                dbg->gimbal_yaw_pitch.set(gimbal_yaw_pitch);
+                bullet_pick_up.update(
+                    Clock::now(),
+                    dbg->gimbal_cmd.get().appear ? dbg->gimbal_cmd.get().fly_time : 0.4
+                );
+                auto bullet_poss =
+                    bullet_pick_up.get_bullet_positions(img_now, very_aimer.get_yaw_pitch_offset());
+                auto odom_in_camera_cv =
+                    tf->pose_a_in_b(SimpleFrame::ODOM, SimpleFrame::CAMERA_CV, img_now);
+                for (auto& pos: bullet_poss) {
+                    pos = odom_in_camera_cv * pos;
+                }
+                dbg->odom_in_camera_cv.set(odom_in_camera_cv);
+                dbg->bullet_positions.set(bullet_poss);
+                web.write_debug_data(dbg.value());
+                auto img = dbg->img_frame.get();
+                auto debug_img = img.src_img.clone();
+                if (img.format == PixelFormat::RGB) {
+                    cv::cvtColor(debug_img, debug_img, cv::COLOR_RGB2BGR);
+                }
+                if (!debug_img.empty()) {
+                    web.draw(debug_img, dbg.value());
+                    web.write_shm(debug_img);
+                }
+            }
+
+#ifdef USE_ROS2
+            auto armors = dbg->armors.get();
+            rcl::pub_armor_target_marker(
+                rcl_node,
+                SimpleFrame_to_str(__armor_target.get_target_state().frame_id),
+                __armor_target
             );
-            auto bullet_poss =
-                bullet_pick_up.get_bullet_positions(img_now, very_aimer.get_yaw_pitch_offset());
-            auto odom_in_camera_cv =
-                tf->pose_a_in_b(SimpleFrame::ODOM, SimpleFrame::CAMERA_CV, img_now);
-            for (auto& pos: bullet_poss) {
-                pos = odom_in_camera_cv * pos;
-            }
-            dbg->odom_in_camera_cv.set(odom_in_camera_cv);
-            dbg->bullet_positions.set(bullet_poss);
-            web.write_debug_data(dbg.value());
-            auto img = dbg->img_frame.get();
-            auto debug_img = img.src_img.clone();
-            if (img.format == PixelFormat::RGB) {
-                cv::cvtColor(debug_img, debug_img, cv::COLOR_RGB2BGR);
-            }
-            if (!debug_img.empty()) {
-                web.draw(debug_img, dbg.value());
-                web.write_shm(debug_img);
-            }
+#endif
         });
 #ifdef USE_ROS2
         if (debug) {
@@ -812,6 +834,15 @@ int main(int argc, char** argv) {
             });
         }
 
+#endif
+#ifdef USE_RERUN
+        if (debug) {
+            s.add_rate_source<>("rerun_tf", 15.0, [&]() {
+                rerun_visual::log_robot_tf(*tf, [](SimpleFrame frame) {
+                    return SimpleFrame_to_str(frame);
+                });
+            });
+        }
 #endif
     }
 

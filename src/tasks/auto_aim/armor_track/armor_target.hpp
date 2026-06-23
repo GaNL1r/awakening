@@ -4,8 +4,10 @@
 #include "tasks/auto_aim/type.hpp"
 #include "utils/common/type_common.hpp"
 #include <chrono>
+#include <opencv2/core/types.hpp>
 #include <optional>
 #include <string>
+#include <tuple>
 #include <utility>
 #include <vector>
 namespace awakening::auto_aim {
@@ -15,8 +17,8 @@ struct ArmorTrackerCfg {
     double lost_time_thres;
     double lost_time_thres_outpost;
     int tracking_thres;
-    double match_gate_armor;
-    double match_gate_not_all_init_armor;
+    double armor_match_pos_gate_by_length_ratio;
+    double armor_match_pos_gate_all_init_by_length_ratio;
     double qyaw_common;
     double qyaw_output;
     Vec3 qxyz_common;
@@ -26,8 +28,9 @@ struct ArmorTrackerCfg {
     double q_h;
     double q_wpr;
     double q_outpost_dz;
-    double r_uv_at_1m;
-    double r_uv_min;
+    double r_sigma_px;
+    double r_sigma_half_length;
+    double r_sigma_angle;
     bool enable_lights_measure = false;
     double light_match_length_ratio_gate;
     double light_match_angle_gate;
@@ -37,8 +40,10 @@ struct ArmorTrackerCfg {
         lost_time_thres = config["lost_time_thres"].as<double>();
         lost_time_thres_outpost = config["lost_time_thres_outpost"].as<double>();
         tracking_thres = config["tracking_thres"].as<int>();
-        match_gate_armor = config["match_gate_armor"].as<double>();
-        match_gate_not_all_init_armor = config["match_gate_not_all_init_armor"].as<double>();
+        armor_match_pos_gate_by_length_ratio =
+            config["armor_match_pos_gate_by_length_ratio"].as<double>();
+        armor_match_pos_gate_all_init_by_length_ratio =
+            config["armor_match_pos_gate_all_init_by_length_ratio"].as<double>();
         qyaw_common = config["qyaw_common"].as<double>();
         qyaw_output = config["qyaw_output"].as<double>();
         auto qxyz_common_vec = config["qxyz_common"].as<std::vector<double>>();
@@ -50,8 +55,9 @@ struct ArmorTrackerCfg {
         q_h = config["q_h"].as<double>();
         q_wpr = config["q_wpr"].as<double>();
         q_outpost_dz = config["q_outpost_dz"].as<double>();
-        r_uv_at_1m = config["r_uv_at_1m"].as<double>();
-        r_uv_min = config["r_uv_min"].as<double>();
+        r_sigma_angle = config["r_sigma_angle"].as<double>();
+        r_sigma_px = config["r_sigma_px"].as<double>();
+        r_sigma_half_length = config["r_sigma_half_length"].as<double>();
         enable_lights_measure = config["enable_lights_measure"].as<bool>();
         light_match_length_ratio_gate = config["light_match_length_ratio_gate"].as<double>();
         light_match_angle_gate = config["light_match_angle_gate"].as<double>();
@@ -59,6 +65,7 @@ struct ArmorTrackerCfg {
             config["light_match_pos_gate_by_length_ratio"].as<double>();
     }
 };
+static constexpr bool measure_normalized = true;
 static inline int GOBAL_ID = 0; //全局状态标记，下游控制对同一id的不重复构建轨迹
 class ArmorTarget {
 public:
@@ -86,8 +93,12 @@ public:
         }
     };
     ArmorTarget() = default;
-    static void
-    armor_pnp(Armor& a, const CameraInfo& camera_info, const ISO3& camera_cv_in_odom) noexcept;
+    static void armor_pnp(
+        Armor& a,
+        const CameraInfo& camera_info,
+        const ISO3& camera_cv_in_odom,
+        bool opt = false
+    ) noexcept;
     void reset(
         Armor& a,
         const ArmorTrackerCfg& c,
@@ -109,20 +120,21 @@ public:
         const CameraInfo& camera_info,
         const cv::Size& image_size
     ) const noexcept;
+    [[nodiscard]] std::vector<cv::Point2f> expanded_pts(
+        const TimePoint& timestamp,
+        const ISO3& camera_cv_in_odom,
+        const CameraInfo& camera_info
+    ) const noexcept;
     [[nodiscard]] Eigen::
         Matrix<double, armor_point_motion_model::X_N, armor_point_motion_model::X_N>
         process_noise(double dt) const noexcept;
     [[nodiscard]] Eigen::
         Matrix<double, armor_point_motion_model::UVZ_N, armor_point_motion_model::UVZ_N>
-        uvmeasurement_covariance(const Eigen::Matrix<double, armor_point_motion_model::UVZ_N, 1>& z
+        uvmeasurement_covariance(
+            const Eigen::Matrix<double, armor_point_motion_model::UVZ_N, 1>& z,
+            double length_px,
+            double measurement_length
         ) const noexcept;
-    [[nodiscard]] Eigen::
-        Matrix<double, armor_point_motion_model::YPDZ_N, armor_point_motion_model::YPDZ_N>
-        ypdmeasurement_covariance(
-            const Eigen::Matrix<double, armor_point_motion_model::YPDZ_N, 1>& z
-        ) const noexcept;
-    [[nodiscard]] Eigen::Matrix<double, armor_point_motion_model::YPDZ_N, 1>
-    get_ypdmeasurement(Armor& a) const noexcept;
 
     void predict_ekf(const TimePoint& timestamp);
     int update(
@@ -132,6 +144,13 @@ public:
         const CameraInfo& camera_info,
         const ISO3& camera_cv_in_odom
     );
+    std::pair<cv::Point2f, cv::Point2f> predict_light(
+        int armor_id,
+        bool is_left,
+        const armor_point_motion_model::State& state,
+        const CameraInfo& camera_info,
+        const ISO3& camera_cv_in_odom
+    ) const noexcept;
     std::vector<std::pair<int, Armor>> match_armor(
         std::vector<Armor>& armors,
         const TimePoint& timestamp,
@@ -141,12 +160,16 @@ public:
     std::vector<std::tuple<int, bool, Light>> match_light(
         std::vector<Light>& lights,
         std::vector<std::pair<int, Armor>>& matched_armors,
+        const std::vector<std::tuple<int, bool, std::pair<cv::Point2f, cv::Point2f>>>& visible_light
+    ) const noexcept;
+    std::vector<std::tuple<int, bool, Light>> match_light(
+        std::vector<Light>& lights,
+        std::vector<std::pair<int, Armor>>& matched_armors,
         const TimePoint& timestamp,
         const CameraInfo& camera_info,
         const ISO3& camera_cv_in_odom
     ) const noexcept;
     armor_point_motion_model::UVMeasure::Ctx uvmeasure_ctx;
-    armor_point_motion_model::YPDMeasure::Ctx ypdmeasure_ctx;
     std::optional<armor_point_motion_model::RobotStateESEKF> esekf;
     ArmorTrackerCfg cfg;
     const armor_point_motion_model::State& get_target_state() const {
@@ -157,6 +180,7 @@ public:
         this_id = GOBAL_ID++; //全局状态标记，下游控制对同一id的不重复构建轨迹
         f(target_state);
     }
+
     bool is_inited = false;
     bool jumped = false;
     int last_match_id = -1;
@@ -197,7 +221,7 @@ public:
         return check() && cfg.enable_lights_measure;
     }
     [[nodiscard]] inline int armor_num() const noexcept {
-        return uvmeasure_ctx.armor_num;
+        return armor_num_by_armor_class(target_number);
     }
     void write_log();
 

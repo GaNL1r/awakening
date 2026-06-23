@@ -142,7 +142,16 @@ struct PointTarget {
                 nominal[i] += delta[i];
             }
         };
-        esekf = ESEKF(f, u_q, inject, p0);
+        const auto box_minus = [this](
+                                   const Eigen::Matrix<double, X_N, 1>& nominal,
+                                   const Eigen::Matrix<double, X_N, 1>& value,
+                                   Eigen::Matrix<double, X_N, 1>& delta
+                               ) {
+            for (int i = 0; i < X_N; i++) {
+                delta[i] = value[i] - nominal[i];
+            }
+        };
+        esekf = ESEKF(f, u_q, inject, box_minus, p0);
         esekf->set_iteration_num(target_config.esekf_iter_num);
 
         state.x = Eigen::VectorXd::Zero(X_N);

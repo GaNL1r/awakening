@@ -17,6 +17,8 @@ option(BUILD_SENTRY "Enable Sentry"   ON)
 option(BUILD_RADAR "Enable Radar"   ON)
 option(BUILD_RUNTIME_TESTS "Build runtime test executables by default" ON)
 option(BUILD_WITH_PCH "Enable precompiled headers for C++ targets" ON)
+option(BUILD_WITH_Daedalus "Enable Daedalus interface" ON)
+option(BUILD_WITH_RERUN "Enable Rerun visualization when the SDK is available" ON)
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} ${PROJECT_SOURCE_DIR}/cmake)
 
 set(AWAKENING_PCH_HEADER ${PROJECT_SOURCE_DIR}/src/pch.hpp)
@@ -40,10 +42,26 @@ find_package(HikSDK REQUIRED)
 find_package(MvSDK REQUIRED)
 find_package(spdlog REQUIRED)
 
+set(RERUN_FOUND FALSE)
+if(BUILD_WITH_RERUN)
+    find_package(rerun_sdk CONFIG QUIET)
+    if(TARGET rerun_sdk)
+        set(RERUN_FOUND TRUE)
+        message(STATUS "Rerun SDK found, enabling the Rerun visualization backend")
+    else()
+        message(WARNING "Rerun SDK not found; Web/ROS2 visualization remains available")
+    endif()
+endif()
+
 
 set(BUILD_DEFINITIONS "")
 set(BUILD_LIBS "")
-
+if(RERUN_FOUND)
+    list(APPEND BUILD_DEFINITIONS USE_RERUN)
+endif()
+if(BUILD_WITH_Daedalus)
+    list(APPEND BUILD_DEFINITIONS USE_Daedalus)
+endif()
 
 if(BUILD_WITH_OPENVINO)
     find_package(OpenVINO REQUIRED COMPONENTS Runtime ONNX)
@@ -118,6 +136,16 @@ target_link_libraries(${PROJECT_NAME}_web
     ${PROJECT_NAME}_auto_aim
     ${PROJECT_NAME}_auto_buff
 )
+if(RERUN_FOUND)
+    # The distributed C++ SDK is static/non-PIC, so keep it at executable link scope.
+    add_library(${PROJECT_NAME}_rerun STATIC src/_rerun/recorder.cpp)
+    awakening_enable_pch(${PROJECT_NAME}_rerun)
+    target_compile_definitions(${PROJECT_NAME}_rerun PUBLIC USE_RERUN)
+    target_link_libraries(${PROJECT_NAME}_rerun
+        PUBLIC rerun_sdk
+        PRIVATE ${PROJECT_NAME}_auto_aim ${PROJECT_NAME}_auto_buff
+    )
+endif()
 
 set(ROS2_PACKAGES
     ament_cmake
@@ -202,6 +230,9 @@ function(add_common_executable exe_name src_file)
     add_executable(${exe_name} ${src_file})
     awakening_enable_pch(${exe_name})
     target_link_libraries(${exe_name}  ${PROJECT_NAME}_utils relink)
+    if(RERUN_FOUND)
+        target_link_libraries(${exe_name} ${PROJECT_NAME}_rerun)
+    endif()
 endfunction()
 
 function(add_tool_executable exe_name src_file)
@@ -212,6 +243,9 @@ function(add_tool_executable exe_name src_file)
     endif()
     awakening_enable_pch(${exe_name})
     target_link_libraries(${exe_name} ${PROJECT_NAME}_utils relink)
+    if(RERUN_FOUND)
+        target_link_libraries(${exe_name} ${PROJECT_NAME}_rerun)
+    endif()
 endfunction()
 
 add_common_executable(standard src/runtime/standard.cpp)

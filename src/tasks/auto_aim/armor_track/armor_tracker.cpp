@@ -8,6 +8,7 @@
 #include <array>
 #include <iostream>
 #include <mutex>
+#include <numeric>
 #include <opencv2/core/eigen.hpp>
 #include <opencv2/core/types.hpp>
 #include <utility>
@@ -51,6 +52,14 @@ struct ArmorTracker::Impl {
         } else if (cur.track_state.tracker_state == ArmorTarget::TrackState::TRACKING) {
             pre.track_state.tracker_state = ArmorTarget::TrackState::LOST; //cur恢复就重置
         }
+        armors.lights.erase(
+            std::remove_if(
+                armors.lights.begin(),
+                armors.lights.end(),
+                [](const Light& l) { return l.laji; }
+            ),
+            armors.lights.end()
+        );
 
         return target_buf_[cur_target_idx_].fast_copy_without_ekf(); //下游不让用ekf
     }
@@ -67,6 +76,7 @@ struct ArmorTracker::Impl {
         }
         bool found = false;
         Armor init_target;
+
         for (auto& a: armors.armors) {
             if (!(a.color == ArmorColor::NONE || a.color == ArmorColor::PURPLE) && !found) {
                 if (!(target_buf_[cur_target_idx_].target_number == ArmorClass::OUTPOST
