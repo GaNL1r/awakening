@@ -1,8 +1,7 @@
 #include "_rerun/recorder.hpp"
 #include "param_deliver.h"
-#include "tasks/base/web.hpp"
 #include "tasks/auto_aim/armor_track/motion_model.hpp"
-#include <rerun.hpp>
+#include "tasks/base/web.hpp"
 #include <algorithm>
 #include <array>
 #include <chrono>
@@ -11,6 +10,7 @@
 #include <mutex>
 #include <opencv2/imgcodecs.hpp>
 #include <opencv2/imgproc.hpp>
+#include <rerun.hpp>
 #include <string_view>
 #include <thread>
 #include <unordered_map>
@@ -19,60 +19,72 @@
 
 namespace awakening::rerun_visual {
 namespace {
-std::string env_or(const char* name, const char* fallback) {
-    if (const char* value = std::getenv(name)) {
-        return value;
-    }
-    return fallback;
-}
-
-int env_int(const char* name, int fallback, int minimum, int maximum) {
-    try {
-        return std::clamp(std::stoi(env_or(name, std::to_string(fallback).c_str())), minimum, maximum);
-    } catch (...) {
+    std::string env_or(const char* name, const char* fallback) {
+        if (const char* value = std::getenv(name)) {
+            return value;
+        }
         return fallback;
     }
-}
 
-std::string entity_part(std::string value) {
-    std::replace_if(value.begin(), value.end(), [](char c) {
-        return c == '/' || c == ' ' || c == '.';
-    }, '_');
-    return value;
-}
-
-rerun::datatypes::Vec3D vec3(const Eigen::Vector3d& v) {
-    return { static_cast<float>(v.x()), static_cast<float>(v.y()), static_cast<float>(v.z()) };
-}
-
-rerun::datatypes::Quaternion quat(const Eigen::Matrix3d& rotation) {
-    const Eigen::Quaterniond q(rotation);
-    return rerun::datatypes::Quaternion::from_xyzw(
-        static_cast<float>(q.x()), static_cast<float>(q.y()),
-        static_cast<float>(q.z()), static_cast<float>(q.w())
-    );
-}
-
-std::string frame_name(int frame_id) {
-    static constexpr std::array<std::string_view, 11> names = {
-        "odom", "gimbal_odom", "gimbal", "camera", "camera_cv", "shoot",
-        "big_yaw", "omni_0", "omni_0_cv", "omni_1", "omni_1_cv"
-    };
-    if (frame_id >= 0 && static_cast<size_t>(frame_id) < names.size()) {
-        return std::string(names[frame_id]);
+    int env_int(const char* name, int fallback, int minimum, int maximum) {
+        try {
+            return std::clamp(
+                std::stoi(env_or(name, std::to_string(fallback).c_str())),
+                minimum,
+                maximum
+            );
+        } catch (...) {
+            return fallback;
+        }
     }
-    return "frame_" + std::to_string(frame_id);
-}
 
-float armor_width(auto_aim::ArmorClass number) {
-    using namespace auto_aim;
-    switch (armor_type_by_armor_class(number)) {
-        case ArmorType::SimpleSmall: return ArmorTypeTraits<ArmorType::SimpleSmall>::WIDTH;
-        case ArmorType::BuildingSmall: return ArmorTypeTraits<ArmorType::BuildingSmall>::WIDTH;
-        case ArmorType::Large: return ArmorTypeTraits<ArmorType::Large>::WIDTH;
+    std::string entity_part(std::string value) {
+        std::replace_if(
+            value.begin(),
+            value.end(),
+            [](char c) { return c == '/' || c == ' ' || c == '.'; },
+            '_'
+        );
+        return value;
     }
-    return ArmorTypeTraits<ArmorType::SimpleSmall>::WIDTH;
-}
+
+    rerun::datatypes::Vec3D vec3(const Eigen::Vector3d& v) {
+        return { static_cast<float>(v.x()), static_cast<float>(v.y()), static_cast<float>(v.z()) };
+    }
+
+    rerun::datatypes::Quaternion quat(const Eigen::Matrix3d& rotation) {
+        const Eigen::Quaterniond q(rotation);
+        return rerun::datatypes::Quaternion::from_xyzw(
+            static_cast<float>(q.x()),
+            static_cast<float>(q.y()),
+            static_cast<float>(q.z()),
+            static_cast<float>(q.w())
+        );
+    }
+
+    std::string frame_name(int frame_id) {
+        static constexpr std::array<std::string_view, 11> names = {
+            "odom",    "gimbal_odom", "gimbal",    "camera", "camera_cv", "shoot",
+            "big_yaw", "omni_0",      "omni_0_cv", "omni_1", "omni_1_cv"
+        };
+        if (frame_id >= 0 && static_cast<size_t>(frame_id) < names.size()) {
+            return std::string(names[frame_id]);
+        }
+        return "frame_" + std::to_string(frame_id);
+    }
+
+    float armor_width(auto_aim::ArmorClass number) {
+        using namespace auto_aim;
+        switch (armor_type_by_armor_class(number)) {
+            case ArmorType::SimpleSmall:
+                return ArmorTypeTraits<ArmorType::SimpleSmall>::WIDTH;
+            case ArmorType::BuildingSmall:
+                return ArmorTypeTraits<ArmorType::BuildingSmall>::WIDTH;
+            case ArmorType::Large:
+                return ArmorTypeTraits<ArmorType::Large>::WIDTH;
+        }
+        return ArmorTypeTraits<ArmorType::SimpleSmall>::WIDTH;
+    }
 } // namespace
 
 struct Recorder::Impl {
@@ -98,9 +110,9 @@ struct Recorder::Impl {
 
         rerun::Error error;
         if (mode == "connect") {
-            error = stream.connect_grpc(env_or(
-                "AWAKENING_RERUN_URL", "rerun+http://127.0.0.1:9876/proxy"
-            ));
+            error = stream.connect_grpc(
+                env_or("AWAKENING_RERUN_URL", "rerun+http://127.0.0.1:9876/proxy")
+            );
         } else if (mode == "save") {
             error = stream.save(env_or("AWAKENING_RERUN_PATH", "awakening.rrd"));
         } else if (mode == "serve") {
@@ -127,7 +139,8 @@ struct Recorder::Impl {
                 rerun::ViewCoordinates::RIGHT_HAND_Z_UP
             );
             stream.log_static(
-                "status/rerun", rerun::TextDocument("Rerun visualization initialized")
+                "status/rerun",
+                rerun::TextDocument("Rerun visualization initialized")
             );
             image_worker = std::thread([this] { run_image_worker(); });
         }
@@ -181,13 +194,14 @@ struct Recorder::Impl {
                 stream.log(
                     entity,
                     rerun::EncodedImage::from_bytes(
-                        rerun::take_ownership(std::move(jpeg)), rerun::MediaType::jpeg()
+                        rerun::take_ownership(std::move(jpeg)),
+                        rerun::MediaType::jpeg()
                     )
                 );
             }
             const int max_fps = env_int("AWAKENING_RERUN_IMAGE_FPS", 8, 1, 30);
-            next_send = std::chrono::steady_clock::now()
-                + std::chrono::milliseconds(1000 / max_fps);
+            next_send =
+                std::chrono::steady_clock::now() + std::chrono::milliseconds(1000 / max_fps);
             // If producers submitted several frames while encoding/sending, only the newest
             // remains in latest_image and is processed by the next iteration.
         }
@@ -253,7 +267,9 @@ void Recorder::log_json(const std::string& root, const nlohmann::json& value) {
 }
 
 void Recorder::log_transform(
-    const std::string& parent, const std::string& child, const ISO3& child_in_parent
+    const std::string& parent,
+    const std::string& child,
+    const ISO3& child_in_parent
 ) {
     if (!enabled()) {
         return;
@@ -318,13 +334,15 @@ void Recorder::log_vision(const VisionDebugCtx& ctx) {
         );
         impl_->stream.log(
             "frames/target/center",
-            rerun::Points3D({ vec3(state.pos()) }).with_radii({ 0.06F })
+            rerun::Points3D({ vec3(state.pos()) })
+                .with_radii({ 0.06F })
                 .with_colors({ rerun::Color(0, 255, 0) }),
             rerun::CoordinateFrame(frame_name(state.frame_id))
         );
         impl_->stream.log(
             "frames/target/velocity",
-            rerun::Arrows3D::from_vectors({ vec3(state.vel()) }).with_origins({ vec3(state.pos()) })
+            rerun::Arrows3D::from_vectors({ vec3(state.vel()) })
+                .with_origins({ vec3(state.pos()) })
                 .with_colors({ rerun::Color(255, 255, 0) }),
             rerun::CoordinateFrame(frame_name(state.frame_id))
         );

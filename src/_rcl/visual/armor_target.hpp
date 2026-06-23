@@ -84,8 +84,16 @@ inline void pub_armor_target_marker(
         angular_v_marker.id = 1;
         angular_v_marker.points.clear();
         angular_v_marker.points.emplace_back(position_marker.pose.position);
-        arrow_end = position_marker.pose.position;
-        arrow_end.z += target_state.vyaw() / M_PI;
+        auto whole_car_pose = auto_aim::armor_point_motion_model::_whole_car_pose(
+            target_state.x.data(),
+            target.target_number
+        );
+        auto vyaw_in_car = ISO3::Identity();
+        vyaw_in_car.translation().z() = target_state.vyaw() / M_PI;
+        auto vyaw_pose = whole_car_pose * vyaw_in_car;
+        arrow_end.x = vyaw_pose.translation().x();
+        arrow_end.y = vyaw_pose.translation().y();
+        arrow_end.z = vyaw_pose.translation().z();
         angular_v_marker.points.emplace_back(arrow_end);
 
         auto getWH = [](auto_aim::ArmorType type) {

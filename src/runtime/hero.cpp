@@ -636,9 +636,9 @@ int main(int argc, char** argv) {
 #endif
 #ifdef USE_RERUN
         s.add_rate_source<>("rerun_tf", 15.0, [&]() {
-            rerun_visual::log_robot_tf(
-                *tf, [](SimpleFrame frame) { return SimpleFrame_to_str(frame); }
-            );
+            rerun_visual::log_robot_tf(*tf, [](SimpleFrame frame) {
+                return SimpleFrame_to_str(frame);
+            });
         });
 #endif
     }

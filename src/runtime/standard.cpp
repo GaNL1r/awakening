@@ -608,14 +608,6 @@ int main(int argc, char** argv) {
                 armor_tracker.reset_count();
                 if (dbg) {
                     dbg->armors.set(armors);
-#ifdef USE_ROS2
-                    rcl::pub_armor_marker(rcl_node, SimpleFrame_to_str(armors.frame_id), armors);
-                    rcl::pub_armor_target_marker(
-                        rcl_node,
-                        SimpleFrame_to_str(__armor_target.get_target_state().frame_id),
-                        __armor_target
-                    );
-#endif
                 }
 
                 log_ctx.track_count++;
@@ -770,50 +762,60 @@ int main(int argc, char** argv) {
     });
     if (dbg) {
         s.add_rate_source<>("debug", 45.0, [&]() {
-            if (!is_web_running()) {
-                return;
-            }
-            static Web web;
-            dbg->type =
-                (mode == Mode::AutoAim) ? VisionDebugCtx::AUTO_AIM : VisionDebugCtx::AUTO_BUFF;
             auto __armor_target = armor_target.read();
-            auto __rune_target = rune_target.read();
-            __armor_target.write_log();
-            __rune_target.write_log();
-            wheel_odometry.write_log();
-            auto img_now = dbg->img_frame.get().timestamp;
-            dbg->armor_target.set(__armor_target);
-            dbg->rune_target.set(__rune_target);
-            dbg->auto_aim_fsm_state.set(auto_aim_fsm_controller.get_state());
-            auto gimbal_in_gimbal_odom =
-                tf->pose_a_in_b(SimpleFrame::GIMBAL, SimpleFrame::GIMBAL_ODOM, Clock::now());
-            auto rpy = utils::matrix2rpy<double>(gimbal_in_gimbal_odom.linear(),utils::RPYOrder::ZYX);
-            auto gimbal_yaw_pitch =
-                std::make_pair(angles::to_degrees(rpy[2]), -angles::to_degrees(rpy[1]));
-            dbg->gimbal_yaw_pitch.set(gimbal_yaw_pitch);
-            bullet_pick_up.update(
-                Clock::now(),
-                dbg->gimbal_cmd.get().appear ? dbg->gimbal_cmd.get().fly_time : 0.4
+            if (is_web_running()) {
+                static Web web;
+                dbg->type =
+                    (mode == Mode::AutoAim) ? VisionDebugCtx::AUTO_AIM : VisionDebugCtx::AUTO_BUFF;
+
+                auto __rune_target = rune_target.read();
+                __armor_target.write_log();
+                __rune_target.write_log();
+                wheel_odometry.write_log();
+                auto img_now = dbg->img_frame.get().timestamp;
+                dbg->armor_target.set(__armor_target);
+                dbg->rune_target.set(__rune_target);
+                dbg->auto_aim_fsm_state.set(auto_aim_fsm_controller.get_state());
+                auto gimbal_in_gimbal_odom =
+                    tf->pose_a_in_b(SimpleFrame::GIMBAL, SimpleFrame::GIMBAL_ODOM, Clock::now());
+                auto rpy =
+                    utils::matrix2rpy<double>(gimbal_in_gimbal_odom.linear(), utils::RPYOrder::ZYX);
+                auto gimbal_yaw_pitch =
+                    std::make_pair(angles::to_degrees(rpy[2]), -angles::to_degrees(rpy[1]));
+                dbg->gimbal_yaw_pitch.set(gimbal_yaw_pitch);
+                bullet_pick_up.update(
+                    Clock::now(),
+                    dbg->gimbal_cmd.get().appear ? dbg->gimbal_cmd.get().fly_time : 0.4
+                );
+                auto bullet_poss =
+                    bullet_pick_up.get_bullet_positions(img_now, very_aimer.get_yaw_pitch_offset());
+                auto odom_in_camera_cv =
+                    tf->pose_a_in_b(SimpleFrame::ODOM, SimpleFrame::CAMERA_CV, img_now);
+                for (auto& pos: bullet_poss) {
+                    pos = odom_in_camera_cv * pos;
+                }
+                dbg->odom_in_camera_cv.set(odom_in_camera_cv);
+                dbg->bullet_positions.set(bullet_poss);
+                web.write_debug_data(dbg.value());
+                auto img = dbg->img_frame.get();
+                auto debug_img = img.src_img.clone();
+                if (img.format == PixelFormat::RGB) {
+                    cv::cvtColor(debug_img, debug_img, cv::COLOR_RGB2BGR);
+                }
+                if (!debug_img.empty()) {
+                    web.draw(debug_img, dbg.value());
+                    web.write_shm(debug_img);
+                }
+            }
+
+#ifdef USE_ROS2
+            auto armors = dbg->armors.get();
+            rcl::pub_armor_target_marker(
+                rcl_node,
+                SimpleFrame_to_str(__armor_target.get_target_state().frame_id),
+                __armor_target
             );
-            auto bullet_poss =
-                bullet_pick_up.get_bullet_positions(img_now, very_aimer.get_yaw_pitch_offset());
-            auto odom_in_camera_cv =
-                tf->pose_a_in_b(SimpleFrame::ODOM, SimpleFrame::CAMERA_CV, img_now);
-            for (auto& pos: bullet_poss) {
-                pos = odom_in_camera_cv * pos;
-            }
-            dbg->odom_in_camera_cv.set(odom_in_camera_cv);
-            dbg->bullet_positions.set(bullet_poss);
-            web.write_debug_data(dbg.value());
-            auto img = dbg->img_frame.get();
-            auto debug_img = img.src_img.clone();
-            if (img.format == PixelFormat::RGB) {
-                cv::cvtColor(debug_img, debug_img, cv::COLOR_RGB2BGR);
-            }
-            if (!debug_img.empty()) {
-                web.draw(debug_img, dbg.value());
-                web.write_shm(debug_img);
-            }
+#endif
         });
 #ifdef USE_ROS2
         if (debug) {
@@ -828,9 +830,9 @@ int main(int argc, char** argv) {
 #ifdef USE_RERUN
         if (debug) {
             s.add_rate_source<>("rerun_tf", 15.0, [&]() {
-                rerun_visual::log_robot_tf(
-                    *tf, [](SimpleFrame frame) { return SimpleFrame_to_str(frame); }
-                );
+                rerun_visual::log_robot_tf(*tf, [](SimpleFrame frame) {
+                    return SimpleFrame_to_str(frame);
+                });
             });
         }
 #endif

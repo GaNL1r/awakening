@@ -18,6 +18,7 @@
 #include <opencv2/core.hpp>
 #include <opencv2/core/mat.hpp>
 #include <opencv2/core/types.hpp>
+#include <opencv2/imgproc.hpp>
 #include <optional>
 #include <stdexcept>
 #include <tuple>
@@ -33,6 +34,72 @@ namespace {
         double length_px;
         double measurement_length;
     };
+
+    bool is_light_in_armor(const ArmorKeyPoints2D& armor_key_points, const Light& light) {
+        auto on_segment = [](const auto& a, const auto& b, const auto& p) {
+            return std::min(a.x, b.x) <= p.x && p.x <= std::max(a.x, b.x)
+                && std::min(a.y, b.y) <= p.y && p.y <= std::max(a.y, b.y);
+        };
+        auto cross = [](const auto& a, const auto& b, const auto& c) {
+            const auto ab = b - a;
+            const auto ac = c - a;
+            return static_cast<double>(ab.x * ac.y - ab.y * ac.x);
+        };
+        auto segments_intersect = [&](const cv::Point2f& a1,
+                                      const cv::Point2f& a2,
+                                      const cv::Point2f& b1,
+                                      const cv::Point2f& b2) {
+            const double d1 = cross(a1, a2, b1);
+            const double d2 = cross(a1, a2, b2);
+            const double d3 = cross(b1, b2, a1);
+            const double d4 = cross(b1, b2, a2);
+
+            constexpr double EPS = 1e-6;
+            if (((d1 > EPS && d2 < -EPS) || (d1 < -EPS && d2 > EPS))
+                && ((d3 > EPS && d4 < -EPS) || (d3 < -EPS && d4 > EPS)))
+            {
+                return true;
+            }
+
+            if (std::abs(d1) <= EPS && on_segment(a1, a2, b1)) {
+                return true;
+            }
+            if (std::abs(d2) <= EPS && on_segment(a1, a2, b2)) {
+                return true;
+            }
+            if (std::abs(d3) <= EPS && on_segment(b1, b2, a1)) {
+                return true;
+            }
+            if (std::abs(d4) <= EPS && on_segment(b1, b2, a2)) {
+                return true;
+            }
+            return false;
+        };
+        const std::array<cv::Point2f, 4> quad = {
+            armor_key_points.points[std::to_underlying(ArmorKeyPointsIndex::LEFT_TOP)].value(),
+            armor_key_points.points[std::to_underlying(ArmorKeyPointsIndex::LEFT_BOTTOM)].value(),
+            armor_key_points.points[std::to_underlying(ArmorKeyPointsIndex::RIGHT_BOTTOM)].value(),
+            armor_key_points.points[std::to_underlying(ArmorKeyPointsIndex::RIGHT_TOP)].value()
+        };
+        const std::vector<cv::Point2f> polygon(quad.begin(), quad.end());
+
+        if (cv::pointPolygonTest(polygon, light.top, false) >= 0
+            || cv::pointPolygonTest(polygon, light.bottom, false) >= 0
+            || cv::pointPolygonTest(polygon, light.center, false) >= 0)
+        {
+            return false;
+        }
+
+        for (std::size_t i = 0; i < quad.size(); ++i) {
+            const auto& a = quad[i];
+            const auto& b = quad[(i + 1) % quad.size()];
+            if (segments_intersect(light.top, light.bottom, a, b)) {
+                return false;
+            }
+        }
+
+        return true;
+    }
 
     UVObservation get_uv_measurement(
         const cv::Point2f& top,
@@ -599,7 +666,6 @@ std::vector<std::tuple<int, bool, Light>> ArmorTarget::match_light(
     const ISO3& camera_cv_in_odom
 ) const noexcept {
     constexpr double MAX_COST = 1e9;
-    //可见灯条逻辑判断不优雅，不过这比较个稳定可观
     std::vector<std::tuple<int, bool, Light>> result;
 
     if (target_number == ArmorClass::BASE || matched_armors.size() != 1) {
@@ -609,6 +675,7 @@ std::vector<std::tuple<int, bool, Light>> ArmorTarget::match_light(
     pred_state.predict(timestamp, target_number);
     const int armors_num = armor_num();
     const int armor_id = matched_armors.front().first;
+    auto& matched_armor = matched_armors.front().second;
     auto predict_light = [&](int id, bool is_left) -> std::pair<cv::Point2f, cv::Point2f> {
         UVMeasure::Ctx ctx { .armor_num = armors_num,
                              .id = id,
@@ -619,13 +686,24 @@ std::vector<std::tuple<int, bool, Light>> ArmorTarget::match_light(
         UVMeasure measure { .ctx = ctx };
         return measure.projected_points(pred_state.x);
     };
+    struct VisibleLight {
+        int armor_id;
+        bool is_left;
+        std::pair<cv::Point2f, cv::Point2f> projected_points;
+    };
     const std::array visible_mapping {
         std::pair { (armor_id + armors_num - 1) % armors_num, false }, // 左可见
         std::pair { (armor_id + 1) % armors_num, true }, // 右可见
     };
-    std::array<std::pair<cv::Point2f, cv::Point2f>, visible_mapping.size()> visible_lights {
-        predict_light(visible_mapping[0].first, visible_mapping[0].second), // 左可见
-        predict_light(visible_mapping[1].first, visible_mapping[1].second), // 右可见
+    std::array<VisibleLight, visible_mapping.size()> visible_lights {
+        VisibleLight { .armor_id = visible_mapping[0].first,
+                       .is_left = visible_mapping[0].second,
+                       .projected_points =
+                           predict_light(visible_mapping[0].first, visible_mapping[0].second) },
+        VisibleLight { .armor_id = visible_mapping[1].first,
+                       .is_left = visible_mapping[1].second,
+                       .projected_points =
+                           predict_light(visible_mapping[1].first, visible_mapping[1].second) }
     };
 
     const int n_obs = static_cast<int>(lights.size());
@@ -634,14 +712,14 @@ std::vector<std::tuple<int, bool, Light>> ArmorTarget::match_light(
         { MAX_COST + 1, MAX_COST + 1 }
     );
 
-    auto calc_cost = [&](const Light& light,
-                         const std::pair<cv::Point2f, cv::Point2f>& pred) -> double {
-        if (matched_armors[0].second.key_points.bounding_box().contains(light.top)
-            || matched_armors[0].second.key_points.bounding_box().contains(light.bottom)
-            || matched_armors[0].second.key_points.bounding_box().contains(light.center))
-        {
-            return MAX_COST + 1;
+    auto calc_cost = [&](const Light& light, const VisibleLight& visible_light) -> double {
+        const auto& pred = visible_light.projected_points;
+        for (auto& [_, armor]: matched_armors) {
+            if (!is_light_in_armor(armor.key_points, light)) {
+                return MAX_COST + 1;
+            }
         }
+
         double pred_len = cv::norm(pred.first - pred.second);
         double len_err = std::abs(light.length - pred_len);
         if (len_err > pred_len * cfg.light_match_length_ratio_gate) {
@@ -673,8 +751,8 @@ std::vector<std::tuple<int, bool, Light>> ArmorTarget::match_light(
     }
 
     for (auto [obs, id]: dta_utils::greedy_match(cost, n_obs, 2, MAX_COST)) {
-        auto [matched_id, is_left] = visible_mapping[id];
-        result.emplace_back(matched_id, is_left, lights[obs]);
+        const auto& matched_light = visible_lights[id];
+        result.emplace_back(matched_light.armor_id, matched_light.is_left, lights[obs]);
     }
 
     return result;
