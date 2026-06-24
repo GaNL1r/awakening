@@ -120,17 +120,12 @@ public:
             Eigen::Matrix<double, wheel_motion_model::Z_N, wheel_motion_model::Z_N> r;
             return r;
         };
-        const auto inject = [this](
-                                const Eigen::Matrix<double, wheel_motion_model::X_N, 1>& delta,
-                                Eigen::Matrix<double, wheel_motion_model::X_N, 1>& nominal
-                            ) {
+        const auto inject = [this](const auto& delta, auto& nominal) {
             for (int i = 0; i < wheel_motion_model::X_N; i++) {
                 nominal[i] += delta[i];
             }
         };
-        const auto box_minus = [](const Eigen::Matrix<double, wheel_motion_model::X_N, 1>& nominal,
-                                  const Eigen::Matrix<double, wheel_motion_model::X_N, 1>& value,
-                                  Eigen::Matrix<double, wheel_motion_model::X_N, 1>& delta) {
+        const auto box_minus = [](const auto& nominal, const auto& value, auto& delta) {
             for (int i = 0; i < wheel_motion_model::X_N; i++) {
                 delta[i] = value[i] - nominal[i];
             }

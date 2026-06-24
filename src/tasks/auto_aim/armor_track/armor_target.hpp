@@ -65,8 +65,8 @@ struct ArmorTrackerCfg {
             config["light_match_pos_gate_by_length_ratio"].as<double>();
     }
 };
-static constexpr bool measure_normalized = true;
-static inline int GOBAL_ID = 0; //全局状态标记，下游控制对同一id的不重复构建轨迹
+inline constexpr bool MEASURE_NORMALIZED = true;
+inline int GLOBAL_ID = 0; // 全局状态标记，下游控制对同一 id 不重复构建轨迹。
 class ArmorTarget {
 public:
     struct TrackState {
@@ -130,10 +130,7 @@ public:
         process_noise(double dt) const noexcept;
     [[nodiscard]] Eigen::
         Matrix<double, armor_point_motion_model::UVZ_N, armor_point_motion_model::UVZ_N>
-        uvmeasurement_covariance(
-            const Eigen::Matrix<double, armor_point_motion_model::UVZ_N, 1>& z,
-            double length_px,
-            double measurement_length
+        uvmeasurement_covariance(const Eigen::Matrix<double, armor_point_motion_model::UVZ_N, 1>& z
         ) const noexcept;
 
     void predict_ekf(const TimePoint& timestamp);
@@ -159,12 +156,12 @@ public:
     ) const noexcept;
     std::vector<std::tuple<int, bool, Light>> match_light(
         std::vector<Light>& lights,
-        std::vector<std::pair<int, Armor>>& matched_armors,
+        const std::vector<std::pair<int, Armor>>& matched_armors,
         const std::vector<std::tuple<int, bool, std::pair<cv::Point2f, cv::Point2f>>>& visible_light
     ) const noexcept;
     std::vector<std::tuple<int, bool, Light>> match_light(
         std::vector<Light>& lights,
-        std::vector<std::pair<int, Armor>>& matched_armors,
+        const std::vector<std::pair<int, Armor>>& matched_armors,
         const TimePoint& timestamp,
         const CameraInfo& camera_info,
         const ISO3& camera_cv_in_odom
@@ -177,14 +174,13 @@ public:
     }
     template<typename F>
     void set_target_state(F&& f) {
-        this_id = GOBAL_ID++; //全局状态标记，下游控制对同一id的不重复构建轨迹
+        this_id = GLOBAL_ID++;
         f(target_state);
     }
 
     bool is_inited = false;
     bool jumped = false;
     int last_match_id = -1;
-    mutable double last_rot_yaw = 0;
     std::optional<std::pair<bool, std::vector<bool>>> outpost_has_all_and_has_set_ids;
     TrackState track_state;
     TimePoint last_update;
@@ -207,10 +203,9 @@ public:
         return target;
     }
     [[nodiscard]] inline bool check() const noexcept {
-        auto v = track_state.is_tracking()
+        return track_state.is_tracking()
             && std::chrono::duration<double>(Clock::now() - last_update).count()
-                < cfg.lost_time_thres;
-        return v;
+            < cfg.lost_time_thres;
     }
     [[nodiscard]] inline bool need_focus() const noexcept {
         return is_inited

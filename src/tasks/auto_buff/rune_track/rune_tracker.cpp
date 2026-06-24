@@ -15,12 +15,9 @@ struct RuneTracker::Impl {
         const ISO3& camera_cv_in_odom,
         int frame_id
     ) {
-        bool found = false;
-        if (target_.track_state.tracker_state == RuneTarget::TrackState::LOST) {
-            found = init_target(detection, frame_id, camera_info, camera_cv_in_odom);
-        } else {
-            found = update_target(detection, camera_info, camera_cv_in_odom);
-        }
+        const bool found = target_.track_state.tracker_state == RuneTarget::TrackState::LOST
+            ? init_target(detection, frame_id, camera_info, camera_cv_in_odom)
+            : update_target(detection, camera_info, camera_cv_in_odom);
         if (target_.get_target_state().pos().norm() > 15.0 && target_.check()) {
             target_.track_state.tracker_state = RuneTarget::TrackState::LOST;
             AWAKENING_WARN("TOO FAR");
@@ -69,7 +66,7 @@ struct RuneTracker::Impl {
             camera_info,
             camera_cv_in_odom
         );
-        auto [fan_updated, r_updated] = target_.update(
+        const auto updated = target_.update(
             matched_fans,
             matched_fan_targets,
             match_r,
@@ -77,7 +74,7 @@ struct RuneTracker::Impl {
             camera_info,
             camera_cv_in_odom
         );
-        return fan_updated > 0;
+        return std::get<0>(updated) > 0;
     }
     void update_fsm(bool found, const TimePoint& now) noexcept {
         auto& target = target_;
@@ -96,10 +93,8 @@ struct RuneTracker::Impl {
     RuneTarget target_;
     int found_count_ = 0;
 };
-RuneTracker::RuneTracker(const YAML::Node& config) {
-    _impl = std::make_unique<Impl>(config);
-}
-RuneTracker::~RuneTracker() noexcept {}
+RuneTracker::RuneTracker(const YAML::Node& config): _impl(std::make_unique<Impl>(config)) {}
+RuneTracker::~RuneTracker() noexcept = default;
 RuneTarget RuneTracker::track(
     RuneDetection& detection,
     const CameraInfo& camera_info,

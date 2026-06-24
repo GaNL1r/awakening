@@ -134,19 +134,12 @@ struct PointTarget {
             Eigen::Matrix<double, Z_N, Z_N> r;
             return r;
         };
-        const auto inject = [this](
-                                const Eigen::Matrix<double, X_N, 1>& delta,
-                                Eigen::Matrix<double, X_N, 1>& nominal
-                            ) {
+        const auto inject = [this](const auto& delta, auto& nominal) {
             for (int i = 0; i < X_N; i++) {
                 nominal[i] += delta[i];
             }
         };
-        const auto box_minus = [this](
-                                   const Eigen::Matrix<double, X_N, 1>& nominal,
-                                   const Eigen::Matrix<double, X_N, 1>& value,
-                                   Eigen::Matrix<double, X_N, 1>& delta
-                               ) {
+        const auto box_minus = [this](const auto& nominal, const auto& value, auto& delta) {
             for (int i = 0; i < X_N; i++) {
                 delta[i] = value[i] - nominal[i];
             }

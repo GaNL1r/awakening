@@ -30,13 +30,8 @@ using namespace armor_point_motion_model;
 
 namespace {
 
-    struct UVObservation {
-        Eigen::Matrix<double, UVZ_N, 1> z;
-        double length_px;
-        double measurement_length;
-    };
-
-    bool is_light_in_armor(const ArmorKeyPoints2D& armor_key_points, const Light& light) {
+    bool
+    is_light_separate_from_armor(const ArmorKeyPoints2D& armor_key_points, const Light& light) {
         auto on_segment = [](const auto& a, const auto& b, const auto& p) {
             return std::min(a.x, b.x) <= p.x && p.x <= std::max(a.x, b.x)
                 && std::min(a.y, b.y) <= p.y && p.y <= std::max(a.y, b.y);
@@ -62,19 +57,10 @@ namespace {
                 return true;
             }
 
-            if (std::abs(d1) <= EPS && on_segment(a1, a2, b1)) {
-                return true;
-            }
-            if (std::abs(d2) <= EPS && on_segment(a1, a2, b2)) {
-                return true;
-            }
-            if (std::abs(d3) <= EPS && on_segment(b1, b2, a1)) {
-                return true;
-            }
-            if (std::abs(d4) <= EPS && on_segment(b1, b2, a2)) {
-                return true;
-            }
-            return false;
+            return (std::abs(d1) <= EPS && on_segment(a1, a2, b1))
+                || (std::abs(d2) <= EPS && on_segment(a1, a2, b2))
+                || (std::abs(d3) <= EPS && on_segment(b1, b2, a1))
+                || (std::abs(d4) <= EPS && on_segment(b1, b2, a2));
         };
         const std::array<cv::Point2f, 4> quad = {
             armor_key_points.points[std::to_underlying(ArmorKeyPointsIndex::LEFT_TOP)].value(),
@@ -102,18 +88,14 @@ namespace {
         return true;
     }
 
-    UVObservation get_uv_measurement(
+    UVVecZ get_uv_measurement(
         const cv::Point2f& top,
         const cv::Point2f& bottom,
         const CameraInfo& camera_info
     ) noexcept {
-        UVObservation observation;
-        observation.z.setZero();
-        observation.length_px = cv::norm(top - bottom);
-
         cv::Point2f measurement_top = top;
         cv::Point2f measurement_bottom = bottom;
-        if (measure_normalized) {
+        if (MEASURE_NORMALIZED) {
             measurement_top = utils::undistort_point(
                 camera_info.camera_matrix,
                 camera_info.distortion_coefficients,
@@ -128,8 +110,8 @@ namespace {
 
         const Eigen::Vector2d top_eigen(measurement_top.x, measurement_top.y);
         const Eigen::Vector2d bottom_eigen(measurement_bottom.x, measurement_bottom.y);
-        UVMeasure::points_to_observation(top_eigen, bottom_eigen, observation.z.data());
-        observation.measurement_length = cv::norm(measurement_top - measurement_bottom);
+        UVVecZ observation;
+        UVMeasure::points_to_observation(top_eigen, bottom_eigen, observation.data());
         return observation;
     }
 } // namespace
@@ -193,58 +175,10 @@ void ArmorTarget::reset(
     } else {
         r_pre = 0.26;
     }
-    const auto u_q = [this]() {
-        Eigen::Matrix<double, X_N, X_N> q;
-        return q;
-    };
-
-    const auto inject =
-        [this](const Eigen::Matrix<double, X_N, 1>& delta, Eigen::Matrix<double, X_N, 1>& nominal) {
-            for (int i = 0; i < X_N; i++) {
-                if (i == idx::CX || i == idx::CY || i == idx::CZ || i == idx::C_ROT_Z
-                    || i == idx::C_ROT_Y || i == idx::C_ROT_X)
-                    continue;
-                nominal[i] += delta[i];
-            }
-            Vec3 delta_rho(delta[idx::CX], delta[idx::CY], delta[idx::CZ]);
-            Vec3 delta_rot(delta[idx::C_ROT_X], delta[idx::C_ROT_Y], delta[idx::C_ROT_Z]);
-            ISO3 nominal_pose = ISO3::Identity();
-            nominal_pose.translation() = Vec3(nominal[idx::CX], nominal[idx::CY], nominal[idx::CZ]);
-            Vec3 nominal_rot(nominal[idx::C_ROT_X], nominal[idx::C_ROT_Y], nominal[idx::C_ROT_Z]);
-            nominal_pose.linear() = utils::so3_exp(nominal_rot);
-            const ISO3 injected_pose = nominal_pose * utils::se3_exp(delta_rho, delta_rot);
-            const Vec3 injected_rot = utils::so3_log(injected_pose.linear().eval());
-            nominal[idx::CX] = injected_pose.translation().x();
-            nominal[idx::CY] = injected_pose.translation().y();
-            nominal[idx::CZ] = injected_pose.translation().z();
-            nominal[idx::C_ROT_X] = injected_rot.x();
-            nominal[idx::C_ROT_Y] = injected_rot.y();
-            nominal[idx::C_ROT_Z] = injected_rot.z();
-        };
-    const auto box_minus = [](const Eigen::Matrix<double, X_N, 1>& nominal,
-                              const Eigen::Matrix<double, X_N, 1>& value,
-                              Eigen::Matrix<double, X_N, 1>& delta) {
-        delta = value - nominal;
-        ISO3 nominal_pose = ISO3::Identity();
-        nominal_pose.translation() = Vec3(nominal[idx::CX], nominal[idx::CY], nominal[idx::CZ]);
-        nominal_pose.linear() =
-            utils::so3_exp(Vec3(nominal[idx::C_ROT_X], nominal[idx::C_ROT_Y], nominal[idx::C_ROT_Z])
-            );
-
-        ISO3 value_pose = ISO3::Identity();
-        value_pose.translation() = Vec3(value[idx::CX], value[idx::CY], value[idx::CZ]);
-        value_pose.linear() =
-            utils::so3_exp(Vec3(value[idx::C_ROT_X], value[idx::C_ROT_Y], value[idx::C_ROT_Z]));
-
-        Vec3 delta_rho;
-        Vec3 delta_rot;
-        utils::se3_log(nominal_pose.inverse() * value_pose, delta_rho, delta_rot);
-        delta[idx::CX] = delta_rho.x();
-        delta[idx::CY] = delta_rho.y();
-        delta[idx::CZ] = delta_rho.z();
-        delta[idx::C_ROT_X] = delta_rot.x();
-        delta[idx::C_ROT_Y] = delta_rot.y();
-        delta[idx::C_ROT_Z] = delta_rot.z();
+    const auto u_q = [] { return Eigen::Matrix<double, X_N, X_N>::Zero(); };
+    const auto inject = [](const auto& delta, auto& nominal) { inject_state(delta, nominal); };
+    const auto box_minus = [](const auto& nominal, const auto& value, auto& delta) {
+        box_minus_state(nominal, value, delta);
     };
     esekf = RobotStateESEKF(
         Predict { .dt = 0.005, .armor_number = target_number },
@@ -254,7 +188,7 @@ void ArmorTarget::reset(
         p0
     );
 
-    esekf.value().set_iteration_num(cfg.esekf_iter_num);
+    esekf->set_iteration_num(cfg.esekf_iter_num);
 
     armor_pnp(a, camera_info, camera_cv_in_odom);
     auto armor_in_odom = a.pose;
@@ -266,10 +200,7 @@ void ArmorTarget::reset(
         : (auto_aim::FIFTTEN_DEGREE_RAD);
     armor_in_car.linear() = utils::rpy2matrix(Vec3(0, armor_pitch, 0));
     auto car_in_odom = armor_in_odom * armor_in_car.inverse();
-    auto rpy = utils::matrix2rpy<double>(car_in_odom.linear(), utils::RPYOrder::XYZ);
     const Vec3 car_rot = utils::so3_log(car_in_odom.linear().eval());
-    const double yaw = rpy[2];
-    last_rot_yaw = yaw;
     target_state.x = Eigen::VectorXd::Zero(X_N);
     target_state.set_pos(car_in_odom.translation());
     target_state.x[idx::R] = r;
@@ -278,7 +209,7 @@ void ArmorTarget::reset(
     target_state.x[idx::C_ROT_X] = car_rot.x();
     target_state.timestamp = timestamp;
     target_state.frame_id = frame_id;
-    esekf.value().set_state(target_state.x);
+    esekf->set_state(target_state.x);
     last_update = timestamp;
     is_inited = true;
     jumped = false;
@@ -286,12 +217,12 @@ void ArmorTarget::reset(
     if (target_number == ArmorClass::OUTPOST) {
         outpost_has_all_and_has_set_ids =
             std::make_pair(false, std::vector<bool>(armor_num(), false));
-        outpost_has_all_and_has_set_ids.value().second[0] = true;
+        outpost_has_all_and_has_set_ids->second[0] = true;
     } else {
         outpost_has_all_and_has_set_ids = std::nullopt;
     }
     track_state.reset();
-    this_id = GOBAL_ID++; //全局状态标记，下游控制对同一id的不重复构建轨迹
+    this_id = GLOBAL_ID++;
 }
 
 void ArmorTarget::armor_pnp(
@@ -368,24 +299,21 @@ void ArmorTarget::armor_pnp(
         a.pose = best_pose;
     }
 }
-Eigen::Matrix<double, UVZ_N, UVZ_N> ArmorTarget::uvmeasurement_covariance(
-    const Eigen::Matrix<double, UVZ_N, 1>& z,
-    double length_px,
-    double measurement_length
-) const noexcept {
+Eigen::Matrix<double, UVZ_N, UVZ_N>
+ArmorTarget::uvmeasurement_covariance(const Eigen::Matrix<double, UVZ_N, 1>& z) const noexcept {
     Eigen::Matrix<double, UVZ_N, UVZ_N> r;
     r.setZero();
 
     const double sigma_px = cfg.r_sigma_px;
     double sigma_x = sigma_px;
     double sigma_y = sigma_px;
-    if (measure_normalized) {
+    if (MEASURE_NORMALIZED) {
         sigma_x /= uvmeasure_ctx.camera_info.camera_fx();
         sigma_y /= uvmeasure_ctx.camera_info.camera_fy();
     }
     double sigma_half_length = cfg.r_sigma_half_length;
 
-    if (measure_normalized) {
+    if (MEASURE_NORMALIZED) {
         sigma_half_length /= uvmeasure_ctx.camera_info.camera_fx();
     }
     double sigma_angle = cfg.r_sigma_angle;
@@ -409,7 +337,7 @@ Eigen::Matrix<double, X_N, X_N> ArmorTarget::process_noise(double dt) const noex
         q_yaw = cfg.qyaw_common; // 角加速度方差
     }
     q.setZero();
-    const Mat3 car_in_odom_R = _whole_car_pose(target_state.x.data(), target_number).linear();
+    const Mat3 car_in_odom_R = whole_car_pose(target_state.x.data(), target_number).linear();
     const Mat3 accel_noise_car = q_xyz.asDiagonal();
     const Mat3 accel_noise_odom = car_in_odom_R * accel_noise_car * car_in_odom_R.transpose();
 
@@ -462,11 +390,11 @@ void ArmorTarget::predict_ekf(const TimePoint& timestamp) {
         throw std::runtime_error("ESEKF is not initialized");
     }
     auto dt = std::chrono::duration<double>(timestamp - target_state.timestamp).count();
-    esekf.value().set_predict_func(Predict { .dt = dt, .armor_number = target_number });
-    esekf.value().set_update_Q([&]() { return process_noise(dt); });
-    target_state.x = esekf.value().predict();
+    esekf->set_predict_func(Predict { .dt = dt, .armor_number = target_number });
+    esekf->set_update_Q([&]() { return process_noise(dt); });
+    target_state.x = esekf->predict();
     target_state.timestamp = timestamp;
-    this_id = GOBAL_ID++; //全局状态标记，下游控制对同一id的不重复构建轨迹
+    this_id = GLOBAL_ID++;
 }
 
 int ArmorTarget::update(
@@ -479,9 +407,6 @@ int ArmorTarget::update(
     if (matched_armors.empty()) {
         return 0;
     }
-    bool all_init =
-        (outpost_has_all_and_has_set_ids.has_value() ? outpost_has_all_and_has_set_ids.value().first
-                                                     : jumped);
     uvmeasure_ctx.camera_cv_in_odom = camera_cv_in_odom;
 
     std::vector<std::shared_ptr<RobotStateESEKF::ObsBase>> obs;
@@ -491,33 +416,17 @@ int ArmorTarget::update(
         return UVMeasure::residual(z_pred, z);
     };
     const int armors_num = armor_num();
-    auto add_armor_uv_obs = [&](Armor& armor, int id, bool is_left) {
+    auto add_uv_obs = [&](const cv::Point2f& top, const cv::Point2f& bottom, int id, bool is_left) {
         auto ctx = uvmeasure_ctx;
         ctx.id = id;
         ctx.is_left = is_left;
-        ctx.normalized = measure_normalized;
-        auto key_points = armor.key_points.landmarks();
-        UVObservation observation;
-        if (is_left) {
-            observation = get_uv_measurement(
-                key_points[ArmorKeyPointsIndex::LEFT_TOP],
-                key_points[ArmorKeyPointsIndex::LEFT_BOTTOM],
-                camera_info
-            );
-        } else {
-            observation = get_uv_measurement(
-                key_points[ArmorKeyPointsIndex::RIGHT_TOP],
-                key_points[ArmorKeyPointsIndex::RIGHT_BOTTOM],
-                camera_info
-            );
-        }
-        const auto u_r = [this,
-                          length_px = observation.length_px,
-                          measurement_length = observation.measurement_length](
-                             const Eigen::Matrix<double, UVZ_N, 1>& z
-                         ) { return uvmeasurement_covariance(z, length_px, measurement_length); };
+        ctx.normalized = MEASURE_NORMALIZED;
+        const auto observation = get_uv_measurement(top, bottom, camera_info);
+        const auto u_r = [this](const Eigen::Matrix<double, UVZ_N, 1>& z) {
+            return uvmeasurement_covariance(z);
+        };
         UVMeasure measure { .ctx = ctx };
-        obs.push_back(esekf.value().make_obs(observation.z, measure, u_r, cal_residual));
+        obs.push_back(esekf->make_obs(observation, measure, u_r, cal_residual));
     };
 
     auto update_outpost_state = [&](int id) {
@@ -537,35 +446,32 @@ int ArmorTarget::update(
         update_outpost_state(id);
         last_match_id = id;
         used_id[id] = true;
-        add_armor_uv_obs(armor, id, true);
-        add_armor_uv_obs(armor, id, false);
+        const auto key_points = armor.key_points.landmarks();
+        add_uv_obs(
+            key_points[ArmorKeyPointsIndex::LEFT_TOP],
+            key_points[ArmorKeyPointsIndex::LEFT_BOTTOM],
+            id,
+            true
+        );
+        add_uv_obs(
+            key_points[ArmorKeyPointsIndex::RIGHT_TOP],
+            key_points[ArmorKeyPointsIndex::RIGHT_BOTTOM],
+            id,
+            false
+        );
     }
-    // if (matched_lights.size() >= 2) {
     for (const auto& [id, is_left, light]: matched_lights) {
         if (used_id[id]) {
             continue;
         }
-        auto ctx = uvmeasure_ctx;
-        ctx.id = id;
         used_id[id] = true;
-        ctx.is_left = is_left;
-        ctx.normalized = measure_normalized;
-        UVMeasure measure { .ctx = ctx };
-        const auto observation = get_uv_measurement(light.top, light.bottom, camera_info);
-        const auto u_r = [this,
-                          length_px = observation.length_px,
-                          measurement_length = observation.measurement_length](
-                             const Eigen::Matrix<double, UVZ_N, 1>& z
-                         ) { return uvmeasurement_covariance(z, length_px, measurement_length); };
-        obs.push_back(esekf.value().make_obs(observation.z, measure, u_r, cal_residual));
+        add_uv_obs(light.top, light.bottom, id, is_left);
     }
-    // }
-
-    if (obs.size() > 0) {
-        target_state.x = esekf.value().update_multi(obs);
+    if (!obs.empty()) {
+        target_state.x = esekf->update_multi(obs);
         target_state.timestamp = timestamp;
         last_update = timestamp;
-        this_id = GOBAL_ID++; //全局状态标记，下游控制对同一id的不重复构建轨迹
+        this_id = GLOBAL_ID++;
     }
     update_count += obs.size();
     return obs.size();
@@ -586,25 +492,22 @@ std::vector<std::pair<int, Armor>> ArmorTarget::match_armor(
     std::vector<int> maybe_visible;
     std::vector<std::pair<double, int>> angle_dis_in_camera;
     for (int i = 0; i < armors_num; i++) {
-        auto pose_in_odom = _armor_pose(pred_state.x.data(), i, armors_num, target_number);
+        auto pose_in_odom = armor_pose(pred_state.x.data(), i, armors_num, target_number);
         auto pose_in_camera = camera_in_odom.inverse() * pose_in_odom;
         auto rpy = utils::matrix2rpy(pose_in_camera.linear().eval());
-        angle_dis_in_camera.emplace_back(std::abs(angles::normalize_angle((0) - rpy[2])), i);
+        angle_dis_in_camera.emplace_back(std::abs(angles::normalize_angle(-rpy[2])), i);
     }
     std::sort(
         angle_dis_in_camera.begin(),
         angle_dis_in_camera.end(),
         [](const auto& a, const auto& b) { return a.first < b.first; }
     );
-    for (int i = 0; i < angle_dis_in_camera.size(); ++i) {
-        if (i == 3) {
-            break;
-        }
+    const auto visible_count = std::min<std::size_t>(3, angle_dis_in_camera.size());
+    for (std::size_t i = 0; i < visible_count; ++i) {
         maybe_visible.push_back(angle_dis_in_camera[i].second);
     }
-    bool all_init =
-        (outpost_has_all_and_has_set_ids.has_value() ? outpost_has_all_and_has_set_ids.value().first
-                                                     : jumped);
+    const bool all_init =
+        outpost_has_all_and_has_set_ids ? outpost_has_all_and_has_set_ids->first : jumped;
     std::vector<std::vector<double>> cost(n_obs, std::vector<double>(armors_num, MAX_COST + 1));
     std::vector<std::pair<std::pair<cv::Point2f, cv::Point2f>, std::pair<cv::Point2f, cv::Point2f>>>
         meas_list(n_obs);
@@ -623,31 +526,19 @@ std::vector<std::pair<int, Armor>> ArmorTarget::match_armor(
     for (int j = 0; j < n_obs; ++j) {
         bool in_gate = false;
         double min_pos_err = std::numeric_limits<double>::max();
-        for (int i = 0; i < maybe_visible.size(); ++i) {
-            int id = maybe_visible[i];
-            auto lightl = predict_light(id, true, pred_state, camera_info, camera_cv_in_odom);
-            auto lightr = predict_light(id, false, pred_state, camera_info, camera_cv_in_odom);
-            auto avg_length_pred =
-                (cv::norm(lightl.first - lightl.second) + cv::norm(lightr.first - lightr.second))
+        for (std::size_t i = 0; i < maybe_visible.size(); ++i) {
+            const int id = maybe_visible[i];
+            const auto left_light =
+                predict_light(id, true, pred_state, camera_info, camera_cv_in_odom);
+            const auto right_light =
+                predict_light(id, false, pred_state, camera_info, camera_cv_in_odom);
+            const double avg_length_pred = (cv::norm(left_light.first - left_light.second)
+                                            + cv::norm(right_light.first - right_light.second))
                 / 2.0;
-            // auto avg_length_meas =
-            //     (cv::norm(meas_list[j].first.first - meas_list[j].first.second)
-            //      + cv::norm(meas_list[j].second.first - meas_list[j].second.second))
-            //     / 2.0;
-            // if (std::abs(avg_length_pred - avg_length_meas) > avg_length_pred * 0.2) {
-            //     continue;
-            // }
-            // auto avg_angle_pred = (std::atan2(light1.second.y - light1.first.y, light1.second.x - light1.first.x) +
-            //                        std::atan2(light2.second.y - light2.first.y, light2.second.x - light2.first.x)) / 2.0;
-            // auto avg_angle_meas = (std::atan2(meas_list[j].first.second.y - meas_list[j].first.first.y, meas_list[j].first.second.x - meas_list[j].first.first.x) +
-            //                        std::atan2(meas_list[j].second.second.y - meas_list[j].second.first.y, meas_list[j].second.second.x - meas_list[j].second.first.x)) / 2.0;
-            // if (std::abs(avg_angle_pred - avg_angle_meas) > 0.2) {
-            //     continue;
-            // }
-            double pos_err = cv::norm(lightl.first - meas_list[j].first.first)
-                + cv::norm(lightr.first - meas_list[j].second.first)
-                + cv::norm(lightl.second - meas_list[j].first.second)
-                + cv::norm(lightr.second - meas_list[j].second.second);
+            const double pos_err = cv::norm(left_light.first - meas_list[j].first.first)
+                + cv::norm(right_light.first - meas_list[j].second.first)
+                + cv::norm(left_light.second - meas_list[j].first.second)
+                + cv::norm(right_light.second - meas_list[j].second.second);
 
             if (std::isfinite(pos_err)
                 && pos_err < avg_length_pred
@@ -688,12 +579,11 @@ std::pair<cv::Point2f, cv::Point2f> ArmorTarget::predict_light(
 }
 std::vector<std::tuple<int, bool, Light>> ArmorTarget::match_light(
     std::vector<Light>& lights,
-    std::vector<std::pair<int, Armor>>& matched_armors,
+    const std::vector<std::pair<int, Armor>>& matched_armors,
     const TimePoint& timestamp,
     const CameraInfo& camera_info,
     const ISO3& camera_cv_in_odom
 ) const noexcept {
-    constexpr double MAX_COST = 1e9;
     if (target_number == ArmorClass::BASE || matched_armors.empty()) {
         return {};
     }
@@ -708,20 +598,15 @@ std::vector<std::tuple<int, bool, Light>> ArmorTarget::match_light(
     auto camera_in_odom = camera_cv_in_odom * R_CV2PHYSICS.inverse();
     std::vector<std::pair<double, int>> angle_dis_in_camera;
     for (int i = 0; i < armors_num; i++) {
-        auto pose_in_odom = _armor_pose(pred_state.x.data(), i, armors_num, target_number);
+        auto pose_in_odom = armor_pose(pred_state.x.data(), i, armors_num, target_number);
         auto pose_in_camera = camera_in_odom.inverse() * pose_in_odom;
         auto rpy = utils::matrix2rpy(pose_in_camera.linear().eval());
-        angle_dis_in_camera.emplace_back(std::abs(angles::normalize_angle((0) - rpy[2])), i);
+        angle_dis_in_camera.emplace_back(std::abs(angles::normalize_angle(-rpy[2])), i);
     }
 
     if (angle_dis_in_camera.empty()) {
         return {};
     }
-    std::sort(
-        angle_dis_in_camera.begin(),
-        angle_dis_in_camera.end(),
-        [](const auto& a, const auto& b) { return a.first < b.first; }
-    );
     std::vector<std::tuple<int, bool, std::pair<cv::Point2f, cv::Point2f>>> visible_lights;
     auto maybe_visible = [&](int armor_id) {
         int left_id = (armor_id + armors_num - 1) % armors_num;
@@ -741,13 +626,18 @@ std::vector<std::tuple<int, bool, Light>> ArmorTarget::match_light(
             );
         }
     };
-    maybe_visible(angle_dis_in_camera.front().second);
+    const auto closest = std::min_element(
+        angle_dis_in_camera.begin(),
+        angle_dis_in_camera.end(),
+        [](const auto& a, const auto& b) { return a.first < b.first; }
+    );
+    maybe_visible(closest->second);
 
     return match_light(lights, matched_armors, visible_lights);
 }
 std::vector<std::tuple<int, bool, Light>> ArmorTarget::match_light(
     std::vector<Light>& lights,
-    std::vector<std::pair<int, Armor>>& matched_armors,
+    const std::vector<std::pair<int, Armor>>& matched_armors,
     const std::vector<std::tuple<int, bool, std::pair<cv::Point2f, cv::Point2f>>>& visible_lights
 ) const noexcept {
     std::vector<std::tuple<int, bool, Light>> result;
@@ -765,30 +655,30 @@ std::vector<std::tuple<int, bool, Light>> ArmorTarget::match_light(
             const std::tuple<int, bool, std::pair<cv::Point2f, cv::Point2f>>& visible_light
         ) -> double {
         const auto& pred = std::get<2>(visible_light);
-        for (auto& [_, armor]: matched_armors) {
-            if (!is_light_in_armor(armor.key_points, light)) {
+        for (const auto& [_, armor]: matched_armors) {
+            if (!is_light_separate_from_armor(armor.key_points, light)) {
                 return MAX_COST + 1;
             }
         }
 
-        double pred_len = cv::norm(pred.first - pred.second);
-        double len_err = std::abs(light.length - pred_len);
+        const double pred_len = cv::norm(pred.first - pred.second);
+        const double len_err = std::abs(light.length - pred_len);
         if (len_err > pred_len * cfg.light_match_length_ratio_gate) {
-            // AWAKENING_WARN("match out of gate: light length err: {}", len_err);
             return MAX_COST + 1;
         }
 
-        double pred_angle = std::atan2(pred.first.x - pred.second.x, pred.first.y - pred.second.y);
-        double light_angle = std::atan2(light.top.x - light.bottom.x, light.top.y - light.bottom.y);
-        double angle_err = std::abs(angles::normalize_angle(light_angle - pred_angle));
+        const double pred_angle =
+            std::atan2(pred.first.x - pred.second.x, pred.first.y - pred.second.y);
+        const double light_angle =
+            std::atan2(light.top.x - light.bottom.x, light.top.y - light.bottom.y);
+        const double angle_err = std::abs(angles::normalize_angle(light_angle - pred_angle));
         if (angle_err > cfg.light_match_angle_gate) {
-            // AWAKENING_WARN("match out of gate: light angle err: {}", angle_err);
             return MAX_COST + 1;
         }
 
-        double pos_err = cv::norm(light.top - pred.first) + cv::norm(light.bottom - pred.second);
+        const double pos_err =
+            cv::norm(light.top - pred.first) + cv::norm(light.bottom - pred.second);
         if (pos_err > pred_len * cfg.light_match_pos_gate_by_length_ratio) {
-            // AWAKENING_WARN("match out of gate: light position err: {}", pos_err);
             return MAX_COST + 1;
         }
 
@@ -822,7 +712,7 @@ std::vector<std::tuple<int, bool, Light>> ArmorTarget::match_light(
     cv::Rect rect = expanded(timestamp, camera_cv_in_odom, camera_info, image_size);
     constexpr double expand_ratio = 1.4;
     rect = utils::expand_and_clip_rect(rect, expand_ratio, image_size);
-    const cv::Rect img_rect = cv::Rect(0, 0, image_size.width, image_size.height);
+    const cv::Rect img_rect(0, 0, image_size.width, image_size.height);
 
     if ((rect & img_rect).area() <= 0) {
         return img_rect;
@@ -855,7 +745,7 @@ std::vector<std::tuple<int, bool, Light>> ArmorTarget::match_light(
 
     double dt = std::chrono::duration<double>(timestamp - last_update).count();
     double lost_dt = cfg.lost_time_thres;
-    double dt_clamped = std::max(0.0, std::min(dt, lost_dt));
+    const double dt_clamped = std::clamp(dt, 0.0, lost_dt);
 
     int base_side = std::max(ratio_rect.width, ratio_rect.height);
     int max_side = std::max(image_size.width, image_size.height);
@@ -893,16 +783,11 @@ std::vector<std::tuple<int, bool, Light>> ArmorTarget::match_light(
     auto tmp_target_state = target_state;
     tmp_target_state.predict(timestamp, target_number);
     const int armors_num = armor_num();
+    pts.reserve(armors_num * 4);
     for (int id = 0; id < armors_num; ++id) {
-        {
+        for (const bool is_left: { true, false }) {
             const auto light =
-                predict_light(id, true, tmp_target_state, camera_info, camera_cv_in_odom);
-            pts.push_back(light.first);
-            pts.push_back(light.second);
-        }
-        {
-            const auto light =
-                predict_light(id, false, tmp_target_state, camera_info, camera_cv_in_odom);
+                predict_light(id, is_left, tmp_target_state, camera_info, camera_cv_in_odom);
             pts.push_back(light.first);
             pts.push_back(light.second);
         }

@@ -84,7 +84,7 @@ inline void pub_armor_target_marker(
         angular_v_marker.id = 1;
         angular_v_marker.points.clear();
         angular_v_marker.points.emplace_back(position_marker.pose.position);
-        auto whole_car_pose = auto_aim::armor_point_motion_model::_whole_car_pose(
+        auto whole_car_pose = auto_aim::armor_point_motion_model::whole_car_pose(
             target_state.x.data(),
             target.target_number
         );

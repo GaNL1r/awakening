@@ -1,16 +1,9 @@
 #include "armor_tracker.hpp"
-#include "angles.h"
 #include "tasks/auto_aim/armor_track/armor_target.hpp"
 #include "tasks/base/dta_utils.hpp"
 #include "utils/logger.hpp"
-#include "utils/utils.hpp"
 #include <algorithm>
 #include <array>
-#include <iostream>
-#include <mutex>
-#include <numeric>
-#include <opencv2/core/eigen.hpp>
-#include <opencv2/core/types.hpp>
 #include <utility>
 #include <vector>
 namespace awakening::auto_aim {
@@ -34,23 +27,18 @@ struct ArmorTracker::Impl {
             update_fsm(found, idx, armors.timestamp);
             return found;
         };
-        //双缓冲，方便异常丢失恢复，方便操作手换目标
-        if (process(cur_target_idx_)) {
-            // target_data_.emplace_back(cur);
-        }
+        // 双缓冲，方便异常丢失恢复和操作手换目标。
+        process(cur_target_idx_);
 
         if (cur.track_state.tracker_state == ArmorTarget::TrackState::TEMP_LOST) {
             process(pre_target_idx_);
 
             if (pre.track_state.tracker_state == ArmorTarget::TrackState::TRACKING) {
-                // if (cur.target_number != ArmorClass::OUTPOST)
-                // { //给4mm英雄用（，太远我都看不清装甲板
                 std::swap(cur, pre);
                 pre.track_state.tracker_state = ArmorTarget::TrackState::LOST;
-                // }
             }
         } else if (cur.track_state.tracker_state == ArmorTarget::TrackState::TRACKING) {
-            pre.track_state.tracker_state = ArmorTarget::TrackState::LOST; //cur恢复就重置
+            pre.track_state.tracker_state = ArmorTarget::TrackState::LOST;
         }
         armors.lights.erase(
             std::remove_if(
@@ -68,36 +56,25 @@ struct ArmorTracker::Impl {
         Armors& armors,
         int frame_id,
         const CameraInfo& camera_info,
-        const ISO3& camera_cv_in_odom,
-        std::vector<ArmorClass> ignore = {}
+        const ISO3& camera_cv_in_odom
     ) noexcept {
         if (armors.armors.empty()) {
             return false;
         }
-        bool found = false;
-        Armor init_target;
-
-        for (auto& a: armors.armors) {
-            if (!(a.color == ArmorColor::NONE || a.color == ArmorColor::PURPLE) && !found) {
-                if (!(target_buf_[cur_target_idx_].target_number == ArmorClass::OUTPOST
-                      && a.number != ArmorClass::OUTPOST && target_buf_[cur_target_idx_].check()))
-                {
-                    init_target = a;
-                    found = true;
-                    break;
-                }
-            }
-        }
-        if (!found) {
+        const auto valid_target = [&](const Armor& armor) {
+            const bool valid_color =
+                armor.color != ArmorColor::NONE && armor.color != ArmorColor::PURPLE;
+            const bool keep_outpost =
+                target_buf_[cur_target_idx_].target_number == ArmorClass::OUTPOST
+                && armor.number != ArmorClass::OUTPOST && target_buf_[cur_target_idx_].check();
+            return valid_color && !keep_outpost;
+        };
+        const auto it = std::find_if(armors.armors.begin(), armors.armors.end(), valid_target);
+        if (it == armors.armors.end()) {
             return false;
         }
-        // if (iam_sentry) {
-        //     ArmorTarget::armor_pnp(init_target, camera_info, camera_cv_in_odom);//逆天散布不让超远击打！
-        //     if (init_target.pose.translation().norm() > 5) {
-        //         return false;
-        //     }
-        // }
 
+        Armor init_target = *it;
         AWAKENING_INFO("init target: {}", string_by_armor_class(init_target.number));
         target.reset(init_target, cfg_, armors.timestamp, frame_id, camera_info, camera_cv_in_odom);
         target.track_state.tracker_state = ArmorTarget::TrackState::DETECTING;
@@ -107,21 +84,18 @@ struct ArmorTracker::Impl {
         ArmorTarget& target,
         Armors& armors,
         const CameraInfo& camera_info,
-        const ISO3& camera_cv_in_odom,
-        std::vector<ArmorClass> ignore = {}
+        const ISO3& camera_cv_in_odom
     ) noexcept {
         std::vector<Armor> candidates;
         candidates.reserve(armors.armors.size());
         for (const auto& a: armors.armors) {
-            if (a.number == target.target_number) {
-                if (a.color == ArmorColor::NONE || a.color == ArmorColor::PURPLE) {
-                    continue;
-                }
+            if (a.number == target.target_number && a.color != ArmorColor::NONE
+                && a.color != ArmorColor::PURPLE)
+            {
                 candidates.emplace_back(a);
             }
         }
         target.predict_ekf(armors.timestamp);
-        std::vector<Light> lights;
         auto matched_armors =
             target.match_armor(candidates, armors.timestamp, camera_info, camera_cv_in_odom);
         auto matched_lights = target.match_light(
@@ -131,7 +105,7 @@ struct ArmorTracker::Impl {
             camera_info,
             camera_cv_in_odom
         );
-        int updated = target.update(
+        const int updated = target.update(
             matched_armors,
             matched_lights,
             armors.timestamp,
@@ -161,7 +135,6 @@ struct ArmorTracker::Impl {
         iam_sentry = is_sentry;
     }
 
-    int is_none_purple_count_ = 0;
     int found_count_ = 0;
 
     size_t cur_target_idx_ = 0;
@@ -170,12 +143,8 @@ struct ArmorTracker::Impl {
     ArmorTrackerCfg cfg_;
     bool iam_sentry = false;
 };
-ArmorTracker::ArmorTracker(const YAML::Node& config) {
-    _impl = std::make_unique<Impl>(config);
-}
-ArmorTracker::~ArmorTracker() noexcept {
-    _impl.reset();
-}
+ArmorTracker::ArmorTracker(const YAML::Node& config): _impl(std::make_unique<Impl>(config)) {}
+ArmorTracker::~ArmorTracker() noexcept = default;
 
 ArmorTarget ArmorTracker::track(
     Armors& armors,

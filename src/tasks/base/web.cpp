@@ -207,7 +207,7 @@ struct Web::Impl {
                     { cv::Point3f(0, 0, 0) },
                     vel_pose
                 );
-                auto whole_car_pose = auto_aim::armor_point_motion_model::_whole_car_pose(
+                auto whole_car_pose = auto_aim::armor_point_motion_model::whole_car_pose(
                     target_state.x.data(),
                     armor_target.target_number
                 );
