@@ -172,9 +172,13 @@ struct VeryAimer::Impl {
             gimbal_in_gimbal_odom.linear().transpose() * shoot_in_gimbal_odom.linear();
         auto desired_gimbal = desired_shoot * R_gimbal_shoot.transpose();
         auto rpy = utils::matrix2rpy<double>(desired_gimbal);
-        cp.valid = true;
         cp.yaw = rpy[2];
         cp.pitch = rpy[1];
+        // auto rvec = utils::so3_log(desired_gimbal.eval());
+        // cp.yaw = rvec[2];
+        // cp.pitch = rvec[1];
+        cp.valid = true;
+
         cp.aim_point.pose = armor_pose;
         cp.aim_id = aim_id;
         return cp;

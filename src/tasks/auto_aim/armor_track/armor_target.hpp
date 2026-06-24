@@ -169,6 +169,7 @@ public:
     armor_point_motion_model::UVMeasure::Ctx uvmeasure_ctx;
     std::optional<armor_point_motion_model::RobotStateESEKF> esekf;
     ArmorTrackerCfg cfg;
+    armor_point_motion_model::Voter voter;
     const armor_point_motion_model::State& get_target_state() const {
         return target_state;
     }

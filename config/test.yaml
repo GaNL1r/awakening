@@ -91,7 +91,7 @@ armor_tracker:
   q_l: 0.0000001
   q_h: 0.0000001
   q_wpr: 0.00000
-  q_outpost_dz: 0.0
+  q_outpost_dz: 0.0000001
   enable_lights_measure: true
   armor_match_pos_gate_by_length_ratio: 20.0
   armor_match_pos_gate_all_init_by_length_ratio: 50.0
@@ -100,7 +100,7 @@ armor_tracker:
   light_match_pos_gate_by_length_ratio: 5.0
   r_sigma_px: 3.0
   r_sigma_half_length: 4.0
-  r_sigma_angle: 0.2
+  r_sigma_angle: 0.5
   esekf_iter_num: 5
 
 
@@ -110,7 +110,7 @@ armor_tracker:
 auto_aim_fsm:
   single_whole_up: 1.5 
   single_whole_down: 1.0
-  whole_pair_up: 17.5 
+  whole_pair_up: 7.5 
   whole_pair_down: 6.5 #1s内至少换2次板子  2pi  否则轨迹规划无意义
   pair_center_up: 16.5
   pair_center_down: 15.0

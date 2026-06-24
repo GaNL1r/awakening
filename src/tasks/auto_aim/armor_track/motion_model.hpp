@@ -27,6 +27,7 @@ namespace idx {
 constexpr int X_N = idx::X_N;
 constexpr int UVZ_N = idx::_UVZ_N;
 constexpr double OUTPOST_R = 0.27;
+constexpr double OUTPOST_WZ = 2.51;
 using VecX = Eigen::Matrix<double, X_N, 1>;
 using UVVecZ = Eigen::Matrix<double, UVZ_N, 1>;
 template<typename T>
@@ -87,14 +88,10 @@ armor_pose(const T x[X_N], int id, int armor_num, ArmorClass armor_number) {
 }
 
 template<class StateVector>
-inline auto state_pose(const StateVector& state) {
+inline auto state_rotation(const StateVector& state) {
     using Scalar = typename std::decay_t<StateVector>::Scalar;
     using Vec3T = Eigen::Matrix<Scalar, 3, 1>;
-    auto pose = Eigen::Transform<Scalar, 3, Eigen::Isometry>::Identity();
-    pose.translation() = Vec3T(state[idx::CX], state[idx::CY], state[idx::CZ]);
-    pose.linear() =
-        utils::so3_exp(Vec3T(state[idx::C_ROT_X], state[idx::C_ROT_Y], state[idx::C_ROT_Z]));
-    return pose;
+    return utils::so3_exp(Vec3T(state[idx::C_ROT_X], state[idx::C_ROT_Y], state[idx::C_ROT_Z]));
 }
 
 template<class DeltaVector, class StateVector>
@@ -103,19 +100,14 @@ inline void inject_state(const DeltaVector& delta, StateVector& nominal) {
     using Vec3T = Eigen::Matrix<Scalar, 3, 1>;
 
     for (int i = 0; i < X_N; ++i) {
-        const bool pose_component = i == idx::CX || i == idx::CY || i == idx::CZ
-            || i == idx::C_ROT_X || i == idx::C_ROT_Y || i == idx::C_ROT_Z;
-        if (!pose_component)
+        const bool rotation_component = i == idx::C_ROT_X || i == idx::C_ROT_Y || i == idx::C_ROT_Z;
+        if (!rotation_component)
             nominal[i] += delta[i];
     }
 
-    const Vec3T delta_rho(delta[idx::CX], delta[idx::CY], delta[idx::CZ]);
     const Vec3T delta_rot(delta[idx::C_ROT_X], delta[idx::C_ROT_Y], delta[idx::C_ROT_Z]);
-    const auto injected_pose = state_pose(nominal) * utils::se3_exp(delta_rho, delta_rot);
-    const Vec3T injected_rot = utils::so3_log(injected_pose.linear().eval());
-    nominal[idx::CX] = injected_pose.translation().x();
-    nominal[idx::CY] = injected_pose.translation().y();
-    nominal[idx::CZ] = injected_pose.translation().z();
+    const Vec3T injected_rot =
+        utils::so3_log((state_rotation(nominal) * utils::so3_exp(delta_rot)).eval());
     nominal[idx::C_ROT_X] = injected_rot.x();
     nominal[idx::C_ROT_Y] = injected_rot.y();
     nominal[idx::C_ROT_Z] = injected_rot.z();
@@ -128,21 +120,46 @@ box_minus_state(const StateVector& nominal, const StateVector& value, DeltaVecto
     using Vec3T = Eigen::Matrix<Scalar, 3, 1>;
 
     delta = value - nominal;
-    Vec3T delta_rho;
-    Vec3T delta_rot;
-    utils::se3_log(state_pose(nominal).inverse() * state_pose(value), delta_rho, delta_rot);
-    delta[idx::CX] = delta_rho.x();
-    delta[idx::CY] = delta_rho.y();
-    delta[idx::CZ] = delta_rho.z();
+    const Vec3T delta_rot =
+        utils::so3_log((state_rotation(nominal).transpose() * state_rotation(value)).eval());
     delta[idx::C_ROT_X] = delta_rot.x();
     delta[idx::C_ROT_Y] = delta_rot.y();
     delta[idx::C_ROT_Z] = delta_rot.z();
 }
+struct Voter {
+    enum {
+        Collecting,
+        Clockwise,
+        Counterclockwise,
+    } state = Collecting;
+    void reset(const TimePoint&) {
+        *this = {};
+    }
+    void update(double yaw1, int) {
+        const double diff = angles::normalize_angle(yaw1 - last_state_yaw);
+        if (std::abs(diff) < 0.05) {
+            return;
+        }
+        if (diff > 0) {
+            clock_wise_count++;
+        } else {
+            clock_wise_count--;
+        }
+        last_state_yaw = yaw1;
+        if (std::abs(clock_wise_count) > 10) {
+            state = clock_wise_count > 0 ? Clockwise : Counterclockwise;
+        } else {
+            state = Collecting;
+        }
+    }
+    int clock_wise_count = 0;
+    double last_state_yaw = 0.0;
+};
 struct Predict {
     double dt { 0.0 };
 
     auto_aim::ArmorClass armor_number = auto_aim::ArmorClass::UNKNOWN;
-
+    Voter voter;
     template<typename T>
     inline void operator()(const T x0[X_N], T x1[X_N]) const {
         std::copy(x0, x0 + X_N, x1);
@@ -153,7 +170,20 @@ struct Predict {
 
         if (armor_number != auto_aim::ArmorClass::BASE) {
             Eigen::Matrix<T, 3, 1> delta_rot;
-            delta_rot << T(0), T(0), x0[idx::VYAW] * T(dt);
+            if (armor_number == ArmorClass::OUTPOST) {
+                if (voter.state == Voter::Clockwise) {
+                    delta_rot << T(0), T(0), T(OUTPOST_WZ) * T(dt);
+                    x1[idx::VYAW] = T(OUTPOST_WZ);
+                } else if (voter.state == Voter::Counterclockwise) {
+                    delta_rot << T(0), T(0), -T(OUTPOST_WZ) * T(dt);
+                    x1[idx::VYAW] = -T(OUTPOST_WZ);
+                } else {
+                    delta_rot << T(0), T(0), x0[idx::VYAW] * T(dt);
+                }
+            } else {
+                delta_rot << T(0), T(0), x0[idx::VYAW] * T(dt);
+            }
+
             const Eigen::Matrix<T, 3, 3> R1 =
                 (utils::so3_exp(
                      Eigen::Matrix<T, 3, 1>(x0[idx::C_ROT_X], x0[idx::C_ROT_Y], x0[idx::C_ROT_Z])
