@@ -46,11 +46,7 @@ using YPDVecZ = Eigen::Matrix<double, YPDZ_N, 1>;
 template<typename T>
 inline T normalize_angle(T a) {
     const T two_pi = T(2.0 * M_PI);
-    return a - two_pi * floor((a + T(M_PI)) / two_pi);
-}
-template<typename T>
-inline T normalize_angle_autodiff(T a) {
-    return ceres::atan2(ceres::sin(a), ceres::cos(a));
+    return a - two_pi * ceres::floor((a + T(M_PI)) / two_pi);
 }
 template<class DeltaVector, class StateVector>
 inline void inject_state(const DeltaVector& delta, StateVector& nominal) {
@@ -58,15 +54,15 @@ inline void inject_state(const DeltaVector& delta, StateVector& nominal) {
         if (i != idx::YAW && i != idx::ROLL)
             nominal[i] += delta[i];
     }
-    nominal[idx::YAW] = normalize_angle_autodiff(nominal[idx::YAW] + delta[idx::YAW]);
-    nominal[idx::ROLL] = normalize_angle_autodiff(nominal[idx::ROLL] + delta[idx::ROLL]);
+    nominal[idx::YAW] = normalize_angle(nominal[idx::YAW] + delta[idx::YAW]);
+    nominal[idx::ROLL] = normalize_angle(nominal[idx::ROLL] + delta[idx::ROLL]);
 }
 template<class StateVector, class DeltaVector>
 inline void
 box_minus_state(const StateVector& nominal, const StateVector& value, DeltaVector& delta) {
     delta = value - nominal;
-    delta[idx::YAW] = normalize_angle_autodiff(value[idx::YAW] - nominal[idx::YAW]);
-    delta[idx::ROLL] = normalize_angle_autodiff(value[idx::ROLL] - nominal[idx::ROLL]);
+    delta[idx::YAW] = normalize_angle(value[idx::YAW] - nominal[idx::YAW]);
+    delta[idx::ROLL] = normalize_angle(value[idx::ROLL] - nominal[idx::ROLL]);
 }
 template<typename T>
 inline T bounded_sigmoid(T raw, double lower, double upper) {
@@ -219,7 +215,7 @@ inline Eigen::Transform<T, 3, Eigen::Isometry> rune_pose(const T x[X_N], int id)
     Eigen::Transform<T, 3, Eigen::Isometry> rune_in_odom =
         Eigen::Transform<T, 3, Eigen::Isometry>::Identity();
     rune_in_odom.translation() << x[idx::CX], x[idx::CY], x[idx::CZ];
-    const T yaw = ceres::atan2(x[idx::CY], x[idx::CX]);
+    const T yaw = normalize_angle(ceres::atan2(x[idx::CY], x[idx::CX]));
     Eigen::Quaternion<T> q_yaw_rune_in_odom(Eigen::AngleAxis<T>(yaw, Eigen::Vector3<T>::UnitZ()));
     Eigen::Quaternion<T> q_pitch_rune_in_odom(Eigen::AngleAxis<T>(T(0), Eigen::Vector3<T>::UnitY())
     );

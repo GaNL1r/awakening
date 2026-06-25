@@ -257,6 +257,7 @@ void RuneTarget::fan_pnp(
         camera_info.camera_matrix,
         camera_info.distortion_coefficients
     );
+
     r.pose = camera_cv_in_odom * r.pose;
 }
 void RuneTarget::fan_target_pnp(

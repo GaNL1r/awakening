@@ -29,65 +29,6 @@ namespace awakening::auto_aim {
 using namespace armor_point_motion_model;
 
 namespace {
-
-    bool
-    is_light_separate_from_armor(const ArmorKeyPoints2D& armor_key_points, const Light& light) {
-        auto on_segment = [](const auto& a, const auto& b, const auto& p) {
-            return std::min(a.x, b.x) <= p.x && p.x <= std::max(a.x, b.x)
-                && std::min(a.y, b.y) <= p.y && p.y <= std::max(a.y, b.y);
-        };
-        auto cross = [](const auto& a, const auto& b, const auto& c) {
-            const auto ab = b - a;
-            const auto ac = c - a;
-            return static_cast<double>(ab.x * ac.y - ab.y * ac.x);
-        };
-        auto segments_intersect = [&](const cv::Point2f& a1,
-                                      const cv::Point2f& a2,
-                                      const cv::Point2f& b1,
-                                      const cv::Point2f& b2) {
-            const double d1 = cross(a1, a2, b1);
-            const double d2 = cross(a1, a2, b2);
-            const double d3 = cross(b1, b2, a1);
-            const double d4 = cross(b1, b2, a2);
-
-            constexpr double EPS = 1e-6;
-            if (((d1 > EPS && d2 < -EPS) || (d1 < -EPS && d2 > EPS))
-                && ((d3 > EPS && d4 < -EPS) || (d3 < -EPS && d4 > EPS)))
-            {
-                return true;
-            }
-
-            return (std::abs(d1) <= EPS && on_segment(a1, a2, b1))
-                || (std::abs(d2) <= EPS && on_segment(a1, a2, b2))
-                || (std::abs(d3) <= EPS && on_segment(b1, b2, a1))
-                || (std::abs(d4) <= EPS && on_segment(b1, b2, a2));
-        };
-        const std::array<cv::Point2f, 4> quad = {
-            armor_key_points.points[std::to_underlying(ArmorKeyPointsIndex::LEFT_TOP)].value(),
-            armor_key_points.points[std::to_underlying(ArmorKeyPointsIndex::LEFT_BOTTOM)].value(),
-            armor_key_points.points[std::to_underlying(ArmorKeyPointsIndex::RIGHT_BOTTOM)].value(),
-            armor_key_points.points[std::to_underlying(ArmorKeyPointsIndex::RIGHT_TOP)].value()
-        };
-        const std::vector<cv::Point2f> polygon(quad.begin(), quad.end());
-
-        if (cv::pointPolygonTest(polygon, light.top, false) >= 0
-            || cv::pointPolygonTest(polygon, light.bottom, false) >= 0
-            || cv::pointPolygonTest(polygon, light.center, false) >= 0)
-        {
-            return false;
-        }
-
-        for (std::size_t i = 0; i < quad.size(); ++i) {
-            const auto& a = quad[i];
-            const auto& b = quad[(i + 1) % quad.size()];
-            if (segments_intersect(light.top, light.bottom, a, b)) {
-                return false;
-            }
-        }
-
-        return true;
-    }
-
     UVVecZ get_uv_measurement(
         const cv::Point2f& top,
         const cv::Point2f& bottom,
@@ -131,8 +72,8 @@ void ArmorTarget::write_log() {
         j_target_state["vz"] = Web::val(target_state.vel().z());
         j_target_state["yaw"] = Web::val(target_state.yaw());
         j_target_state["vyaw"] = Web::val(target_state.vyaw());
-        j_target_state["r"] = Web::val(target_state.r());
-        j_target_state["l"] = Web::val(target_state.l());
+        j_target_state["r1"] = Web::val(target_state.r1());
+        j_target_state["r2"] = Web::val(target_state.r2());
         j_target_state["h"] = Web::val(target_state.h());
         j_target_state["wp"] = Web::val(target_state.w_p());
         j_target_state["wr"] = Web::val(target_state.w_r());
@@ -163,7 +104,7 @@ void ArmorTarget::reset(
     p0.diagonal()[idx::CX] = p0.diagonal()[idx::CY] = p0.diagonal()[idx::CZ] = 1;
     p0.diagonal()[idx::VCX] = p0.diagonal()[idx::VCY] = p0.diagonal()[idx::VCZ] = 10;
     p0.diagonal()[idx::C_ROT_Z] = p0.diagonal()[idx::C_ROT_Y] = p0.diagonal()[idx::C_ROT_X] = 1;
-    p0.diagonal()[idx::L] = p0.diagonal()[idx::R] = p0.diagonal()[idx::H] = 1;
+    p0.diagonal()[idx::R1] = p0.diagonal()[idx::R2] = p0.diagonal()[idx::H] = 1;
     if (target_number == ArmorClass::OUTPOST) {
         p0.diagonal()[idx::OUTPOST01DZ] = p0.diagonal()[idx::OUTPOST02DZ] = 1;
     }
@@ -203,7 +144,10 @@ void ArmorTarget::reset(
     const Vec3 car_rot = utils::so3_log(car_in_odom.linear().eval());
     target_state.x = Eigen::VectorXd::Zero(X_N);
     target_state.set_pos(car_in_odom.translation());
-    target_state.x[idx::R] = r;
+    target_state.x[idx::R1] = target_state.x[idx::R2] = r;
+    if (target_number == ArmorClass::OUTPOST) {
+        target_state.x[idx::OUTPOST01DZ] = target_state.x[idx::OUTPOST02DZ] = 0;
+    }
     target_state.x[idx::C_ROT_Z] = car_rot.z();
     target_state.x[idx::C_ROT_Y] = car_rot.y();
     target_state.x[idx::C_ROT_X] = car_rot.x();
@@ -229,76 +173,41 @@ void ArmorTarget::reset(
 void ArmorTarget::armor_pnp(
     Armor& a,
     const CameraInfo& camera_info,
-    const ISO3& camera_cv_in_odom,
-    bool opt
+    const ISO3& camera_cv_in_odom
 ) noexcept {
     auto key_points = a.key_points.landmarks();
-    a.pose = utils::solve_pnp(
-        key_points,
+    std::vector<cv::Mat> rvecs;
+    std::vector<cv::Mat> tvecs;
+    cv::solvePnPGeneric(
         getArmorKeyPoints3D<cv::Point3f>(a.number),
+        key_points,
         camera_info.camera_matrix,
         camera_info.distortion_coefficients,
-        cv::SOLVEPNP_IPPE
+        rvecs,
+        tvecs,
+        false,
+        cv::SOLVEPNP_IPPE,
+        cv::noArray(),
+        cv::noArray()
     );
+    for (size_t i = 0; i < rvecs.size(); ++i) {
+        cv::Mat R_cv;
+        cv::Rodrigues(rvecs[i], R_cv);
+        Mat3 R_eigen;
+        cv::cv2eigen(R_cv, R_eigen);
+        Vec3 axis_x = R_eigen.col(0);
+        Vec3 t_eigen;
+        cv::cv2eigen(tvecs[i], t_eigen);
+        Vec3 front_normal = -axis_x;
+        if (front_normal.dot(-t_eigen) > 0) {
+            a.pose.translation() = t_eigen;
+            a.pose.linear() = R_eigen;
+            break;
+        }
+    }
+
     auto armor_in_odom = camera_cv_in_odom * a.pose;
     a.pose = armor_in_odom;
-    if (opt) {
-        auto rpy = utils::matrix2rpy<double>(a.pose.linear());
-        auto obj_points = getArmorKeyPoints3D<cv::Point3f>(a.number);
-        const double armor_pitch = (a.number == auto_aim::ArmorClass::OUTPOST)
-            ? -auto_aim::FIFTTEN_DEGREE_RAD
-            : auto_aim::FIFTTEN_DEGREE_RAD;
-        auto center = [](const cv::Point2f& a, const cv::Point2f& b) { return (a + b) * 0.5f; };
-        auto eval_yaw = [&](double yaw) -> double {
-            auto a_pose_in_odom = a.pose;
-            Vec3 search_rpy(0.0, armor_pitch, yaw);
-            a_pose_in_odom.linear() = utils::rpy2matrix(search_rpy);
-
-            auto a_pose_in_camera_cv = camera_cv_in_odom.inverse() * a_pose_in_odom;
-            auto img_points = utils::reprojection(
-                camera_info.camera_matrix,
-                camera_info.distortion_coefficients,
-                obj_points,
-                a_pose_in_camera_cv
-            );
-
-            double error = 0.0;
-            // for (int i = 0; i < img_points.size(); i++) {
-            //     error += cv::norm(img_points[i] - key_points[i]);
-            //     }
-            error += cv::norm(
-                center(
-                    img_points[ArmorKeyPointsIndex::LEFT_TOP],
-                    img_points[ArmorKeyPointsIndex::RIGHT_TOP]
-                )
-                - center(
-                    key_points[ArmorKeyPointsIndex::LEFT_TOP],
-                    key_points[ArmorKeyPointsIndex::RIGHT_TOP]
-                )
-            );
-
-            error += cv::norm(
-                center(
-                    img_points[ArmorKeyPointsIndex::LEFT_BOTTOM],
-                    img_points[ArmorKeyPointsIndex::RIGHT_BOTTOM]
-                )
-                - center(
-                    key_points[ArmorKeyPointsIndex::LEFT_BOTTOM],
-                    key_points[ArmorKeyPointsIndex::RIGHT_BOTTOM]
-                )
-            );
-
-            return error;
-        };
-        constexpr double SEARCH_RANGE_DEG = 140.0;
-        constexpr double HALF_RANGE_RAD = SEARCH_RANGE_DEG * CV_PI / 180.0 * 0.5;
-        double left = rpy[2] - HALF_RANGE_RAD;
-        double right = rpy[2] + HALF_RANGE_RAD;
-        double best_yaw = utils::golden_section_search(eval_yaw, left, right, 1e-4);
-        auto best_pose = a.pose;
-        best_pose.linear() = utils::rpy2matrix(Vec3(0.0, armor_pitch, best_yaw));
-        a.pose = best_pose;
-    }
 }
 Eigen::Matrix<double, UVZ_N, UVZ_N>
 ArmorTarget::uvmeasurement_covariance(const Eigen::Matrix<double, UVZ_N, 1>& z) const noexcept {
@@ -365,12 +274,12 @@ Eigen::Matrix<double, X_N, X_N> ArmorTarget::process_noise(double dt) const noex
             q(rot_idx[i], rot_idx[j]) += dt * Q_wpr_body(i, j);
         }
     }
-    q(idx::R, idx::R) = cfg.q_r;
+    q(idx::R1, idx::R1) = cfg.q_r;
     if (target_number == ArmorClass::OUTPOST) {
         q(idx::OUTPOST01DZ, idx::OUTPOST01DZ) = cfg.q_outpost_dz;
         q(idx::OUTPOST02DZ, idx::OUTPOST02DZ) = cfg.q_outpost_dz;
     } else {
-        q(idx::L, idx::L) = cfg.q_l;
+        q(idx::R2, idx::R2) = cfg.q_r;
         q(idx::H, idx::H) = cfg.q_h;
     }
     return q;
@@ -463,7 +372,17 @@ int ArmorTarget::update(
         target_state.timestamp = timestamp;
         last_update = timestamp;
         this_id = GLOBAL_ID++;
-        voter.update(target_state.yaw(), 0);
+        voter.update(
+            utils::matrix2rpy(
+                utils::so3_exp(Vec3(
+                    target_state.x[idx::C_ROT_X],
+                    target_state.x[idx::C_ROT_Y],
+                    target_state.x[idx::C_ROT_Z]
+                )),
+                utils::RPYOrder::ZYX
+            )[2],
+            timestamp
+        );
     }
     update_count += obs.size();
     return obs.size();
@@ -479,24 +398,25 @@ std::vector<std::pair<int, Armor>> ArmorTarget::match_armor(
     const int n_obs = static_cast<int>(armors.size());
     auto pred_state = target_state;
     pred_state.predict(timestamp, target_number);
-    auto camera_in_odom = camera_cv_in_odom * R_CV2PHYSICS.inverse();
     const int armors_num = armor_num();
     std::vector<int> maybe_visible;
-    std::vector<std::pair<double, int>> angle_dis_in_camera;
+    std::vector<std::pair<double, int>> angle_dis_in_camera_cv;
     for (int i = 0; i < armors_num; i++) {
         auto pose_in_odom = armor_pose(pred_state.x.data(), i, armors_num, target_number);
-        auto pose_in_camera = camera_in_odom.inverse() * pose_in_odom;
-        auto rpy = utils::matrix2rpy(pose_in_camera.linear().eval());
-        angle_dis_in_camera.emplace_back(std::abs(angles::normalize_angle(-rpy[2])), i);
+        auto pose_in_camera_cv = camera_cv_in_odom.inverse() * pose_in_odom;
+        Vec3 axis_x = pose_in_camera_cv.linear().col(0);
+        Vec3 front_normal = -axis_x;
+        auto normal = pose_in_camera_cv.linear().col(0);
+        angle_dis_in_camera_cv.emplace_back(front_normal.dot(-pose_in_camera_cv.translation()), i);
     }
     std::sort(
-        angle_dis_in_camera.begin(),
-        angle_dis_in_camera.end(),
-        [](const auto& a, const auto& b) { return a.first < b.first; }
+        angle_dis_in_camera_cv.begin(),
+        angle_dis_in_camera_cv.end(),
+        [](const auto& a, const auto& b) { return a.first > b.first; }
     );
-    const auto visible_count = std::min<std::size_t>(3, angle_dis_in_camera.size());
+    const auto visible_count = std::min<std::size_t>(3, angle_dis_in_camera_cv.size());
     for (std::size_t i = 0; i < visible_count; ++i) {
-        maybe_visible.push_back(angle_dis_in_camera[i].second);
+        maybe_visible.push_back(angle_dis_in_camera_cv[i].second);
     }
     const bool all_init =
         outpost_has_all_and_has_set_ids ? outpost_has_all_and_has_set_ids->first : jumped;
@@ -587,16 +507,21 @@ std::vector<std::tuple<int, bool, Light>> ArmorTarget::match_light(
     for (auto& [id, _]: matched_armors) {
         matched[id] = true;
     }
-    auto camera_in_odom = camera_cv_in_odom * R_CV2PHYSICS.inverse();
-    std::vector<std::pair<double, int>> angle_dis_in_camera;
+    std::vector<std::pair<double, int>> angle_dis_in_camera_cv;
     for (int i = 0; i < armors_num; i++) {
         auto pose_in_odom = armor_pose(pred_state.x.data(), i, armors_num, target_number);
-        auto pose_in_camera = camera_in_odom.inverse() * pose_in_odom;
-        auto rpy = utils::matrix2rpy(pose_in_camera.linear().eval());
-        angle_dis_in_camera.emplace_back(std::abs(angles::normalize_angle(-rpy[2])), i);
+        auto pose_in_camera_cv = camera_cv_in_odom.inverse() * pose_in_odom;
+        Vec3 axis_x = pose_in_camera_cv.linear().col(0);
+        Vec3 front_normal = -axis_x;
+        auto normal = pose_in_camera_cv.linear().col(0);
+        angle_dis_in_camera_cv.emplace_back(front_normal.dot(-pose_in_camera_cv.translation()), i);
     }
-
-    if (angle_dis_in_camera.empty()) {
+    std::sort(
+        angle_dis_in_camera_cv.begin(),
+        angle_dis_in_camera_cv.end(),
+        [](const auto& a, const auto& b) { return a.first > b.first; }
+    );
+    if (angle_dis_in_camera_cv.empty()) {
         return {};
     }
     std::vector<std::tuple<int, bool, std::pair<cv::Point2f, cv::Point2f>>> visible_lights;
@@ -608,9 +533,9 @@ std::vector<std::tuple<int, bool, Light>> ArmorTarget::match_light(
         );
     };
     const auto closest = std::min_element(
-        angle_dis_in_camera.begin(),
-        angle_dis_in_camera.end(),
-        [](const auto& a, const auto& b) { return a.first < b.first; }
+        angle_dis_in_camera_cv.begin(),
+        angle_dis_in_camera_cv.end(),
+        [](const auto& a, const auto& b) { return a.first > b.first; }
     );
     maybe_visible((closest->second + armors_num - 1) % armors_num, false);
     maybe_visible((closest->second + 1) % armors_num, true);

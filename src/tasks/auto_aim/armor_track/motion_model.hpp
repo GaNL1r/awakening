@@ -17,8 +17,8 @@
 namespace awakening::auto_aim::armor_point_motion_model {
 
 namespace idx {
-    enum { CX, VCX, CY, VCY, CZ, VCZ, C_ROT_Z, VYAW, R, P1, P2, C_ROT_Y, C_ROT_X, X_N };
-    constexpr int L = P1;
+    enum { CX, VCX, CY, VCY, CZ, VCZ, C_ROT_Z, VYAW, R1, P1, P2, C_ROT_Y, C_ROT_X, X_N };
+    constexpr int R2 = P1;
     constexpr int H = P2;
     constexpr int OUTPOST01DZ = P1;
     constexpr int OUTPOST02DZ = P2;
@@ -33,7 +33,7 @@ using UVVecZ = Eigen::Matrix<double, UVZ_N, 1>;
 template<typename T>
 inline T normalize_angle(T a) {
     const T two_pi = T(2.0 * M_PI);
-    return a - two_pi * floor((a + T(M_PI)) / two_pi);
+    return a - two_pi * ceres::floor((a + T(M_PI)) / two_pi);
 }
 
 template<typename T>
@@ -48,8 +48,8 @@ inline Eigen::Matrix<T, 3, 3> car_rotation(const T x[X_N], ArmorClass armor_numb
 }
 template<typename T>
 inline T armor_radius(const T x[X_N], int id, int armor_num) {
-    const bool use_lh = (armor_num == 4) && (id & 1);
-    return use_lh ? x[idx::R] + x[idx::L] : x[idx::R];
+    const bool is_r2 = (armor_num == 4) && (id & 1);
+    return is_r2 ? x[idx::R2] : x[idx::R1];
 }
 template<typename T>
 inline Eigen::Transform<T, 3, Eigen::Isometry>
@@ -65,7 +65,7 @@ inline Eigen::Transform<T, 3, Eigen::Isometry>
 armor_pose(const T x[X_N], int id, int armor_num, ArmorClass armor_number) {
     const T yaw = normalize_angle(T(id) * T(2.0 * M_PI / armor_num));
     const bool outpost = armor_number == ArmorClass::OUTPOST;
-    const bool use_lh = (armor_num == 4) && (id & 1);
+    const bool is_r2 = (armor_num == 4) && (id & 1);
     const T r = armor_radius(x, id, armor_num);
     const T ax = -ceres::cos(yaw) * r;
     const T ay = -ceres::sin(yaw) * r;
@@ -76,7 +76,7 @@ armor_pose(const T x[X_N], int id, int armor_num, ArmorClass armor_number) {
         else if (id == 2)
             az = x[idx::OUTPOST02DZ];
     } else {
-        az = use_lh ? x[idx::H] : T(0);
+        az = is_r2 ? x[idx::H] : T(0);
     }
     auto pose_in_car = Eigen::Transform<T, 3, Eigen::Isometry>::Identity();
     pose_in_car.translation() << ax, ay, az;
@@ -132,10 +132,14 @@ struct Voter {
         Clockwise,
         Counterclockwise,
     } state = Collecting;
-    void reset(const TimePoint&) {
+    void reset(const TimePoint& t) {
         *this = {};
+        start_t = t;
     }
-    void update(double yaw1, int) {
+    void update(double yaw1, const TimePoint& t) {
+        if (t - start_t < std::chrono::milliseconds(1000)) {
+            return;
+        }
         const double diff = angles::normalize_angle(yaw1 - last_state_yaw);
         if (std::abs(diff) < 0.05) {
             return;
@@ -152,6 +156,7 @@ struct Voter {
             state = Collecting;
         }
     }
+    TimePoint start_t;
     int clock_wise_count = 0;
     double last_state_yaw = 0.0;
 };
@@ -201,15 +206,15 @@ struct Predict {
 
     template<typename T>
     inline void clamp(T x[X_N]) const {
-        auto& r = x[idx::R];
-        auto& l = x[idx::L];
+        // auto& r = x[idx::R];
+        // auto& l = x[idx::L];
         auto& h = x[idx::H];
         auto& vyaw = x[idx::VYAW];
         if (armor_number != auto_aim::ArmorClass::OUTPOST) {
-            if (r + l < T(0.1) || r + l > T(0.5)) {
-                r = T(0.25);
-                l = T(0);
-            }
+            // if (r + l < T(0.1) || r + l > T(0.5)) {
+            //     r = T(0.25);
+            //     l = T(0);
+            // }
 
             if (ceres::abs(h) > T(0.5)) {
                 h = T(0.0);
@@ -221,7 +226,7 @@ struct Predict {
             if (ceres::abs(x[idx::OUTPOST02DZ]) > T(0.3)) {
                 x[idx::OUTPOST02DZ] = T(0.0);
             }
-            r = T(OUTPOST_R);
+            x[idx::R1] = T(OUTPOST_R);
         }
 
         if (ceres::abs(vyaw) > T(20.0)) {
@@ -370,7 +375,8 @@ struct State {
 
     inline Vec3 rpy() const noexcept {
         return utils::matrix2rpy<double>(
-            utils::so3_exp(Vec3(x[idx::C_ROT_X], x[idx::C_ROT_Y], x[idx::C_ROT_Z]))
+            utils::so3_exp(Vec3(x[idx::C_ROT_X], x[idx::C_ROT_Y], x[idx::C_ROT_Z])),
+            utils::RPYOrder::XYZ
         );
     }
     inline double yaw() const noexcept {
@@ -380,11 +386,11 @@ struct State {
         return x[idx::VYAW];
     }
 
-    inline double r() const noexcept {
-        return x[idx::R];
+    inline double r1() const noexcept {
+        return x[idx::R1];
     }
-    inline double l() const noexcept {
-        return x[idx::L];
+    inline double r2() const noexcept {
+        return x[idx::R2];
     }
     inline double h() const noexcept {
         return x[idx::H];

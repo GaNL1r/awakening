@@ -24,7 +24,6 @@ struct ArmorTrackerCfg {
     Vec3 qxyz_common;
     Vec3 qxyz_output;
     double q_r;
-    double q_l;
     double q_h;
     double q_wpr;
     double q_outpost_dz;
@@ -51,7 +50,6 @@ struct ArmorTrackerCfg {
         auto qxyz_output_vec = config["qxyz_output"].as<std::vector<double>>();
         qxyz_output << qxyz_output_vec[0], qxyz_output_vec[1], qxyz_output_vec[2];
         q_r = config["q_r"].as<double>();
-        q_l = config["q_l"].as<double>();
         q_h = config["q_h"].as<double>();
         q_wpr = config["q_wpr"].as<double>();
         q_outpost_dz = config["q_outpost_dz"].as<double>();
@@ -93,12 +91,8 @@ public:
         }
     };
     ArmorTarget() = default;
-    static void armor_pnp(
-        Armor& a,
-        const CameraInfo& camera_info,
-        const ISO3& camera_cv_in_odom,
-        bool opt = false
-    ) noexcept;
+    static void
+    armor_pnp(Armor& a, const CameraInfo& camera_info, const ISO3& camera_cv_in_odom) noexcept;
     void reset(
         Armor& a,
         const ArmorTrackerCfg& c,
