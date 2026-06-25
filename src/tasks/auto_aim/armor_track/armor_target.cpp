@@ -130,8 +130,6 @@ void ArmorTarget::reset(
     );
 
     esekf->set_iteration_num(cfg.esekf_iter_num);
-
-    armor_pnp(a, camera_info, camera_cv_in_odom);
     auto armor_in_odom = a.pose;
     auto armor_in_car = ISO3::Identity();
     const double r = r_pre;
@@ -170,7 +168,7 @@ void ArmorTarget::reset(
     voter.reset(timestamp);
 }
 
-void ArmorTarget::armor_pnp(
+bool ArmorTarget::armor_pnp(
     Armor& a,
     const CameraInfo& camera_info,
     const ISO3& camera_cv_in_odom
@@ -178,18 +176,23 @@ void ArmorTarget::armor_pnp(
     auto key_points = a.key_points.landmarks();
     std::vector<cv::Mat> rvecs;
     std::vector<cv::Mat> tvecs;
-    cv::solvePnPGeneric(
-        getArmorKeyPoints3D<cv::Point3f>(a.number),
-        key_points,
-        camera_info.camera_matrix,
-        camera_info.distortion_coefficients,
-        rvecs,
-        tvecs,
-        false,
-        cv::SOLVEPNP_IPPE,
-        cv::noArray(),
-        cv::noArray()
-    );
+    if (!cv::solvePnPGeneric(
+            getArmorKeyPoints3D<cv::Point3f>(a.number),
+            key_points,
+            camera_info.camera_matrix,
+            camera_info.distortion_coefficients,
+            rvecs,
+            tvecs,
+            false,
+            cv::SOLVEPNP_IPPE,
+            cv::noArray(),
+            cv::noArray()
+        ))
+    {
+        return false;
+    }
+
+    bool has_valid = false;
     for (size_t i = 0; i < rvecs.size(); ++i) {
         cv::Mat R_cv;
         cv::Rodrigues(rvecs[i], R_cv);
@@ -202,12 +205,14 @@ void ArmorTarget::armor_pnp(
         if (front_normal.dot(-t_eigen) > 0) {
             a.pose.translation() = t_eigen;
             a.pose.linear() = R_eigen;
+            has_valid = true;
             break;
         }
     }
 
     auto armor_in_odom = camera_cv_in_odom * a.pose;
     a.pose = armor_in_odom;
+    return has_valid;
 }
 Eigen::Matrix<double, UVZ_N, UVZ_N>
 ArmorTarget::uvmeasurement_covariance(const Eigen::Matrix<double, UVZ_N, 1>& z) const noexcept {

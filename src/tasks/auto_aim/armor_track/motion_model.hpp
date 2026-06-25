@@ -26,7 +26,7 @@ namespace idx {
 } // namespace idx
 constexpr int X_N = idx::X_N;
 constexpr int UVZ_N = idx::_UVZ_N;
-constexpr double OUTPOST_R = 0.27;
+constexpr double OUTPOST_R = 0.55/2.0;
 constexpr double OUTPOST_WZ = 2.51;
 using VecX = Eigen::Matrix<double, X_N, 1>;
 using UVVecZ = Eigen::Matrix<double, UVZ_N, 1>;

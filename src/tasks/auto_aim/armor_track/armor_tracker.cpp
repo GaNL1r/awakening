@@ -1,9 +1,11 @@
 #include "armor_tracker.hpp"
 #include "tasks/auto_aim/armor_track/armor_target.hpp"
+#include "tasks/auto_aim/type.hpp"
 #include "tasks/base/dta_utils.hpp"
 #include "utils/logger.hpp"
 #include <algorithm>
 #include <array>
+#include <limits>
 #include <utility>
 #include <vector>
 namespace awakening::auto_aim {
@@ -61,20 +63,35 @@ struct ArmorTracker::Impl {
         if (armors.armors.empty()) {
             return false;
         }
-        const auto valid_target = [&](const Armor& armor) {
+        const auto valid_target = [&](Armor& armor) {
             const bool valid_color =
                 armor.color != ArmorColor::NONE && armor.color != ArmorColor::PURPLE;
             const bool keep_outpost =
                 target_buf_[cur_target_idx_].target_number == ArmorClass::OUTPOST
                 && armor.number != ArmorClass::OUTPOST && target_buf_[cur_target_idx_].check();
-            return valid_color && !keep_outpost;
+            const bool pnp_ok = ArmorTarget::armor_pnp(armor, camera_info, camera_cv_in_odom);
+            return valid_color && !keep_outpost && pnp_ok;
         };
-        const auto it = std::find_if(armors.armors.begin(), armors.armors.end(), valid_target);
-        if (it == armors.armors.end()) {
+        Armor* selected_armor = nullptr;
+        auto min_dis = std::numeric_limits<double>::max();
+        for (auto& armor: armors.armors) {
+            if (valid_target(armor)) {
+                auto bbox = armor.key_points.bounding_box();
+                auto dis = utils::calculate_distance_to_img_center(
+                    (bbox.tl() + bbox.br()) / 2.0,
+                    camera_info.camera_matrix
+                );
+                if (dis < min_dis) {
+                    min_dis = dis;
+                    selected_armor = &armor;
+                }
+            }
+        }
+        if (!selected_armor) {
             return false;
         }
 
-        Armor init_target = *it;
+        Armor init_target = *selected_armor;
         AWAKENING_INFO("init target: {}", string_by_armor_class(init_target.number));
         target.reset(init_target, cfg_, armors.timestamp, frame_id, camera_info, camera_cv_in_odom);
         target.track_state.tracker_state = ArmorTarget::TrackState::DETECTING;
