@@ -19,6 +19,9 @@ struct ArmorTrackerCfg {
     int tracking_thres;
     double armor_match_gate;
     double armor_match_gate_not_all_init;
+    double armor_match_w_center_err;
+    double armor_match_w_angle_err;
+    double armor_match_w_side_length_err;
     double qyaw_common;
     double qyaw_output;
     Vec3 qxyz_common;
@@ -41,6 +44,9 @@ struct ArmorTrackerCfg {
         tracking_thres = config["tracking_thres"].as<int>();
         armor_match_gate = config["armor_match_gate"].as<double>();
         armor_match_gate_not_all_init = config["armor_match_gate_not_all_init"].as<double>();
+        armor_match_w_center_err = config["armor_match_w_center_err"].as<double>();
+        armor_match_w_angle_err = config["armor_match_w_angle_err"].as<double>();
+        armor_match_w_side_length_err = config["armor_match_w_side_length_err"].as<double>();
         qyaw_common = config["qyaw_common"].as<double>();
         qyaw_output = config["qyaw_output"].as<double>();
         auto qxyz_common_vec = config["qxyz_common"].as<std::vector<double>>();

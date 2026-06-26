@@ -277,17 +277,18 @@ ArmorTarget::uvmeasurement_covariance(const Eigen::Matrix<double, UVZ_N, 1>& z) 
     Eigen::Matrix<double, UVZ_N, UVZ_N> r;
     r.setZero();
     auto length = z[idx::UV_LENGTH];
-    if(MEASURE_NORMALIZED){
-        length *= (uvmeasure_ctx.camera_info.camera_fx() + uvmeasure_ctx.camera_info.camera_fy()) / 2.0;
+    if (MEASURE_NORMALIZED) {
+        length *=
+            (uvmeasure_ctx.camera_info.camera_fx() + uvmeasure_ctx.camera_info.camera_fy()) / 2.0;
     }
-    const double sigma_px = cfg.r_sigma_px_by_length_ratio*length;
+    const double sigma_px = cfg.r_sigma_px_by_length_ratio * length;
     double sigma_x = sigma_px;
     double sigma_y = sigma_px;
     if (MEASURE_NORMALIZED) {
         sigma_x /= uvmeasure_ctx.camera_info.camera_fx();
         sigma_y /= uvmeasure_ctx.camera_info.camera_fy();
     }
-    double sigma_length = cfg.r_sigma_length_by_length_ratio*length;
+    double sigma_length = cfg.r_sigma_length_by_length_ratio * length;
     if (MEASURE_NORMALIZED) {
         sigma_length /=
             ((uvmeasure_ctx.camera_info.camera_fx() + uvmeasure_ctx.camera_info.camera_fy()) / 2.0);
@@ -494,62 +495,134 @@ std::vector<std::pair<int, Armor>> ArmorTarget::match_armor(
         n_obs,
         std::vector<double>(maybe_visible.size(), MAX_COST + 1)
     );
-    std::vector<std::pair<UVVecZ, UVVecZ>> meas_list(n_obs);
-    for (int i = 0; i < n_obs; ++i) {
-        auto key_points = armors[i].key_points.landmarks();
-        meas_list[i].first = get_uv_measurement(
-            key_points[ArmorKeyPointsIndex::LEFT_TOP],
-            key_points[ArmorKeyPointsIndex::LEFT_BOTTOM],
-            camera_info
-        );
-        meas_list[i].second = get_uv_measurement(
-            key_points[ArmorKeyPointsIndex::RIGHT_TOP],
-            key_points[ArmorKeyPointsIndex::RIGHT_BOTTOM],
-            camera_info
-        );
+    std::vector<std::array<cv::Point2f, 4>> meas_list(n_obs);
+
+    for (int j = 0; j < n_obs; ++j) {
+        auto key_points = armors[j].key_points.landmarks();
+
+        meas_list[j] = { key_points[ArmorKeyPointsIndex::LEFT_TOP],
+                         key_points[ArmorKeyPointsIndex::RIGHT_TOP],
+                         key_points[ArmorKeyPointsIndex::RIGHT_BOTTOM],
+                         key_points[ArmorKeyPointsIndex::LEFT_BOTTOM] };
     }
     for (int j = 0; j < n_obs; ++j) {
         bool in_gate = false;
-        double min_d2 = std::numeric_limits<double>::max();
+        double min_total_cost = std::numeric_limits<double>::max();
         for (std::size_t i = 0; i < maybe_visible.size(); ++i) {
             const int id = maybe_visible[i];
-            auto ctx = uvmeasure_ctx;
-            ctx.id = id;
-            ctx.camera_cv_in_odom = camera_cv_in_odom;
-            ctx.is_left = true;
-            UVMeasure measure { .ctx = ctx };
-            UVVecZ z_pred_l;
-            measure.h(pred_state.x, z_pred_l);
-            auto nu_l = UVMeasure::residual(z_pred_l, meas_list[j].first);
-            ctx.is_left = false;
-            UVMeasure measure_right { .ctx = ctx };
-            UVVecZ z_pred_r;
-            measure_right.h(pred_state.x, z_pred_r);
-            auto nu_r = UVMeasure::residual(z_pred_r, meas_list[j].second);
-            auto R_l = uvmeasurement_covariance(z_pred_l);
-            auto R_r = uvmeasurement_covariance(z_pred_r);
-            Eigen::VectorXd nu(nu_l.size() + nu_r.size());
-            nu << nu_l, nu_r;
-            Eigen::MatrixXd R(R_l.rows() + R_r.rows(), R_l.cols() + R_r.cols());
-            R.setZero();
-            R.topLeftCorner(R_l.rows(), R_l.cols()) = R_l;
-            R.bottomRightCorner(R_r.rows(), R_r.cols()) = R_r;
-            double d2 = nu.transpose() * R.ldlt().solve(nu);
 
-            if (std::isfinite(d2)
-                && d2 < (!all_init ? cfg.armor_match_gate_not_all_init : cfg.armor_match_gate))
+            const auto left_light =
+                predict_light(id, true, pred_state, camera_info, camera_cv_in_odom);
+
+            const auto right_light =
+                predict_light(id, false, pred_state, camera_info, camera_cv_in_odom);
+
+            std::array<cv::Point2f, 4> pred = { left_light.first,
+                                                right_light.first,
+                                                right_light.second,
+                                                left_light.second };
+            const auto& meas = meas_list[j];
+
+            cv::Point2f cp(0, 0), cm(0, 0);
+
+            for (int k = 0; k < 4; ++k) {
+                cp += pred[k];
+                cm += meas[k];
+            }
+            cp *= 0.25f;
+            cm *= 0.25f;
+            double center_err = cv::norm(cp - cm);
+            auto angle = [&](const cv::Point2f& p1, const cv::Point2f& p2) {
+                return std::atan2(p2.y - p1.y, p2.x - p1.x);
+            };
+            double angle_err = 0;
+            for (int k = 0; k < 4; ++k) {
+                angle_err += std::abs(angles::normalize_angle(
+                    angle(pred[k], pred[(k + 1) % 4]) - angle(meas[k], meas[(k + 1) % 4])
+                ));
+            }
+            double side_length_err = 0;
+            double side_length_p = 0;
+            double side_length_m = 0;
+            for (int k = 0; k < 4; ++k) {
+                side_length_m += cv::norm(meas[k] - meas[(k + 1) % 4]);
+                side_length_p += cv::norm(pred[k] - pred[(k + 1) % 4]);
+            }
+            side_length_err = std::abs(side_length_p - side_length_m) / side_length_p;
+            double total_cost = cfg.armor_match_w_center_err * center_err
+                + cfg.armor_match_w_angle_err * angle_err
+                + cfg.armor_match_w_side_length_err * side_length_err;
+            if (std::isfinite(total_cost)
+                && total_cost
+                    < (!all_init ? cfg.armor_match_gate_not_all_init : cfg.armor_match_gate))
             {
-                cost[j][i] = d2;
+                cost[j][i] = total_cost;
                 in_gate = true;
             }
-            if (d2 < min_d2) {
-                min_d2 = d2;
+            if (total_cost < min_total_cost) {
+                min_total_cost = total_cost;
             }
         }
         if (!in_gate) {
-            AWAKENING_WARN("match out of gate min d2: {}", min_d2);
+            AWAKENING_WARN("match out of gate min total cost: {}", min_total_cost);
         }
     }
+    // std::vector<std::pair<UVVecZ, UVVecZ>> meas_list(n_obs);
+    // for (int i = 0; i < n_obs; ++i) {
+    //     auto key_points = armors[i].key_points.landmarks();
+    //     meas_list[i].first = get_uv_measurement(
+    //         key_points[ArmorKeyPointsIndex::LEFT_TOP],
+    //         key_points[ArmorKeyPointsIndex::LEFT_BOTTOM],
+    //         camera_info
+    //     );
+    //     meas_list[i].second = get_uv_measurement(
+    //         key_points[ArmorKeyPointsIndex::RIGHT_TOP],
+    //         key_points[ArmorKeyPointsIndex::RIGHT_BOTTOM],
+    //         camera_info
+    //     );
+    // }
+    // for (int j = 0; j < n_obs; ++j) {
+    //     bool in_gate = false;
+    //     double min_d2 = std::numeric_limits<double>::max();
+    //     for (std::size_t i = 0; i < maybe_visible.size(); ++i) {
+    //         const int id = maybe_visible[i];
+    //         auto ctx = uvmeasure_ctx;
+    //         ctx.id = id;
+    //         ctx.camera_cv_in_odom = camera_cv_in_odom;
+    //         ctx.is_left = true;
+    //         UVMeasure measure { .ctx = ctx };
+    //         UVVecZ z_pred_l;
+    //         measure.h(pred_state.x, z_pred_l);
+    //         auto nu_l = UVMeasure::residual(z_pred_l, meas_list[j].first);
+    //         ctx.is_left = false;
+    //         UVMeasure measure_right { .ctx = ctx };
+    //         UVVecZ z_pred_r;
+    //         measure_right.h(pred_state.x, z_pred_r);
+    //         auto nu_r = UVMeasure::residual(z_pred_r, meas_list[j].second);
+    //         auto R_l = uvmeasurement_covariance(z_pred_l);
+    //         auto R_r = uvmeasurement_covariance(z_pred_r);
+    //         Eigen::VectorXd nu(nu_l.size() + nu_r.size());
+    //         nu << nu_l, nu_r;
+    //         Eigen::MatrixXd R(R_l.rows() + R_r.rows(), R_l.cols() + R_r.cols());
+    //         R.setZero();
+    //         R.topLeftCorner(R_l.rows(), R_l.cols()) = R_l;
+    //         R.bottomRightCorner(R_r.rows(), R_r.cols()) = R_r;
+    //         double d2 = nu.transpose() * R.ldlt().solve(nu);
+
+    //         if (std::isfinite(d2)
+    //             && d2 < (!all_init ? cfg.armor_match_gate_not_all_init : cfg.armor_match_gate))
+    //         {
+    //             cost[j][i] = d2;
+    //             in_gate = true;
+    //         }
+    //         if (d2 < min_d2) {
+    //             min_d2 = d2;
+    //         }
+    //     }
+    //     if (!in_gate) {
+    //         AWAKENING_WARN("match out of gate min d2: {}", min_d2);
+    //     }
+    // }
     for (auto [obs, i]: dta_utils::greedy_match(cost, n_obs, maybe_visible.size(), MAX_COST)) {
         result.emplace_back(maybe_visible[i], armors[obs]);
     }
