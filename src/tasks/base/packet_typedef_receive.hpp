@@ -26,7 +26,8 @@ struct ReceiveRobotData {
 
     float yaw, pitch,
         roll; //坐标系定义： +x:前，+y:左，+z：上，+yaw 左，+pitch 下。+roll 右倾，旋转顺序ZYX
-    float q[4]; // wxyz
+    // float q[4]; // wxyz
+    float vyaw, vpitch, vroll;
     float v_x, v_y, v_z;
 
     float bullet_speed;
@@ -51,11 +52,11 @@ struct ReceiveRobotData {
             j["timestamp_receive_micro"] = Web::val(time_stamp_receive_micro);
             j["timestamp_send_micro"] = Web::val(time_stamp_send_micro);
 
-            auto _q = Eigen::Quaternionf(q[0], q[1], q[2], q[3]);
+            // auto _q = Eigen::Quaternionf(q[0], q[1], q[2], q[3]);
 
-            // j["yaw"] = Web::val(yaw);
-            // j["pitch"] = Web::val(pitch);
-            // j["roll"] = Web::val(roll);
+            j["yaw"] = Web::val(yaw);
+            j["pitch"] = Web::val(pitch);
+            j["roll"] = Web::val(roll);
 
             j["v_x"] = Web::val(v_x);
             j["v_y"] = Web::val(v_y);

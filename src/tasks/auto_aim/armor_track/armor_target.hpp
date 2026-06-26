@@ -63,7 +63,7 @@ struct ArmorTrackerCfg {
             config["light_match_pos_gate_by_length_ratio"].as<double>();
     }
 };
-inline constexpr bool MEASURE_NORMALIZED = true;
+inline constexpr bool MEASURE_NORMALIZED = false;
 inline int GLOBAL_ID = 0; // 全局状态标记，下游控制对同一 id 不重复构建轨迹。
 class ArmorTarget {
 public:
@@ -101,6 +101,7 @@ public:
         const CameraInfo& camera_info,
         const ISO3& camera_cv_in_odom
     );
+
     [[nodiscard]] cv::Rect get_net_focus_roi(
         const TimePoint& timestamp,
         const ISO3& camera_cv_in_odom,
