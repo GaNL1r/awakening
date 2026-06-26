@@ -17,8 +17,8 @@ struct ArmorTrackerCfg {
     double lost_time_thres;
     double lost_time_thres_outpost;
     int tracking_thres;
-    double armor_match_pos_gate_by_length_ratio;
-    double armor_match_pos_gate_all_init_by_length_ratio;
+    double armor_match_gate;
+    double armor_match_gate_not_all_init;
     double qyaw_common;
     double qyaw_output;
     Vec3 qxyz_common;
@@ -27,8 +27,8 @@ struct ArmorTrackerCfg {
     double q_h;
     double q_wpr;
     double q_outpost_dz;
-    double r_sigma_px;
-    double r_sigma_half_length;
+    double r_sigma_px_by_length_ratio;
+    double r_sigma_length_by_length_ratio;
     double r_sigma_angle;
     bool enable_lights_measure = false;
     double light_match_length_ratio_gate;
@@ -39,10 +39,8 @@ struct ArmorTrackerCfg {
         lost_time_thres = config["lost_time_thres"].as<double>();
         lost_time_thres_outpost = config["lost_time_thres_outpost"].as<double>();
         tracking_thres = config["tracking_thres"].as<int>();
-        armor_match_pos_gate_by_length_ratio =
-            config["armor_match_pos_gate_by_length_ratio"].as<double>();
-        armor_match_pos_gate_all_init_by_length_ratio =
-            config["armor_match_pos_gate_all_init_by_length_ratio"].as<double>();
+        armor_match_gate = config["armor_match_gate"].as<double>();
+        armor_match_gate_not_all_init = config["armor_match_gate_not_all_init"].as<double>();
         qyaw_common = config["qyaw_common"].as<double>();
         qyaw_output = config["qyaw_output"].as<double>();
         auto qxyz_common_vec = config["qxyz_common"].as<std::vector<double>>();
@@ -54,8 +52,8 @@ struct ArmorTrackerCfg {
         q_wpr = config["q_wpr"].as<double>();
         q_outpost_dz = config["q_outpost_dz"].as<double>();
         r_sigma_angle = config["r_sigma_angle"].as<double>();
-        r_sigma_px = config["r_sigma_px"].as<double>();
-        r_sigma_half_length = config["r_sigma_half_length"].as<double>();
+        r_sigma_px_by_length_ratio = config["r_sigma_px_by_length_ratio"].as<double>();
+        r_sigma_length_by_length_ratio = config["r_sigma_length_by_length_ratio"].as<double>();
         enable_lights_measure = config["enable_lights_measure"].as<bool>();
         light_match_length_ratio_gate = config["light_match_length_ratio_gate"].as<double>();
         light_match_angle_gate = config["light_match_angle_gate"].as<double>();

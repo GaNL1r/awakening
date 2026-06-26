@@ -90,16 +90,16 @@ armor_tracker:
   q_r: 0.0000001
   q_l: 0.0000001
   q_h: 0.0000001
-  q_wpr: 0.000001
+  q_wpr: 1.0
   q_outpost_dz: 0.0000001
   enable_lights_measure: true
-  armor_match_pos_gate_by_length_ratio: 20.0
-  armor_match_pos_gate_all_init_by_length_ratio: 50.0
+  armor_match_gate: 400.0
+  armor_match_gate_not_all_init: 1000.0
   light_match_length_ratio_gate: 0.2
   light_match_angle_gate: 0.2
   light_match_pos_gate_by_length_ratio: 5.0
-  r_sigma_px: 10.0
-  r_sigma_half_length: 100.0
+  r_sigma_px_by_length_ratio: 0.1
+  r_sigma_length_by_length_ratio: 0.2
   r_sigma_angle: 0.5
   esekf_iter_num: 5
 

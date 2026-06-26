@@ -47,7 +47,7 @@ inline T normalize_angle(T a) {
 constexpr bool USE_WROT = true;
 template<typename T>
 inline Eigen::Matrix<T, 3, 3> car_rotation(const T x[X_N], ArmorClass armor_number) {
-    if (armor_number == ArmorClass::OUTPOST || armor_number == ArmorClass::BASE||!USE_WROT) {
+    if (armor_number == ArmorClass::OUTPOST || armor_number == ArmorClass::BASE || !USE_WROT) {
         Eigen::Matrix<T, 3, 1> yaw_rotvec;
         yaw_rotvec << T(0), T(0), x[idx::C_ROT_Z];
         return utils::so3_exp(yaw_rotvec);
