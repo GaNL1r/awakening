@@ -92,7 +92,7 @@ armor_tracker:
   q_h: 0.0000001
   q_wpr: 1.0
   q_outpost_dz: 0.0000001
-  enable_lights_measure: true
+  enable_lights_measure: false
   armor_match_gate: 200.0
   armor_match_gate_not_all_init: 1000.0
   armor_match_w_center_err: 5.0
@@ -103,7 +103,8 @@ armor_tracker:
   light_match_pos_gate_by_length_ratio: 5.0
   r_sigma_px_by_length_ratio: 0.2
   r_sigma_length_by_length_ratio: 0.5
-  r_sigma_angle: 0.5
+  r_sigma_angle: 0.1
+  r_armor_lights_depth_diff: 0.001
   esekf_iter_num: 5
 
 

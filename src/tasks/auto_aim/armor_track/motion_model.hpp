@@ -9,6 +9,7 @@
 #include <array>
 #include <cassert>
 #include <ceres/ceres.h>
+#include <ceres/jet.h>
 #include <chrono>
 #include <cmath>
 #include <type_traits>
@@ -24,27 +25,27 @@ namespace idx {
     constexpr int OUTPOST02DZ = P2;
     enum { YPD_Y, YPD_P, YPD_D, A_ROT_X, A_ROT_Y, A_ROT_Z, _YPD_Z_N };
     // enum { YPD_Y, YPD_P, YPD_D, A_ROT_YAW, _YPD_Z_N };
-    enum { UV_ANGLE, UV_CENTER_X, UV_CENTER_Y, UV_LENGTH, _UVZ_N };
-    enum { PLANE_NX, PLANE_NY, PLANE_NZ, PLANE_DEPTH, _PLANE_Z_N };
+    enum { UV_ANGLE, UV_CENTER_X, UV_CENTER_Y, UV_LENGTH, _UVLZ_N };
 } // namespace idx
 constexpr int X_N = idx::X_N;
-constexpr int UVZ_N = idx::_UVZ_N;
+constexpr int UVLZ_N = idx::_UVLZ_N;
 constexpr double OUTPOST_R = 0.55 / 2.0;
 constexpr double OUTPOST_WZ = 2.51;
 constexpr double MIN_ARMOR_R = 0.05;
 constexpr double MAX_ARMOR_R = 1.0;
 constexpr int YPDZ_N = idx::_YPD_Z_N;
-constexpr int PLANEZ_N = idx::_PLANE_Z_N;
 using VecX = Eigen::Matrix<double, X_N, 1>;
-using UVVecZ = Eigen::Matrix<double, UVZ_N, 1>;
+using UVLVecZ = Eigen::Matrix<double, UVLZ_N, 1>;
 using YPDVecZ = Eigen::Matrix<double, YPDZ_N, 1>;
-using PlaneVecZ = Eigen::Matrix<double, PLANEZ_N, 1>;
+constexpr int DIFFZ_N = 1;
+using DiffVecZ = Eigen::Matrix<double, DIFFZ_N, 1>;
+constexpr bool USE_WROT = true;
 template<typename T>
 inline T normalize_angle(T a) {
     const T two_pi = T(2.0 * M_PI);
     return a - two_pi * ceres::floor((a + T(M_PI)) / two_pi);
 }
-constexpr bool USE_WROT = true;
+
 template<typename T>
 inline Eigen::Matrix<T, 3, 3> car_rotation(const T x[X_N], ArmorClass armor_number) {
     if (armor_number == ArmorClass::OUTPOST || armor_number == ArmorClass::BASE || !USE_WROT) {
@@ -94,31 +95,6 @@ armor_pose(const T x[X_N], int id, int armor_num, ArmorClass armor_number) {
     pose_in_car.linear() =
         utils::rpy2matrix(Eigen::Vector3<T>(T(0), armor_pitch, yaw), utils::RPYOrder::ZYX);
     return whole_car_pose(x, armor_number) * pose_in_car;
-}
-
-template<typename T>
-inline T armor_front_facing_score(const Eigen::Transform<T, 3, Eigen::Isometry>& armor_in_camera_cv
-) {
-    const Eigen::Matrix<T, 3, 1> front_normal = -armor_in_camera_cv.linear().col(0);
-    const Eigen::Matrix<T, 3, 1> camera_direction = -armor_in_camera_cv.translation();
-    return front_normal.dot(camera_direction);
-}
-
-template<typename T>
-inline bool armor_front_facing(const Eigen::Transform<T, 3, Eigen::Isometry>& armor_in_camera_cv) {
-    return armor_front_facing_score(armor_in_camera_cv) > T(0);
-}
-
-inline bool state_armor_front_facing(
-    const VecX& x,
-    int id,
-    int armor_num,
-    ArmorClass armor_number,
-    const ISO3& camera_cv_in_odom
-) {
-    const auto pose_in_odom = armor_pose(x.data(), id, armor_num, armor_number);
-    const auto pose_in_camera_cv = camera_cv_in_odom.inverse() * pose_in_odom;
-    return armor_front_facing(pose_in_camera_cv);
 }
 
 template<class StateVector>
@@ -278,20 +254,20 @@ struct Predict {
         operator()(x0.data(), x1.data());
     }
 };
-
-struct UVMeasure {
+struct UVCtx {
+    int armor_num;
+    int id;
+    ISO3 camera_cv_in_odom = ISO3::Identity();
+    CameraInfo camera_info;
+    auto_aim::ArmorClass armor_number = auto_aim::ArmorClass::UNKNOWN;
+    bool is_left;
+    bool normalized = false;
+};
+struct UVLMeasure {
     template<typename T>
     using ImagePoint = Eigen::Matrix<T, 2, 1>;
 
-    struct Ctx {
-        int armor_num;
-        int id;
-        ISO3 camera_cv_in_odom = ISO3::Identity();
-        CameraInfo camera_info;
-        auto_aim::ArmorClass armor_number = auto_aim::ArmorClass::UNKNOWN;
-        bool is_left;
-        bool normalized = false;
-    } ctx;
+    UVCtx ctx;
 
     template<typename T>
     inline std::array<ImagePoint<T>, 2> project_points(const T x[X_N]) const {
@@ -328,7 +304,7 @@ struct UVMeasure {
 
     template<typename T>
     static inline void
-    points_to_observation(const ImagePoint<T>& top, const ImagePoint<T>& bottom, T z[UVZ_N]) {
+    points_to_observation(const ImagePoint<T>& top, const ImagePoint<T>& bottom, T z[UVLZ_N]) {
         const ImagePoint<T> delta = top - bottom;
         const ImagePoint<T> center = (top + bottom) / T(2);
         z[idx::UV_ANGLE] = ceres::atan2(delta.x(), delta.y());
@@ -338,7 +314,7 @@ struct UVMeasure {
     }
 
     template<typename T>
-    inline void operator()(const T x[X_N], T z[UVZ_N]) const {
+    inline void operator()(const T x[X_N], T z[UVLZ_N]) const {
         const auto points = project_points(x);
         points_to_observation(points[0], points[1], z);
     }
@@ -350,16 +326,86 @@ struct UVMeasure {
     }
 
     template<typename T>
-    static inline Eigen::Matrix<T, UVZ_N, 1>
-    residual(const Eigen::Matrix<T, UVZ_N, 1>& z_pred, const Eigen::Matrix<T, UVZ_N, 1>& z) {
-        Eigen::Matrix<T, UVZ_N, 1> v = z - z_pred;
+    static inline Eigen::Matrix<T, UVLZ_N, 1>
+    residual(const Eigen::Matrix<T, UVLZ_N, 1>& z_pred, const Eigen::Matrix<T, UVLZ_N, 1>& z) {
+        Eigen::Matrix<T, UVLZ_N, 1> v = z - z_pred;
         v[idx::UV_ANGLE] = normalize_angle(v[idx::UV_ANGLE]);
         return v;
     }
-    inline void h(const VecX& x, UVVecZ& z) const {
+    inline void h(const VecX& x, UVLVecZ& z) const {
         operator()(x.data(), z.data());
     }
 };
+struct DiffMeasure {
+    template<typename T>
+    using ImagePoint = Eigen::Matrix<T, 2, 1>;
+
+    UVCtx ctx;
+
+    template<typename T>
+    inline Eigen::Transform<T, 3, Eigen::Isometry> armor_pose_in_camera_cv(const T x[X_N]) const {
+        auto pose_in_odom = armor_pose(x, ctx.id, ctx.armor_num, ctx.armor_number);
+
+        Eigen::Transform<T, 3, Eigen::Isometry> camera_cv_in_odom_jet;
+        camera_cv_in_odom_jet.matrix() = ctx.camera_cv_in_odom.matrix().template cast<T>();
+
+        return camera_cv_in_odom_jet.inverse() * pose_in_odom;
+    }
+
+    template<typename T>
+    inline std::array<ImagePoint<T>, 4> project_points(const T x[X_N]) const {
+        auto pose_in_camera_cv = armor_pose_in_camera_cv(x);
+        std::vector<cv::Point3f> object_points = getArmorKeyPoints3D<cv::Point3f>(ctx.armor_number);
+
+        std::vector<ImagePoint<T>> pts_jet;
+        if (ctx.normalized) {
+            utils::project_points_jets_normalized(
+                object_points,
+                pose_in_camera_cv,
+                ctx.camera_info.distortion_coefficients,
+                pts_jet
+            );
+        } else {
+            utils::project_points_jets(
+                object_points,
+                pose_in_camera_cv,
+                ctx.camera_info.camera_matrix,
+                ctx.camera_info.distortion_coefficients,
+                pts_jet
+            );
+        }
+
+        return { pts_jet[0], pts_jet[1], pts_jet[2], pts_jet[3] };
+    }
+
+    template<typename T>
+    inline void operator()(const T x[X_N], T z[DIFFZ_N]) const {
+        const auto pose_in_camera_cv = armor_pose_in_camera_cv(x);
+        const auto object_points = getArmorKeyPoints3D<cv::Point3f>(ctx.armor_number);
+        auto point_in_camera = [&](ArmorKeyPointsIndex index) {
+            const auto& p = object_points[std::to_underlying(index)];
+            return pose_in_camera_cv * Eigen::Matrix<T, 3, 1>(T(p.x), T(p.y), T(p.z));
+        };
+        const auto left_center = (point_in_camera(ArmorKeyPointsIndex::LEFT_TOP)
+                                  + point_in_camera(ArmorKeyPointsIndex::LEFT_BOTTOM))
+            * T(0.5);
+        const auto right_center = (point_in_camera(ArmorKeyPointsIndex::RIGHT_TOP)
+                                   + point_in_camera(ArmorKeyPointsIndex::RIGHT_BOTTOM))
+            * T(0.5);
+        z[0] = (left_center.z() - right_center.z());
+    }
+
+    template<typename T>
+    static inline Eigen::Matrix<T, DIFFZ_N, 1>
+    residual(const Eigen::Matrix<T, DIFFZ_N, 1>& z_pred, const Eigen::Matrix<T, DIFFZ_N, 1>& z) {
+        Eigen::Matrix<T, DIFFZ_N, 1> v = z - z_pred;
+        return v;
+    }
+    inline void h(const VecX& x, DiffVecZ& z) const {
+        operator()(x.data(), z.data());
+    }
+};
+
 struct YPDMeasure {
     struct Ctx {
         int armor_num;
@@ -409,38 +455,6 @@ struct YPDMeasure {
         return v;
     }
     inline void h(const VecX& x, YPDVecZ& z) const {
-        operator()(x.data(), z.data());
-    }
-};
-struct PlaneMeasure {
-    struct Ctx {
-        int armor_num;
-        int id;
-        auto_aim::ArmorClass armor_number = auto_aim::ArmorClass::UNKNOWN;
-        ISO3 camera_cv_in_odom = ISO3::Identity();
-    } ctx;
-
-    template<typename T>
-    inline void operator()(const T x[X_N], T z[PLANEZ_N]) const {
-        auto pose_in_odom = armor_pose(x, ctx.id, ctx.armor_num, ctx.armor_number);
-        Eigen::Transform<T, 3, Eigen::Isometry> camera_cv_in_odom_jet;
-        camera_cv_in_odom_jet.matrix() = ctx.camera_cv_in_odom.matrix().template cast<T>();
-        auto pose_in_camera_cv = camera_cv_in_odom_jet.inverse() * pose_in_odom;
-
-        const Eigen::Matrix<T, 3, 1> front_normal = -pose_in_camera_cv.linear().col(0);
-        z[idx::PLANE_NX] = front_normal.x();
-        z[idx::PLANE_NY] = front_normal.y();
-        z[idx::PLANE_NZ] = front_normal.z();
-        z[idx::PLANE_DEPTH] = pose_in_camera_cv.translation().z();
-    }
-
-    template<typename T>
-    static inline Eigen::Matrix<T, PLANEZ_N, 1>
-    residual(const Eigen::Matrix<T, PLANEZ_N, 1>& z_pred, const Eigen::Matrix<T, PLANEZ_N, 1>& z) {
-        return z - z_pred;
-    }
-
-    inline void h(const VecX& x, PlaneVecZ& z) const {
         operator()(x.data(), z.data());
     }
 };

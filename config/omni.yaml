@@ -101,6 +101,7 @@ armor_tracker:
   r_sigma_px_by_length_ratio: 0.1
   r_sigma_length_by_length_ratio: 0.3
   r_sigma_angle: 0.5
+  r_armor_lights_depth_diff: 0.001
   esekf_iter_num: 5
 
 

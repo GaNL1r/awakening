@@ -33,6 +33,7 @@ struct ArmorTrackerCfg {
     double r_sigma_px_by_length_ratio;
     double r_sigma_length_by_length_ratio;
     double r_sigma_angle;
+    double r_armor_lights_depth_diff;
     bool enable_lights_measure = false;
     double light_match_length_ratio_gate;
     double light_match_angle_gate;
@@ -60,6 +61,7 @@ struct ArmorTrackerCfg {
         r_sigma_angle = config["r_sigma_angle"].as<double>();
         r_sigma_px_by_length_ratio = config["r_sigma_px_by_length_ratio"].as<double>();
         r_sigma_length_by_length_ratio = config["r_sigma_length_by_length_ratio"].as<double>();
+        r_armor_lights_depth_diff = config["r_armor_lights_depth_diff"].as<double>();
         enable_lights_measure = config["enable_lights_measure"].as<bool>();
         light_match_length_ratio_gate = config["light_match_length_ratio_gate"].as<double>();
         light_match_angle_gate = config["light_match_angle_gate"].as<double>();
@@ -127,10 +129,6 @@ public:
     [[nodiscard]] Eigen::
         Matrix<double, armor_point_motion_model::X_N, armor_point_motion_model::X_N>
         process_noise(double dt) const noexcept;
-    [[nodiscard]] Eigen::
-        Matrix<double, armor_point_motion_model::UVZ_N, armor_point_motion_model::UVZ_N>
-        uvmeasurement_covariance(const Eigen::Matrix<double, armor_point_motion_model::UVZ_N, 1>& z
-        ) const noexcept;
 
     void predict_ekf(const TimePoint& timestamp);
     int update(
@@ -165,7 +163,7 @@ public:
         const CameraInfo& camera_info,
         const ISO3& camera_cv_in_odom
     ) const noexcept;
-    armor_point_motion_model::UVMeasure::Ctx uvmeasure_ctx;
+    armor_point_motion_model::UVCtx uvmeasure_ctx;
     std::optional<armor_point_motion_model::RobotStateESEKF> esekf;
     ArmorTrackerCfg cfg;
     armor_point_motion_model::Voter voter;
