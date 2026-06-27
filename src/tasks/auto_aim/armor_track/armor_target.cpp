@@ -56,8 +56,6 @@ namespace {
         return observation;
     }
 
-   
-
 } // namespace
 
 void ArmorTarget::write_log() {
@@ -462,11 +460,14 @@ int ArmorTarget::update(
                 / 2.0;
             const double depth_diff = left_center.z() - right_center.z();
             DiffVecZ observation_diff;
+            // observation_diff << left_center.z(), right_center.z();
+            observation_diff << depth_diff;
             DiffMeasure measure_diff { .ctx = ctx };
             const auto u_r_diff = [&](const DiffVecZ& z) {
                 Eigen::Matrix<double, DIFFZ_N, DIFFZ_N> r;
                 r.setZero();
                 r(0, 0) = cfg.r_armor_lights_depth_diff;
+                // r(1, 1) = cfg.r_armor_lights_depth_diff;
                 return r;
             };
             obs.push_back(esekf->make_obs(

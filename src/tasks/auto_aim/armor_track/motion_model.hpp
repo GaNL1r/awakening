@@ -353,32 +353,6 @@ struct DiffMeasure {
     }
 
     template<typename T>
-    inline std::array<ImagePoint<T>, 4> project_points(const T x[X_N]) const {
-        auto pose_in_camera_cv = armor_pose_in_camera_cv(x);
-        std::vector<cv::Point3f> object_points = getArmorKeyPoints3D<cv::Point3f>(ctx.armor_number);
-
-        std::vector<ImagePoint<T>> pts_jet;
-        if (ctx.normalized) {
-            utils::project_points_jets_normalized(
-                object_points,
-                pose_in_camera_cv,
-                ctx.camera_info.distortion_coefficients,
-                pts_jet
-            );
-        } else {
-            utils::project_points_jets(
-                object_points,
-                pose_in_camera_cv,
-                ctx.camera_info.camera_matrix,
-                ctx.camera_info.distortion_coefficients,
-                pts_jet
-            );
-        }
-
-        return { pts_jet[0], pts_jet[1], pts_jet[2], pts_jet[3] };
-    }
-
-    template<typename T>
     inline void operator()(const T x[X_N], T z[DIFFZ_N]) const {
         const auto pose_in_camera_cv = armor_pose_in_camera_cv(x);
         const auto object_points = getArmorKeyPoints3D<cv::Point3f>(ctx.armor_number);
@@ -392,7 +366,9 @@ struct DiffMeasure {
         const auto right_center = (point_in_camera(ArmorKeyPointsIndex::RIGHT_TOP)
                                    + point_in_camera(ArmorKeyPointsIndex::RIGHT_BOTTOM))
             * T(0.5);
-        z[0] = (left_center.z() - right_center.z());
+        // z[0] = (left_center.z());
+        // z[1] = (right_center.z());
+        z[0] = left_center.z() - right_center.z();
     }
 
     template<typename T>
