@@ -56,60 +56,7 @@ namespace {
         return observation;
     }
 
-    std::optional<double>
-    get_ippe_depth_diff_measurement(Armor& armor, const CameraInfo& camera_info) noexcept {
-        auto key_points = armor.key_points.landmarks();
-        const auto object_points = getArmorKeyPoints3D<cv::Point3f>(armor.number);
-        std::vector<cv::Mat> rvecs;
-        std::vector<cv::Mat> tvecs;
-        std::vector<double> reproj_errors;
-        if (!cv::solvePnPGeneric(
-                object_points,
-                key_points,
-                camera_info.camera_matrix,
-                camera_info.distortion_coefficients,
-                rvecs,
-                tvecs,
-                false,
-                cv::SOLVEPNP_IPPE,
-                cv::noArray(),
-                cv::noArray(),
-                reproj_errors
-            ))
-        {
-            return std::nullopt;
-        }
-
-        std::optional<double> best_depth_diff;
-        for (size_t i = 0; i < rvecs.size(); ++i) {
-            cv::Mat R_cv;
-            cv::Rodrigues(rvecs[i], R_cv);
-            Mat3 R;
-            Vec3 t;
-            cv::cv2eigen(R_cv, R);
-            cv::cv2eigen(tvecs[i], t);
-            Vec3 axis_x = R.col(0);
-            Vec3 front_normal = -axis_x;
-            if (front_normal.dot(-t) > 0) {
-                auto point_in_camera = [&](ArmorKeyPointsIndex index) -> Vec3 {
-                    const auto& p = object_points[std::to_underlying(index)];
-                    return R * Vec3(p.x, p.y, p.z) + t;
-                };
-                const Vec3 left_center = (point_in_camera(ArmorKeyPointsIndex::LEFT_TOP)
-                                          + point_in_camera(ArmorKeyPointsIndex::LEFT_BOTTOM))
-                    / 2.0;
-                const Vec3 right_center = (point_in_camera(ArmorKeyPointsIndex::RIGHT_TOP)
-                                           + point_in_camera(ArmorKeyPointsIndex::RIGHT_BOTTOM))
-                    / 2.0;
-                const double depth_diff = left_center.z() - right_center.z();
-
-                best_depth_diff = depth_diff;
-                break;
-            }
-        }
-
-        return best_depth_diff;
-    }
+   
 
 } // namespace
 
