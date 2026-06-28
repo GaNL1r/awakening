@@ -5,6 +5,7 @@
 #include "utils/utils.hpp"
 #include <array>
 #include <memory>
+#include <opencv2/calib3d.hpp>
 #include <opencv2/core/types.hpp>
 #include <opencv2/imgproc.hpp>
 namespace awakening {
@@ -214,6 +215,16 @@ struct Web::Impl {
                 auto vyaw_in_car = ISO3::Identity();
                 vyaw_in_car.translation().z() = target_state.vyaw() / 10.0;
                 auto vyaw_pose = odom_in_camera_cv * whole_car_pose * vyaw_in_car;
+                whole_car_pose = odom_in_camera_cv * whole_car_pose;
+                auto [rvec, tvec] = utils::eigen_iso3_to_rvec_tvec(whole_car_pose);
+                cv::drawFrameAxes(
+                    img,
+                    camera_info.camera_matrix,
+                    camera_info.distortion_coefficients,
+                    rvec,
+                    tvec,
+                    0.1
+                );
                 auto vyaw_image_points = utils::reprojection(
                     camera_info.camera_matrix,
                     camera_info.distortion_coefficients,
@@ -245,7 +256,6 @@ struct Web::Impl {
                     0,
                     0.1
                 );
-                cv::circle(img, center, 5, cv::Scalar(50, 255, 50), -1);
                 cv::putText(
                     img,
                     fmt::format("V_yaw: {:.2f}", target_state.vyaw()),

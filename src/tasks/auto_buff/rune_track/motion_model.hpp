@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <cassert>
 #include <ceres/ceres.h>
+#include <ceres/jet.h>
 #include <chrono>
 #include <cmath>
 #include <cstddef>
@@ -20,7 +21,7 @@
 namespace awakening::auto_buff::motion_model {
 
 namespace idx {
-    enum { CX, CY, CZ, YAW, ROLL, V_ROLL, TAU, A_RAW, W_RAW, X_N };
+    enum { CX, CY, CZ, YAW, ROLL, V_ROLL, TAU, A, W, X_N };
     enum { R_X, R_Y, _R_Z_N };
     enum { TOP_X, TOP_Y, LEFT_X, LEFT_Y, BOTTOM_X, BOTTOM_Y, RIGHT_X, RIGHT_Y, _FanBlade_Z_N };
     enum { LT_X, LT_Y, LB_X, LB_Y, RB_X, RB_Y, RT_X, RT_Y, CEN_X, CEN_Y, _FanTarget_Z_N };
@@ -64,23 +65,7 @@ box_minus_state(const StateVector& nominal, const StateVector& value, DeltaVecto
     delta[idx::YAW] = normalize_angle(value[idx::YAW] - nominal[idx::YAW]);
     delta[idx::ROLL] = normalize_angle(value[idx::ROLL] - nominal[idx::ROLL]);
 }
-template<typename T>
-inline T bounded_sigmoid(T raw, double lower, double upper) {
-    const T s = T(1) / (T(1) + ceres::exp(-raw));
-    return T(lower) + T(upper - lower) * s;
-}
-inline double unbounded_from_bounded(double value, double lower, double upper) {
-    const double ratio = std::clamp((value - lower) / (upper - lower), 1e-6, 1.0 - 1e-6);
-    return std::log(ratio / (1.0 - ratio));
-}
-template<typename T>
-inline T physical_a(const T x[X_N]) {
-    return bounded_sigmoid(x[idx::A_RAW], A_LOWER, A_UPPER);
-}
-template<typename T>
-inline T physical_w(const T x[X_N]) {
-    return bounded_sigmoid(x[idx::W_RAW], W_LOWER, W_UPPER);
-}
+
 struct Voter {
     enum {
         Collecting,
@@ -91,7 +76,7 @@ struct Voter {
     void reset(const TimePoint&) {
         *this = {};
     }
-    void update(double roll, int) {
+    void update(double roll, int need_count) {
         const double diff = angles::normalize_angle(roll - last_state_roll);
         if (std::abs(diff) < 0.05) {
             return;
@@ -102,7 +87,7 @@ struct Voter {
             clock_wise_count--;
         }
         last_state_roll = roll;
-        if (std::abs(clock_wise_count) > 10) {
+        if (std::abs(clock_wise_count) > need_count) {
             state = clock_wise_count > 0 ? Clockwise : Counterclockwise;
         } else {
             state = Collecting;
@@ -143,8 +128,8 @@ struct Predict {
 
         x1[idx::TAU] += dt;
         if (voter.mode == Voter::Big) {
-            const T a = physical_a(x0);
-            const T w = physical_w(x0);
+            const T a = x0[idx::A];
+            const T w = x0[idx::W];
             const T b = T(AMPLITUDE_SUM) - a;
             delta_theta_abs =
                 ((a / w) * (ceres::cos(w * x0[idx::TAU]) - ceres::cos(w * x1[idx::TAU])))
@@ -160,14 +145,18 @@ struct Predict {
             delta_theta = -delta_theta_abs;
         }
         x1[idx::ROLL] += delta_theta;
-        apply_mode_constraints(x1);
+        clamp(x1);
     }
 
     template<typename T>
-    inline void apply_mode_constraints(T x[X_N]) const {
+    inline void clamp(T x[X_N]) const {
         if (voter.state != Voter::Collecting) {
             x[idx::V_ROLL] = T(0);
         }
+        x[idx::A] = ceres::fmin(x[idx::A], A_UPPER);
+        x[idx::W] = ceres::fmin(x[idx::W], W_UPPER);
+        x[idx::A] = ceres::fmax(x[idx::A], A_LOWER);
+        x[idx::W] = ceres::fmax(x[idx::W], W_LOWER);
     }
     inline void f(const VecX& x0, VecX& x1) const {
         assert(x0.size() == X_N);
@@ -393,10 +382,10 @@ struct State {
         return dir * SMALL_SPEED;
     }
     double a() const {
-        return physical_a(x.data());
+        return x[idx::A];
     }
     double w() const {
-        return physical_w(x.data());
+        return x[idx::W];
     }
     double tau() const {
         return x[idx::TAU];

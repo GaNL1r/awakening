@@ -575,7 +575,7 @@ std::vector<std::pair<int, Armor>> ArmorTarget::match_armor(
             }
             cp *= 0.25f;
             cm *= 0.25f;
-            double center_err = cv::norm(cp - cm);//整体位置误差
+            double center_err = cv::norm(cp - cm); //整体位置误差
             auto angle = [&](const cv::Point2f& p1, const cv::Point2f& p2) {
                 return std::atan2(p2.y - p1.y, p2.x - p1.x);
             };
@@ -592,7 +592,8 @@ std::vector<std::pair<int, Armor>> ArmorTarget::match_armor(
                 side_length_m += cv::norm(meas[k] - meas[(k + 1) % 4]);
                 side_length_p += cv::norm(pred[k] - pred[(k + 1) % 4]);
             }
-            side_length_err = std::abs(side_length_p - side_length_m) / side_length_p; //边长差，表现距离缩放
+            side_length_err =
+                std::abs(side_length_p - side_length_m) / side_length_p; //边长差，表现距离缩放
             double total_cost = cfg.armor_match_w_center_err * center_err
                 + cfg.armor_match_w_angle_err * angle_err
                 + cfg.armor_match_w_side_length_err * side_length_err;
@@ -677,9 +678,11 @@ std::vector<std::tuple<int, bool, Light>> ArmorTarget::match_light(
     const auto closest = std::min_element(
         angle_dis_in_camera_cv.begin(),
         angle_dis_in_camera_cv.end(),
-        [](const auto& a, const auto& b) { return a.first > b.first; } //最正对那个，还是需要遮挡模型更好
+        [](const auto& a, const auto& b) {
+            return a.first > b.first;
+        } //最正对那个，还是需要遮挡模型更好
     );
-    maybe_visible((closest->second + armors_num - 1) % armors_num, false);//左边板子右灯条
+    maybe_visible((closest->second + armors_num - 1) % armors_num, false); //左边板子右灯条
     maybe_visible((closest->second + 1) % armors_num, true); // 右边板子左灯条
     maybe_visible(closest->second, false);
     maybe_visible(closest->second, true);
@@ -755,7 +758,12 @@ std::vector<std::tuple<int, bool, Light>> ArmorTarget::match_light(
 
     cv::Rect rect = expanded(timestamp, camera_cv_in_odom, camera_info, image_size);
     constexpr double expand_ratio = 1.4;
-    rect = utils::expand_and_clip_rect(rect, expand_ratio, image_size);
+    constexpr double expand_ratio_base = 3.0;
+    rect = utils::expand_and_clip_rect(
+        rect,
+        (target_number == ArmorClass::BASE) ? expand_ratio_base : expand_ratio,
+        image_size
+    );
     const cv::Rect img_rect(0, 0, image_size.width, image_size.height);
 
     if ((rect & img_rect).area() <= 0) {

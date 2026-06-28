@@ -80,28 +80,6 @@ sudo ./run.sh run standard omni true
 python3 web.py #运行远程可视化web（雷达识别不适用）
 ```
 
-编译时若检测到 Rerun C++ SDK，调试数据会同时发送到 Rerun、Web 和 ROS2/RViz，
-原有接口无需修改。Rerun 默认启动本机 Viewer，也可用环境变量选择输出方式：
-
-```bash
-AWAKENING_RERUN=spawn    ./run.sh run standard omni true # 默认：启动 Viewer
-AWAKENING_RERUN=connect  ./run.sh run standard omni true # 连接 AWAKENING_RERUN_URL
-AWAKENING_RERUN=serve    ./run.sh run standard omni true # 在 9876 端口提供服务
-AWAKENING_RERUN=save AWAKENING_RERUN_PATH=awakening.rrd ./run.sh run standard omni true
-AWAKENING_RERUN=off      ./run.sh run standard omni true # 仅使用原 Web/ROS2 接口
-```
-
-图像采用仅保留最新帧的单槽队列，默认 8 FPS、最大宽度 640、JPEG 质量 30，
-可按网络带宽调整：
-
-```bash
-AWAKENING_RERUN_IMAGE_FPS=10 AWAKENING_RERUN_IMAGE_WIDTH=720 \
-AWAKENING_RERUN_JPEG_QUALITY=35 \
-AWAKENING_RERUN=spawn ./run.sh run standard config/test.yaml true
-```
-
-可用 `-DBUILD_WITH_RERUN=OFF` 完全关闭 Rerun 编译；SDK 缺失时 CMake 也会自动回退到原有可视化。
-
 `run.sh` 支持：
 
 ```bash

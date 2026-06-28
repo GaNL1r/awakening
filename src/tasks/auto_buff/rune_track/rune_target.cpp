@@ -197,11 +197,11 @@ bool RuneTarget::reset(
     Eigen::DiagonalMatrix<double, X_N> p0;
     p0.diagonal().setZero();
     p0.diagonal()[idx::CX] = p0.diagonal()[idx::CY] = p0.diagonal()[idx::CZ] = 1;
-    p0.diagonal()[idx::A_RAW] = p0.diagonal()[idx::W_RAW] = 1;
     p0.diagonal()[idx::ROLL] = p0.diagonal()[idx::YAW] = 1;
     p0.diagonal()[idx::V_ROLL] = 100;
     p0.diagonal()[idx::TAU] = 100;
-    p0.diagonal()[idx::W_RAW] = p0.diagonal()[idx::A_RAW] = 100;
+    p0.diagonal()[idx::A] = 1;
+    p0.diagonal()[idx::W] = 1;
     const auto u_q = [] { return Eigen::Matrix<double, X_N, X_N>::Zero(); };
     const auto inject = [](const auto& delta, auto& nominal) { inject_state(delta, nominal); };
     const auto box_minus = [](const auto& nominal, const auto& value, auto& delta) {
@@ -229,8 +229,8 @@ bool RuneTarget::reset(
     target_state.set_pos(pos);
     target_state.x[idx::ROLL] = rpy[0];
     target_state.x[idx::YAW] = rpy[2];
-    target_state.x[idx::A_RAW] = unbounded_from_bounded(a_guess, A_LOWER, A_UPPER);
-    target_state.x[idx::W_RAW] = unbounded_from_bounded(w_guess, W_LOWER, W_UPPER);
+    target_state.x[idx::A] = a_guess;
+    target_state.x[idx::W] = w_guess;
     target_state.x[idx::TAU] = tau;
     target_state.timestamp = timestamp;
     target_state.frame_id = frame_id;
@@ -288,9 +288,8 @@ RuneTarget::process_noise(double dt) const noexcept {
     q(idx::YAW, idx::YAW) = dt * cfg.q_yaw;
 
     utils::fill_constant_accel_noise(q, idx::ROLL, idx::V_ROLL, cfg.q_roll, dt);
-
-    q(idx::A_RAW, idx::A_RAW) = dt * cfg.q_a_raw;
-    q(idx::W_RAW, idx::W_RAW) = dt * cfg.q_w_raw;
+    q(idx::A, idx::A) = dt * cfg.q_a;
+    q(idx::W, idx::W) = dt * cfg.q_w;
     q(idx::TAU, idx::TAU) = dt * cfg.q_tau;
 
     return q;
@@ -403,20 +402,42 @@ std::tuple<int, int> RuneTarget::update(
     const ISO3& camera_cv_in_odom
 ) {
     std::vector<std::shared_ptr<ESEKF::ObsBase>> obs;
+    auto pred_state = target_state;
+    pred_state.predict(timestamp, voter);
+    FanBladeVecZ fan_prediction;
+    auto fan_measure_ctx = fan_ctx;
+    fan_measure_ctx.camera_cv_in_odom = camera_cv_in_odom;
+    fan_measure_ctx.id = 0;
+    FanBladeMeasure fan_measure { .ctx = fan_measure_ctx };
+    fan_measure.h(pred_state.x, fan_prediction);
+    RVecZ r_prediction;
+    auto r_measure_ctx = r_ctx;
+    r_measure_ctx.camera_cv_in_odom = camera_cv_in_odom;
+    RMeasure r_measure { .ctx = r_measure_ctx };
+    r_measure.h(pred_state.x, r_prediction);
+    double fan_hand_length = cv::norm(
+        cv::Point2f(fan_prediction[idx::BOTTOM_X], fan_prediction[idx::BOTTOM_Y])
+        - cv::Point2f(r_prediction[idx::R_X], r_prediction[idx::R_Y])
+    );
     if (r) {
         RVecZ z(r->second.x, r->second.y);
         auto ctx = r_ctx;
         ctx.camera_cv_in_odom = camera_cv_in_odom;
         RMeasure measure { .ctx = ctx };
         const auto r_u_r = [&](const auto&) {
-            return diagonal_covariance<RZ_N>(r->first ? cfg.r_uv_cv : cfg.r_uv_net);
+            auto sigma_ratio = r->first ? cfg.r_sigma_pix_by_hand_length_ratio_cv
+                                        : cfg.r_sigma_pix_by_hand_length_ratio_net;
+            auto sigma = sigma_ratio * fan_hand_length;
+            return diagonal_covariance<RZ_N>(sigma * sigma / 2.0);
         };
         const auto residual = [](const auto& z_pred, const auto& z) { return z - z_pred; };
         obs.push_back(esekf->make_obs(z, measure, r_u_r, residual));
     }
 
     const auto fan_u_r = [&](const auto&) {
-        return diagonal_covariance<FanBladeZ_N>(cfg.r_uv_net);
+        auto sigma_ratio = cfg.r_sigma_pix_by_hand_length_ratio_net;
+        auto sigma = sigma_ratio * fan_hand_length;
+        return diagonal_covariance<FanBladeZ_N>(sigma * sigma / 2.0);
     };
     const auto residual = [](const auto& z_pred, const auto& z) { return z - z_pred; };
     if (!matched_fans.empty() || !matched_fan_targets.empty()) {
@@ -431,7 +452,9 @@ std::tuple<int, int> RuneTarget::update(
         obs.push_back(esekf->make_obs(fan_blade_observation(fan), measure, fan_u_r, residual));
     }
     const auto fan_target_u_r = [&](const auto&) {
-        return diagonal_covariance<FanTargetZ_N>(cfg.r_uv_cv);
+        auto sigma_ratio = cfg.r_sigma_pix_by_hand_length_ratio_cv;
+        auto sigma = sigma_ratio * fan_hand_length;
+        return diagonal_covariance<FanTargetZ_N>(sigma * sigma / 2.0);
     };
     for (const auto& [id, fan]: matched_fan_targets) {
         fan_wc.update(id, timestamp);

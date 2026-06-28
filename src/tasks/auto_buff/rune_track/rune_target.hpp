@@ -17,11 +17,11 @@ struct RuneTrackerCfg {
     Vec3 q_xyz;
     double q_yaw;
     double q_roll;
-    double q_a_raw;
-    double q_w_raw;
+    double q_a;
+    double q_w;
     double q_tau;
-    double r_uv_cv;
-    double r_uv_net;
+    double r_sigma_pix_by_hand_length_ratio_cv;
+    double r_sigma_pix_by_hand_length_ratio_net;
     double match_gate;
     int voter_state_need_count;
     int voter_mode_need_count;
@@ -34,11 +34,13 @@ struct RuneTrackerCfg {
         q_xyz = Vec3(q_xyz_vec[0], q_xyz_vec[1], q_xyz_vec[2]);
         q_yaw = config["q_yaw"].as<double>();
         q_roll = config["q_roll"].as<double>();
-        q_a_raw = config["q_a_raw"].as<double>();
-        q_w_raw = config["q_w_raw"].as<double>();
+        q_a = config["q_a"].as<double>();
+        q_w = config["q_w"].as<double>();
         q_tau = config["q_tau"].as<double>();
-        r_uv_cv = config["r_uv_cv"].as<double>();
-        r_uv_net = config["r_uv_net"].as<double>();
+        r_sigma_pix_by_hand_length_ratio_cv =
+            config["r_sigma_pix_by_hand_length_ratio_cv"].as<double>();
+        r_sigma_pix_by_hand_length_ratio_net =
+            config["r_sigma_pix_by_hand_length_ratio_net"].as<double>();
         match_gate = config["match_gate"].as<double>();
         voter_state_need_count = config["voter_state_need_count"].as<int>();
         voter_mode_need_count = config["voter_mode_need_count"].as<int>();

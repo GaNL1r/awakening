@@ -57,7 +57,10 @@ inline Eigen::Matrix<T, 3, 3> car_rotation(const T x[X_N], ArmorClass armor_numb
     );
 }
 template<typename T>
-inline T armor_radius(const T x[X_N], int id, int armor_num) {
+inline T armor_radius(const T x[X_N], int id, int armor_num, ArmorClass armor_number) {
+    if (armor_number == ArmorClass::BASE) {
+        return T(0.0);
+    }
     const bool is_r2 = (armor_num == 4) && (id & 1);
     return ceres::exp(is_r2 ? x[idx::LOG_R2] : x[idx::LOG_R1]);
 }
@@ -76,7 +79,7 @@ armor_pose(const T x[X_N], int id, int armor_num, ArmorClass armor_number) {
     const T yaw = normalize_angle(T(id) * T(2.0 * M_PI / armor_num));
     const bool outpost = armor_number == ArmorClass::OUTPOST;
     const bool is_r2 = (armor_num == 4) && (id & 1);
-    const T r = armor_radius(x, id, armor_num);
+    const T r = armor_radius(x, id, armor_num, armor_number);
     const T ax = -ceres::cos(yaw) * r;
     const T ay = -ceres::sin(yaw) * r;
     T az = T(0);
@@ -464,7 +467,7 @@ struct State {
             std::chrono::duration_cast<TimePoint::duration>(std::chrono::duration<double>(dt));
     }
     inline double get_armor_r(int id, auto_aim::ArmorClass armor_number) const {
-        return armor_radius(x.data(), id, armor_num_by_armor_class(armor_number));
+        return armor_radius(x.data(), id, armor_num_by_armor_class(armor_number), armor_number);
     }
     inline void set_pos(const Vec3& p) noexcept {
         x[idx::CX] = p.x();
