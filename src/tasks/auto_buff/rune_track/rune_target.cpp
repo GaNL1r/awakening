@@ -380,6 +380,7 @@ std::optional<std::pair<bool, cv::Point2f>> RuneTarget::match_r(
         if (error > avg_hand_length * 0.2) {
             continue;
         }
+        
         if (error < min_cost) {
             min_cost = error;
             best_id = i;

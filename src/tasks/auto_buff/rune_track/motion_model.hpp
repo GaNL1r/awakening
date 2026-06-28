@@ -200,7 +200,6 @@ struct RMeasure {
 template<typename T>
 inline Eigen::Transform<T, 3, Eigen::Isometry> rune_pose(const T x[X_N], int id) {
     const T roll = normalize_angle(x[idx::ROLL] + T(id) * T(2.0 * M_PI / FAN_NUM));
-
     Eigen::Transform<T, 3, Eigen::Isometry> rune_in_odom =
         Eigen::Transform<T, 3, Eigen::Isometry>::Identity();
     rune_in_odom.translation() << x[idx::CX], x[idx::CY], x[idx::CZ];

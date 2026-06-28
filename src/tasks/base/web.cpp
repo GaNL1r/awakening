@@ -1,5 +1,6 @@
 #include "web.hpp"
 #include "tasks/auto_aim/armor_track/motion_model.hpp"
+#include "tasks/auto_buff/rune_track/motion_model.hpp"
 #include "tasks/auto_buff/type.hpp"
 #include "utils/common/type_common.hpp"
 #include "utils/utils.hpp"
@@ -86,6 +87,36 @@ struct Web::Impl {
                     }
                 }
             }
+            auto rune0_pose = auto_buff::motion_model::rune_pose(target_state.x.data(), 0);
+            auto vroll_in_rune = ISO3::Identity();
+            vroll_in_rune.translation().x() = target_state.v_roll(rune_target.voter)*2.0;
+            auto vroll_pose = odom_in_camera_cv * rune0_pose * vroll_in_rune;
+            rune0_pose = odom_in_camera_cv * rune0_pose;
+            auto center_image_points = utils::reprojection(
+                camera_info.camera_matrix,
+                camera_info.distortion_coefficients,
+                { cv::Point3f(0, 0, 0) },
+                rune0_pose
+            );
+            auto [rvec, tvec] = utils::eigen_iso3_to_rvec_tvec(rune0_pose);
+            cv::drawFrameAxes(
+                img,
+                camera_info.camera_matrix,
+                camera_info.distortion_coefficients,
+                rvec,
+                tvec,
+                0.1
+            );
+            auto vroll_image_points = utils::reprojection(
+                camera_info.camera_matrix,
+                camera_info.distortion_coefficients,
+                { cv::Point3f(0, 0, 0) },
+                vroll_pose
+            );
+            cv::Point2f center = center_image_points[0];
+            const cv::Point2f start_pt = center;
+            cv::Point2f end_pt = vroll_image_points[0];
+            cv::arrowedLine(img, start_pt, end_pt, cv::Scalar(50, 255, 50), 3, cv::LINE_AA, 0, 0.1);
             if (cmd.aim_point.pose.translation().z() > 0.1) {
                 auto aim_point_img_points = utils::reprojection(
                     camera_info.camera_matrix,
