@@ -161,6 +161,21 @@ inline std::vector<PointT> getArmorKeyPoints3D(ArmorClass armor_class) {
         return ArmorKeyPoint3D<PointT, ArmorType::SimpleSmall>::build();
     }
 }
+
+inline std::pair<double, double> getArmorWH(ArmorClass armor_class) {
+    auto armor_type = armor_type_by_armor_class(armor_class);
+    if (armor_type == ArmorType::Large) {
+        return std::make_pair(
+            ArmorKeyPoint3D<cv::Point3f, ArmorType::Large>::W,
+            ArmorKeyPoint3D<cv::Point3f, ArmorType::Large>::H
+        );
+    } else {
+        return std::make_pair(
+            ArmorKeyPoint3D<cv::Point3f, ArmorType::SimpleSmall>::W,
+            ArmorKeyPoint3D<cv::Point3f, ArmorType::SimpleSmall>::H
+        );
+    }
+}
 template<typename PointT>
 inline std::vector<PointT> getArmorLightKeyPoints3D(ArmorClass armor_class, bool left) {
     auto armor_type = armor_type_by_armor_class(armor_class);

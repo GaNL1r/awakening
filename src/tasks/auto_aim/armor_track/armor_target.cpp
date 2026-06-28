@@ -392,10 +392,9 @@ int ArmorTarget::update(
     };
 
     auto add_uva_obs = [&](Armor& a, int id) {
+        const auto key_points = a.key_points.landmarks();
         auto ctx = uvmeasure_ctx;
         ctx.id = id;
-        ctx.normalized = MEASURE_NORMALIZED;
-        const auto key_points = a.key_points.landmarks();
         auto l_length = cv::norm(
             key_points[ArmorKeyPointsIndex::LEFT_TOP] - key_points[ArmorKeyPointsIndex::LEFT_BOTTOM]
         );
@@ -404,47 +403,18 @@ int ArmorTarget::update(
             - key_points[ArmorKeyPointsIndex::RIGHT_BOTTOM]
         );
         auto avg_length = (l_length + r_length) / 2;
-        const auto u_r = [&](const Eigen::Matrix<double, UVLZ_N, 1>& z) {
-            Eigen::Matrix<double, UVLZ_N, UVLZ_N> r;
-            r.setZero();
-            const double sigma_px = cfg.r_sigma_px_by_length_ratio * avg_length;
-            double sigma_x = sigma_px;
-            double sigma_y = sigma_px;
-            if (MEASURE_NORMALIZED) {
-                sigma_x /= uvmeasure_ctx.camera_info.camera_fx();
-                sigma_y /= uvmeasure_ctx.camera_info.camera_fy();
-            }
-            double sigma_length = cfg.r_sigma_length_by_length_ratio * avg_length;
-            if (MEASURE_NORMALIZED) {
-                sigma_length /=
-                    ((uvmeasure_ctx.camera_info.camera_fx() + uvmeasure_ctx.camera_info.camera_fy())
-                     / 2.0);
-            }
-            double sigma_angle = cfg.r_sigma_angle;
-            sigma_angle *= std::cos(z(idx::UV_ANGLE));
-            r(idx::UV_ANGLE, idx::UV_ANGLE) = sigma_angle * sigma_angle / 2.0;
-            r(idx::UV_CENTER_X, idx::UV_CENTER_X) = sigma_x * sigma_x / 2.0;
-            r(idx::UV_CENTER_Y, idx::UV_CENTER_Y) = sigma_y * sigma_y / 2.0;
-            r(idx::UV_LENGTH, idx::UV_LENGTH) = sigma_length * sigma_length / 2.0;
-            return r;
-        };
-        ctx.is_left = true;
-        UVLMeasure measure_l { .ctx = ctx };
-        const auto observation_l = get_uvl_measurement(
+        add_uvl_obs(
             key_points[ArmorKeyPointsIndex::LEFT_TOP],
             key_points[ArmorKeyPointsIndex::LEFT_BOTTOM],
-            camera_info
+            id,
+            true
         );
-        obs.push_back(esekf->make_obs(observation_l, measure_l, u_r, cal_uvl_residual));
-        ctx.is_left = false;
-        UVLMeasure measure_r { .ctx = ctx };
-        const auto observation_r = get_uvl_measurement(
+        add_uvl_obs(
             key_points[ArmorKeyPointsIndex::RIGHT_TOP],
             key_points[ArmorKeyPointsIndex::RIGHT_BOTTOM],
-            camera_info
+            id,
+            false
         );
-        obs.push_back(esekf->make_obs(observation_r, measure_r, u_r, cal_uvl_residual));
-
         if (matched_armors.size() == 1 && armor_pnp(a, camera_info, camera_cv_in_odom)) {
             auto armor_pose_in_camera_cv = camera_cv_in_odom.inverse() * a.pose;
             auto object_points = getArmorKeyPoints3D<Vec3>(a.number);
@@ -466,8 +436,9 @@ int ArmorTarget::update(
             const auto u_r_diff = [&](const DiffVecZ& z) {
                 Eigen::Matrix<double, DIFFZ_N, DIFFZ_N> r;
                 r.setZero();
-                r(0, 0) = cfg.r_armor_lights_depth_diff;
-                // r(1, 1) = cfg.r_armor_lights_depth_diff;
+                auto r_sigma = cfg.r_sigma_armor_lights_depth_diff;
+                // / std::abs(z[0] / getArmorWH(target_number).first);
+                r(0, 0) = r_sigma * r_sigma / 2.0;
                 return r;
             };
             obs.push_back(esekf->make_obs(
