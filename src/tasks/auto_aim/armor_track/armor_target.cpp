@@ -48,7 +48,6 @@ namespace {
                 bottom
             );
         }
-
         const Eigen::Vector2d top_eigen(measurement_top.x, measurement_top.y);
         const Eigen::Vector2d bottom_eigen(measurement_bottom.x, measurement_bottom.y);
         UVLVecZ observation;
@@ -134,7 +133,7 @@ void ArmorTarget::reset(
     auto armor_in_odom = a.pose;
     auto armor_in_car = ISO3::Identity();
     const double r = r_pre;
-    armor_in_car.translation() << -r, 0, 0;
+    armor_in_car.translation() << -r, 0, 0; //yaw =0
     const double armor_pitch = (target_number == auto_aim::ArmorClass::OUTPOST)
         ? (-auto_aim::FIFTTEN_DEGREE_RAD)
         : (auto_aim::FIFTTEN_DEGREE_RAD);
@@ -203,7 +202,8 @@ bool ArmorTarget::armor_pnp(
         Vec3 t_eigen;
         cv::cv2eigen(tvecs[i], t_eigen);
         Vec3 front_normal = -axis_x;
-        if (front_normal.dot(-t_eigen) > 0) {
+        if (front_normal.dot(-t_eigen) > 0)
+        { //选择正面朝向相机，这里重投影误差已经进行过排序，所以直接break
             a.pose.translation() = t_eigen;
             a.pose.linear() = R_eigen;
             has_valid = true;
@@ -213,7 +213,7 @@ bool ArmorTarget::armor_pnp(
 
     auto armor_in_odom = camera_cv_in_odom * a.pose;
     a.pose = armor_in_odom;
-    if (a.number == auto_aim::ArmorClass::OUTPOST || !USE_WROT) {
+    if (a.number == auto_aim::ArmorClass::OUTPOST || !USE_WROT) { //不考虑整体旋转的目标
         auto rpy = utils::matrix2rpy<double>(a.pose.linear());
         auto obj_points = getArmorKeyPoints3D<cv::Point3f>(a.number);
         const double armor_pitch = (a.number == auto_aim::ArmorClass::OUTPOST)
@@ -233,10 +233,8 @@ bool ArmorTarget::armor_pnp(
                 a_pose_in_camera_cv
             );
 
-            double error = 0.0;
-            // for (int i = 0; i < img_points.size(); i++) {
-            //     error += cv::norm(img_points[i] - key_points[i]);
-            //     }
+            double error =
+                0.0; //因为识别角点垂直实际灯条的噪声对姿态影响最大，利用中点误差为其平均误差将其作为约束，这个思想与灯条观测设计思想一致
             error += cv::norm(
                 center(
                     img_points[ArmorKeyPointsIndex::LEFT_TOP],
@@ -265,7 +263,12 @@ bool ArmorTarget::armor_pnp(
         constexpr double HALF_RANGE_RAD = SEARCH_RANGE_DEG * CV_PI / 180.0 * 0.5;
         double left = rpy[2] - HALF_RANGE_RAD;
         double right = rpy[2] + HALF_RANGE_RAD;
-        double best_yaw = utils::golden_section_search(eval_yaw, left, right, 1e-4);
+        double best_yaw = utils::golden_section_search(
+            eval_yaw,
+            left,
+            right,
+            1e-4
+        ); //误差天然线性，直接使用黄金分割
         auto best_pose = a.pose;
         best_pose.linear() = utils::rpy2matrix(Vec3(0.0, armor_pitch, best_yaw));
         a.pose = best_pose;
@@ -289,7 +292,9 @@ Eigen::Matrix<double, X_N, X_N> ArmorTarget::process_noise(double dt) const noex
     const double dt2 = dt * dt;
     const double dt3 = dt2 * dt;
     const double dt4 = dt2 * dt2;
-    const Mat3 car_in_odom_R = whole_car_pose(target_state.x.data(), target_number).linear();
+    const Mat3 car_in_odom_R =
+        whole_car_pose(target_state.x.data(), target_number)
+            .linear(); //认为目标是地面轮式机器人运动，相对自身姿态的z运动强度小
     const Mat3 Q_acc_body = q_xyz_body.asDiagonal();
     const Mat3 Q_acc_odom = car_in_odom_R * Q_acc_body * car_in_odom_R.transpose();
     constexpr std::array<int, 3> pos_idx { idx::CX, idx::CY, idx::CZ };
@@ -303,7 +308,8 @@ Eigen::Matrix<double, X_N, X_N> ArmorTarget::process_noise(double dt) const noex
             q(vel_idx[i], vel_idx[j]) = dt2 * Q_acc_odom(i, j);
         }
     }
-    q(idx::VYAW, idx::VYAW) += dt2 * q_yaw;
+    q(idx::VYAW, idx::VYAW) +=
+        dt2 * q_yaw; //这里将误差设计为相对自身的旋转误差，所以q就是相对自身的运动
     q(idx::C_ROT_Z, idx::VYAW) += 0.5 * dt3 * q_yaw;
     q(idx::VYAW, idx::C_ROT_Z) += 0.5 * dt3 * q_yaw;
     q(idx::C_ROT_Z, idx::C_ROT_Z) += 0.25 * dt4 * q_yaw;
@@ -313,7 +319,7 @@ Eigen::Matrix<double, X_N, X_N> ArmorTarget::process_noise(double dt) const noex
             q(rot_idx[i], rot_idx[j]) += dt * Q_wpr_body(i, j);
         }
     }
-    q(idx::LOG_R1, idx::LOG_R1) = cfg.q_r / (target_state.r1() * target_state.r1());
+    q(idx::LOG_R1, idx::LOG_R1) = cfg.q_r / (target_state.r1() * target_state.r1()); //状态量为log
     if (target_number == ArmorClass::OUTPOST) {
         q(idx::OUTPOST01DZ, idx::OUTPOST01DZ) = cfg.q_outpost_dz;
         q(idx::OUTPOST02DZ, idx::OUTPOST02DZ) = cfg.q_outpost_dz;
@@ -365,12 +371,12 @@ int ArmorTarget::update(
         const auto u_r = [&](const Eigen::Matrix<double, UVLZ_N, 1>& z) {
             Eigen::Matrix<double, UVLZ_N, UVLZ_N> r;
             r.setZero();
-            auto length = cv::norm(top - bottom);
+            auto length = cv::norm(top - bottom); //用灯条长短描述位置误差的强度，可以线性可以log
             const double sigma_px = cfg.r_sigma_px_by_length_ratio * length;
             double sigma_x = sigma_px;
             double sigma_y = sigma_px;
             if (MEASURE_NORMALIZED) {
-                sigma_x /= uvmeasure_ctx.camera_info.camera_fx();
+                sigma_x /= uvmeasure_ctx.camera_info.camera_fx(); //将像素误差转换为归一化坐标误差
                 sigma_y /= uvmeasure_ctx.camera_info.camera_fy();
             }
             double sigma_length = cfg.r_sigma_length_by_length_ratio * length;
@@ -380,7 +386,8 @@ int ArmorTarget::update(
                      / 2.0);
             }
             double sigma_angle = cfg.r_sigma_angle;
-            sigma_angle *= std::cos(z(idx::UV_ANGLE));
+            sigma_angle *= std::cos(z(idx::UV_ANGLE)
+            ); //越接近垂直上下点的垂直灯条方向偏移越大，这个实际还是需要考虑遮挡模型
             r(idx::UV_ANGLE, idx::UV_ANGLE) = sigma_angle * sigma_angle / 2.0;
             r(idx::UV_CENTER_X, idx::UV_CENTER_X) = sigma_x * sigma_x / 2.0;
             r(idx::UV_CENTER_Y, idx::UV_CENTER_Y) = sigma_y * sigma_y / 2.0;
@@ -395,14 +402,6 @@ int ArmorTarget::update(
         const auto key_points = a.key_points.landmarks();
         auto ctx = uvmeasure_ctx;
         ctx.id = id;
-        auto l_length = cv::norm(
-            key_points[ArmorKeyPointsIndex::LEFT_TOP] - key_points[ArmorKeyPointsIndex::LEFT_BOTTOM]
-        );
-        auto r_length = cv::norm(
-            key_points[ArmorKeyPointsIndex::RIGHT_TOP]
-            - key_points[ArmorKeyPointsIndex::RIGHT_BOTTOM]
-        );
-        auto avg_length = (l_length + r_length) / 2;
         add_uvl_obs(
             key_points[ArmorKeyPointsIndex::LEFT_TOP],
             key_points[ArmorKeyPointsIndex::LEFT_BOTTOM],
@@ -415,8 +414,9 @@ int ArmorTarget::update(
             id,
             false
         );
-        if (matched_armors.size() == 1 && armor_pnp(a, camera_info, camera_cv_in_odom)) { //单个装甲板容易退化，使状态被时间误导，这里用ippe解出的深度差进行约束
-            auto armor_pose_in_camera_cv = camera_cv_in_odom.inverse() * a.pose;
+        if (matched_armors.size() == 1 && armor_pnp(a, camera_info, camera_cv_in_odom))
+        { //单个装甲板容易退化，使状态被时间误导，这里用ippe解出的深度差进行约束
+            auto armor_pose_in_camera_cv = camera_cv_in_odom.inverse() * a.pose; //转回相机
             auto object_points = getArmorKeyPoints3D<Vec3>(a.number);
             auto point_in_camera = [&](ArmorKeyPointsIndex index) -> Vec3 {
                 const auto& p = object_points[std::to_underlying(index)];
@@ -432,18 +432,17 @@ int ArmorTarget::update(
             DiffVecZ observation_diff;
             observation_diff << depth_diff;
             DiffMeasure measure_diff { .ctx = ctx };
-            const auto u_r_diff = [&](const DiffVecZ& z) {
-                Eigen::Matrix<double, DIFFZ_N, DIFFZ_N> r;
-                r.setZero();
-                auto r_sigma = cfg.r_sigma_armor_lights_depth_diff;
-                // / std::abs(z[0] / getArmorWH(target_number).first);
-                r(0, 0) = r_sigma * r_sigma / 2.0;
-                return r;
-            };
             obs.push_back(esekf->make_obs(
                 observation_diff,
                 measure_diff,
-                u_r_diff,
+                [&](const DiffVecZ& z) {
+                    Eigen::Matrix<double, DIFFZ_N, DIFFZ_N> r;
+                    r.setZero();
+                    auto r_sigma = cfg.r_sigma_armor_lights_depth_diff;
+                    // / std::abs(z[0] / getArmorWH(target_number).first); //实际触发到这里的情况深度差都不大，这么映射太猛了
+                    r(0, 0) = r_sigma * r_sigma / 2.0;
+                    return r;
+                },
                 [](const DiffVecZ& z_pred, const DiffVecZ& z) {
                     return DiffMeasure::residual(z_pred, z);
                 }
@@ -470,7 +469,6 @@ int ArmorTarget::update(
             last_match_id = id;
             used_id[id] = true;
             add_uva_obs(armor, id);
-            // add_ypd_obs(armor, id);
         }
     }
 
@@ -528,7 +526,10 @@ std::vector<std::pair<int, Armor>> ArmorTarget::match_armor(
         angle_dis_in_camera_cv.end(),
         [](const auto& a, const auto& b) { return a.first > b.first; }
     );
-    const auto visible_count = std::min<std::size_t>(3, angle_dis_in_camera_cv.size());
+    const auto visible_count = std::min<std::size_t>(
+        3,
+        angle_dis_in_camera_cv.size()
+    ); //前3个和正对差小的
     for (std::size_t i = 0; i < visible_count; ++i) {
         maybe_visible.push_back(angle_dis_in_camera_cv[i].second);
     }
@@ -551,7 +552,7 @@ std::vector<std::pair<int, Armor>> ArmorTarget::match_armor(
     for (int j = 0; j < n_obs; ++j) {
         bool in_gate = false;
         double min_total_cost = std::numeric_limits<double>::max();
-        for (std::size_t i = 0; i < maybe_visible.size(); ++i) {
+        for (std::size_t i = 0; i < maybe_visible.size(); ++i) { //抽象为4边形和4边形匹配
             const int id = maybe_visible[i];
 
             const auto left_light =
@@ -574,11 +575,11 @@ std::vector<std::pair<int, Armor>> ArmorTarget::match_armor(
             }
             cp *= 0.25f;
             cm *= 0.25f;
-            double center_err = cv::norm(cp - cm);
+            double center_err = cv::norm(cp - cm);//整体位置误差
             auto angle = [&](const cv::Point2f& p1, const cv::Point2f& p2) {
                 return std::atan2(p2.y - p1.y, p2.x - p1.x);
             };
-            double angle_err = 0;
+            double angle_err = 0; //每条边的角度差，表现姿态
             for (int k = 0; k < 4; ++k) {
                 angle_err += std::abs(angles::normalize_angle(
                     angle(pred[k], pred[(k + 1) % 4]) - angle(meas[k], meas[(k + 1) % 4])
@@ -591,7 +592,7 @@ std::vector<std::pair<int, Armor>> ArmorTarget::match_armor(
                 side_length_m += cv::norm(meas[k] - meas[(k + 1) % 4]);
                 side_length_p += cv::norm(pred[k] - pred[(k + 1) % 4]);
             }
-            side_length_err = std::abs(side_length_p - side_length_m) / side_length_p;
+            side_length_err = std::abs(side_length_p - side_length_m) / side_length_p; //边长差，表现距离缩放
             double total_cost = cfg.armor_match_w_center_err * center_err
                 + cfg.armor_match_w_angle_err * angle_err
                 + cfg.armor_match_w_side_length_err * side_length_err;
@@ -610,62 +611,6 @@ std::vector<std::pair<int, Armor>> ArmorTarget::match_armor(
             AWAKENING_WARN("match out of gate min total cost: {}", min_total_cost);
         }
     }
-    // std::vector<std::pair<UVVecZ, UVVecZ>> meas_list(n_obs);
-    // for (int i = 0; i < n_obs; ++i) {
-    //     auto key_points = armors[i].key_points.landmarks();
-    //     meas_list[i].first = get_uv_measurement(
-    //         key_points[ArmorKeyPointsIndex::LEFT_TOP],
-    //         key_points[ArmorKeyPointsIndex::LEFT_BOTTOM],
-    //         camera_info
-    //     );
-    //     meas_list[i].second = get_uv_measurement(
-    //         key_points[ArmorKeyPointsIndex::RIGHT_TOP],
-    //         key_points[ArmorKeyPointsIndex::RIGHT_BOTTOM],
-    //         camera_info
-    //     );
-    // }
-    // for (int j = 0; j < n_obs; ++j) {
-    //     bool in_gate = false;
-    //     double min_d2 = std::numeric_limits<double>::max();
-    //     for (std::size_t i = 0; i < maybe_visible.size(); ++i) {
-    //         const int id = maybe_visible[i];
-    //         auto ctx = uvmeasure_ctx;
-    //         ctx.id = id;
-    //         ctx.camera_cv_in_odom = camera_cv_in_odom;
-    //         ctx.is_left = true;
-    //         UVMeasure measure { .ctx = ctx };
-    //         UVVecZ z_pred_l;
-    //         measure.h(pred_state.x, z_pred_l);
-    //         auto nu_l = UVMeasure::residual(z_pred_l, meas_list[j].first);
-    //         ctx.is_left = false;
-    //         UVMeasure measure_right { .ctx = ctx };
-    //         UVVecZ z_pred_r;
-    //         measure_right.h(pred_state.x, z_pred_r);
-    //         auto nu_r = UVMeasure::residual(z_pred_r, meas_list[j].second);
-    //         auto R_l = uvmeasurement_covariance(z_pred_l);
-    //         auto R_r = uvmeasurement_covariance(z_pred_r);
-    //         Eigen::VectorXd nu(nu_l.size() + nu_r.size());
-    //         nu << nu_l, nu_r;
-    //         Eigen::MatrixXd R(R_l.rows() + R_r.rows(), R_l.cols() + R_r.cols());
-    //         R.setZero();
-    //         R.topLeftCorner(R_l.rows(), R_l.cols()) = R_l;
-    //         R.bottomRightCorner(R_r.rows(), R_r.cols()) = R_r;
-    //         double d2 = nu.transpose() * R.ldlt().solve(nu);
-
-    //         if (std::isfinite(d2)
-    //             && d2 < (!all_init ? cfg.armor_match_gate_not_all_init : cfg.armor_match_gate))
-    //         {
-    //             cost[j][i] = d2;
-    //             in_gate = true;
-    //         }
-    //         if (d2 < min_d2) {
-    //             min_d2 = d2;
-    //         }
-    //     }
-    //     if (!in_gate) {
-    //         AWAKENING_WARN("match out of gate min d2: {}", min_d2);
-    //     }
-    // }
     for (auto [obs, i]: dta_utils::greedy_match(cost, n_obs, maybe_visible.size(), MAX_COST)) {
         result.emplace_back(maybe_visible[i], armors[obs]);
     }
@@ -697,7 +642,6 @@ std::vector<std::tuple<int, bool, Light>> ArmorTarget::match_light(
     if (target_number == ArmorClass::BASE || matched_armors.empty()) {
         return {};
     }
-    // return {};
     auto pred_state = target_state;
     pred_state.predict(timestamp, target_number);
     const int armors_num = armor_num();
@@ -733,10 +677,10 @@ std::vector<std::tuple<int, bool, Light>> ArmorTarget::match_light(
     const auto closest = std::min_element(
         angle_dis_in_camera_cv.begin(),
         angle_dis_in_camera_cv.end(),
-        [](const auto& a, const auto& b) { return a.first > b.first; }
+        [](const auto& a, const auto& b) { return a.first > b.first; } //最正对那个，还是需要遮挡模型更好
     );
-    maybe_visible((closest->second + armors_num - 1) % armors_num, false);
-    maybe_visible((closest->second + 1) % armors_num, true);
+    maybe_visible((closest->second + armors_num - 1) % armors_num, false);//左边板子右灯条
+    maybe_visible((closest->second + 1) % armors_num, true); // 右边板子左灯条
     maybe_visible(closest->second, false);
     maybe_visible(closest->second, true);
     return match_light(lights, matched_armors, visible_lights);
@@ -756,17 +700,11 @@ std::vector<std::tuple<int, bool, Light>> ArmorTarget::match_light(
         n_obs,
         std::vector<double>(visible_lights.size(), MAX_COST + 1)
     );
-    auto calc_cost =
+    auto calc_cost = //灯条没有数字特征，这里严格进行门控，使用位置匹配
         [&](const Light& light,
             const std::tuple<int, bool, std::pair<cv::Point2f, cv::Point2f>>& visible_light
         ) -> double {
         const auto& pred = std::get<2>(visible_light);
-        // for (const auto& [_, armor]: matched_armors) {
-        //     if (!is_light_separate_from_armor(armor.key_points, light)) {
-        //         return MAX_COST + 1;
-        //     }
-        // }
-
         const double pred_len = cv::norm(pred.first - pred.second);
         const double len_err = std::abs(light.length - pred_len);
         if (len_err > pred_len * cfg.light_match_length_ratio_gate) {
