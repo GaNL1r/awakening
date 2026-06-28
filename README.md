@@ -143,32 +143,32 @@ flowchart TD
         AT2 --> AT21["选择有效装甲板<br/>过滤 NONE / PURPLE / 低质量目标"]
         AT21 --> AT22["IPPE PnP 初始化装甲板位姿<br/>前哨站做 yaw 搜索修正"]
         AT22 --> AT23["由装甲板位姿 + 预设半径<br/>反推整车位姿"]
-        AT23 --> AT24["初始化 ArmorTarget ESEKF<br/>x = cx vcx cy vcy cz vcz rot_z vyaw r p1 p2 rot_y rot_x"]
+        AT23 --> AT24["初始化 ArmorTarget ESEKF<br/>x = cx vcx cy vcy cz vcz rot_z vyaw log_r1 log_r2 h rot_y rot_x"]
         AT24 --> AT25["初始化目标编号 / frame_id / last_update<br/>TrackState -> DETECTING"]
 
         AT1 -->|"否"| AT3["update_target"]
         AT3 --> AT31["按已跟踪目标数字过滤候选装甲板<br/>保留同类且颜色有效观测"]
-        AT31 --> AT32["predict_ekf<br/>常速度平移 + SO(3) 右乘 yaw 增量<br/>右不变 SE(3) 误差线性化"]
+        AT31 --> AT32["predict_ekf<br/>常速度平移 + SO(3) 右乘 yaw 增量<br/>姿态右乘误差线性化"]
         AT32 --> AT33["生成整车几何预测<br/>T_car_odom = t(cx,cy,cz) * Exp_SO3(rot)<br/>逐编号生成 T_armor_odom"]
         AT33 --> AT34["match_armor"]
-        AT34 --> AT341["每个候选装甲板做 IPPE PnP<br/>仅用于粗匹配和门控"]
-        AT341 --> AT342["构造 YPD + SO(3) 观测<br/>yaw / pitch / distance / Log(R)"]
-        AT342 --> AT343["与预测编号装甲板比较<br/>角度 wrap + Log(R_meas R_pred^T)<br/>马氏距离门控"]
-        AT343 --> AT344["greedy_match<br/>得到 matched_armors"]
+        AT34 --> AT341["按法向可见性选取最多 3 块预测装甲板"]
+        AT341 --> AT342["预测左右灯条端点<br/>组成装甲板四点轮廓"]
+        AT342 --> AT343["与检测四点比较<br/>中心误差 / 边角度误差 / 周长比例误差"]
+        AT343 --> AT344["加权代价门控 + greedy_match<br/>得到 matched_armors"]
 
         AT344 --> AT35["match_light"]
-        AT35 --> AT351{"是否只有一块完整装甲板<br/>且目标非基地?"}
+        AT35 --> AT351{"是否已有完整装甲板匹配<br/>且目标非基地?"}
         AT351 -->|"否"| AT354["matched_lights 为空"]
-        AT351 -->|"是"| AT352["预测相邻可见单灯条<br/>左相邻 / 右相邻"]
+        AT351 -->|"是"| AT352["按法向选择最可见装甲板<br/>预测自身左右灯条 + 相邻单灯条"]
         AT352 --> AT353["长度比例门控 / 角度门控 / 位置门控<br/>以端点位置差为代价贪心匹配"]
         AT353 --> AT36["ArmorTarget::update"]
         AT354 --> AT36
 
         AT36 --> AT361{"matched_armors 是否为空?"}
         AT361 -->|"是"| AT365["本帧不更新 ESEKF<br/>仅推进跟踪状态机"]
-        AT361 -->|"否"| AT362["完整装甲板拆成左右灯条 UV 观测<br/>每条观测: top_x top_y bottom_x bottom_y"]
-        AT362 --> AT363["单独灯条构造 UV 观测<br/>未被完整装甲板占用时参与更新"]
-        AT363 --> AT364["update_multi<br/>拼接多观测 ESEKF<br/>最小化像素重投影残差"]
+        AT361 -->|"否"| AT362["完整装甲板拆成左右灯条 UVL 观测<br/>每条观测: angle center_x center_y length"]
+        AT362 --> AT363["单独灯条构造 UVL 观测<br/>未被完整装甲板占用时参与更新"]
+        AT363 --> AT364["单完整装甲板额外加入左右灯条深度差观测<br/>update_multi 最小化重投影几何残差"]
         AT364 --> AT366["更新整车状态 / 协方差 / last_update<br/>写入 Web armor_target 日志"]
         AT365 --> AT37["update_fsm"]
         AT366 --> AT37
@@ -304,10 +304,10 @@ RoboMaster 机器人受机械结构和规则约束，装甲板在车体上呈现
 跟踪器使用误差状态扩展卡尔曼滤波器 `ErrorStateEKF`。状态定义在 `src/tasks/auto_aim/armor_track/motion_model.hpp`：
 
 ```text
-x = [cx, vcx, cy, vcy, cz, vcz, rot_z, vyaw, r, p1, p2, rot_y, rot_x]^T
+x = [cx, vcx, cy, vcy, cz, vcz, rot_z, vyaw, log_r1, log_r2, h, rot_y, rot_x]^T
 ```
 
-其中 `c = (cx, cy, cz)` 表示整车中心位置，`v = (vcx, vcy, vcz)` 表示整车速度。`rot_x/rot_y/rot_z` 共同描述车体姿态的 `SO(3)` 旋转向量，`vyaw` 表示绕车体系 z 轴的角速度，用于预测阶段推进 yaw 方向运动。`r` 表示装甲板到车体中心的基础半径；`p1/p2` 在普通四装甲目标中描述长短轴差和高度差，在前哨站目标中描述两层装甲板的高度偏移。基地和前哨站目标采用退化模型，约束 `rot_x/rot_y`，只估计主要 yaw 方向。
+其中 `c = (cx, cy, cz)` 表示整车中心位置，`v = (vcx, vcy, vcz)` 表示整车速度。`rot_x/rot_y/rot_z` 共同描述车体姿态的 `SO(3)` 旋转向量，`vyaw` 表示绕车体系 z 轴的角速度，用于预测阶段推进 yaw 方向运动。`log_r1/log_r2` 表示装甲板到车体中心半径的对数形式，普通四装甲目标用奇偶编号区分长短半径，`h` 描述另一组装甲板的高度差。前哨站复用 `log_r1/log_r2/h` 中的后两个槽位作为 `OUTPOST01DZ/OUTPOST02DZ`，并把半径约束到固定前哨站半径。基地和前哨站目标采用退化模型，约束 `rot_x/rot_y`，只估计主要 yaw 方向。
 
 当前车体位姿生成顺序为：
 
@@ -316,23 +316,24 @@ T_car_odom.translation = [cx, cy, cz]^T
 R_car_odom = Exp_SO3([rot_x, rot_y, rot_z])
 ```
 
-预测时先由旋转向量恢复 `R_car_odom`，再右乘 `Exp_SO3([0, 0, vyaw * dt])` 推进车体姿态。滤波误差状态对整车位姿使用右不变 SE(3) 扰动：
+预测时先由旋转向量恢复 `R_car_odom`，再右乘 `Exp_SO3([0, 0, vyaw * dt])` 推进车体姿态。当前实现对姿态使用右乘 `SO(3)` 误差注入，平移、速度、半径和高度等状态仍使用欧氏加法：
 
 ```text
-T_car_odom <- T_car_odom * Exp_SE3(delta_rho, delta_rot)
-delta = Log_SE3(T_nominal^-1 * T_value)
+R_car_odom <- R_car_odom * Exp_SO3(delta_rot)
+p_car_odom <- p_car_odom + delta_p
+delta_rot = Log_SO3(R_nominal^T * R_value)
 ```
 
-这里 `inject(delta, x)` 表示把误差状态注入名义状态，`box_minus(x_nominal, x_value)` 表示从两个名义状态反推出误差状态。普通欧氏状态可以直接相减，但 SE(3) 位姿不能做元素级相减，因此位姿误差使用 `Log_SE3(T_nominal^-1 * T_value)` 表达。二者是一组互逆关系：
+这里 `inject(delta, x)` 表示把误差状态注入名义状态，`box_minus(x_nominal, x_value)` 表示从两个名义状态反推出误差状态。普通欧氏状态直接相加/相减，姿态误差使用 `Log_SO3(R_nominal^T * R_value)` 表达。二者是一组互逆关系：
 
 ```text
 x_value = inject(delta, x_nominal)
 delta   = box_minus(x_nominal, x_value)
 ```
 
-右不变扰动的核心作用，是让姿态误差作用在目标自身的切空间内，避免左乘扰动把远距离目标绕 odom 原点旋转而放大位置误差。采用该误差定义后，`ErrorStateEKF` 通过 `inject / box_minus` 对预测误差传播 `F` 和多观测更新 `H` 做数值线性化，使协方差、残差和注入操作保持在同一误差坐标中。
+右乘姿态扰动的核心作用，是让姿态误差作用在目标自身的切空间内，避免把旋转向量当作普通三维欧氏量直接相减。采用该误差定义后，`ErrorStateEKF` 通过 `inject / box_minus` 对预测误差传播 `F` 和多观测更新 `H` 做数值线性化，使协方差、残差和注入操作保持在同一误差坐标中。
 
-预测传播时，滤波器先扰动上一时刻名义状态，再分别预测，并用 `box_minus` 把两个预测结果的差转换回右不变误差坐标：
+预测传播时，滤波器先扰动上一时刻名义状态，再分别预测，并用 `box_minus` 把两个预测结果的差转换回当前误差坐标：
 
 ```text
 x_pert      = inject(delta_i, x_prev)
@@ -341,17 +342,17 @@ x_pert_pred = f(x_pert)
 F_i         = box_minus(x_pred, x_pert_pred) / eps
 ```
 
-多观测更新时，滤波器同样对误差状态做中心差分，得到与当前注入方式一致的观测雅可比 `H`。相比直接对状态数组做自动微分，这种方式计算量更高，但避免了“SE(3) 注入 + 欧氏雅可比”混用造成的不一致。
+多观测更新时，滤波器同样对误差状态做中心差分，得到与当前注入方式一致的观测雅可比 `H`。相比直接把旋转向量当作普通三维量做差，这种方式计算量更高，但避免了姿态注入和欧氏雅可比混用造成的不一致。
 
-过程噪声分为平移和姿态两部分。平移加速度噪声按 car 坐标系前后、左右、上下定义；右不变位置误差 `delta_rho` 位于 car 切空间，而速度状态仍位于 odom 坐标系，因此构造 `Q` 时位置块、速度块和位置-速度交叉块分别为：
+过程噪声分为平移和姿态两部分。平移加速度噪声按 car 坐标系前后、左右、上下配置，构造 `Q` 时先通过当前车体姿态旋转到 odom 坐标系，再按常加速度模型填入位置、速度和交叉项：
 
 ```text
 Q_accel_car  = diag(q_xyz)
 Q_accel_odom = R_car_odom * Q_accel_car * R_car_odom^T
-Q_rho_rho = 1/4 dt^4 Q_accel_car
-Q_rho_v   = 1/2 dt^3 Q_accel_car * R_car_odom^T
-Q_v_rho   = 1/2 dt^3 R_car_odom * Q_accel_car
-Q_v_v     = dt^2 Q_accel_odom
+Q_p_p = 1/4 dt^4 Q_accel_odom
+Q_p_v = 1/2 dt^3 Q_accel_odom
+Q_v_p = 1/2 dt^3 Q_accel_odom
+Q_v_v = dt^2 Q_accel_odom
 ```
 
 姿态误差同样位于 car 切空间。模型只显式估计 `vyaw`，因此 yaw 角加速度噪声按绕车体系 z 轴的常角加速度模型填入 `rot_z / vyaw` 块：
@@ -362,19 +363,19 @@ Q_rot_z_vyaw  += 1/2 dt^3 q_yaw
 Q_vyaw_vyaw += dt^2 q_yaw
 ```
 
-`q_wpr` 作为非 yaw 姿态漂移强度，以 `dt * q_wpr` 的形式加到 `rot_x/rot_y` 对角项，用于吸收车体 roll/pitch 小幅误差、地面坡度和外参残差。这个设计保留了单一 `vyaw` 的轻量运动模型，同时让位姿注入、过程噪声和滤波线性化都与右不变 InEKF 的误差定义保持一致。
+`q_wpr` 作为非 yaw 姿态漂移强度，以 `dt * q_wpr` 的形式加到 `rot_x/rot_y` 对角项，用于吸收车体 roll/pitch 小幅误差、地面坡度和外参残差。这个设计保留了单一 `vyaw` 的轻量运动模型，同时让姿态注入、过程噪声和滤波线性化保持在一致的误差定义中。
 
 对于第 `i` 块装甲板，其相对车体中心的位置由整车状态直接给出：
 
 ```text
 theta_i = i * 2pi / armor_num
-r_i = r 或 r + p1
+r_i = exp(log_r1) 或 exp(log_r2)
 p_i_car = [-r_i cos(theta_i), -r_i sin(theta_i), dz_i]^T
 R_armor_car = Rz(theta_i) * Ry(armor_pitch)
 T_armor_odom = T_car_odom * T_armor_car
 ```
 
-这一步把“装甲板跳变”转化为确定的刚体几何关系。无论当前看到的是正面装甲板、侧面装甲板，还是相邻装甲板的一条灯条，它们本质上都是同一个整车状态在不同位置上的投影。只要观测能匹配到对应编号，就可以共同约束同一个状态向量。
+普通四装甲目标中奇数编号使用 `log_r2` 和高度差 `h`，偶数编号使用 `log_r1` 且高度差为 0；前哨站的 1、2 号装甲板使用独立高度偏移。这一步把“装甲板跳变”转化为确定的刚体几何关系。无论当前看到的是正面装甲板、侧面装甲板，还是相邻装甲板的一条灯条，它们本质上都是同一个整车状态在不同位置上的投影。只要观测能匹配到对应编号，就可以共同约束同一个状态向量。
 
 观测模型直接工作在图像平面。对某块装甲板或某条灯条，算法根据当前状态生成对应三维位姿，再通过相机模型投影到图像坐标：
 
@@ -383,7 +384,17 @@ z_hat = project(camera, T_camera_odom^-1 * T_armor_i(x) * P)
 residual = z_observed - z_hat
 ```
 
-这里 `z_observed` 是检测器给出的真实角点或灯条端点，`z_hat` 是当前整车状态预测出的图像位置。完整装甲板在更新时会拆成左右两条灯条 UV 观测，单独灯条也可以作为局部观测参与更新。滤波器最小化的不是 PnP 后的三维位姿误差，而是更接近传感器原始测量的图像重投影误差。
+这里 `z_observed` 是检测器给出的真实灯条端点整理出的观测，`z_hat` 是当前整车状态预测出的图像位置。实现中每条灯条会被转换为 `UVL = [angle, center_x, center_y, length]`，角度残差做 `+-pi` 归一化；完整装甲板在更新时会拆成左右两条灯条 UVL 观测，单独灯条也可以作为局部观测参与更新。滤波器最小化的不是 PnP 后的三维位姿误差，而是更接近传感器原始测量的图像重投影几何残差。
+
+当本帧只有一块完整装甲板完成匹配时，单靠这块装甲板拆出的两条 UVL 观测容易出现退化：图像上的中心、长度和角度可以约束投影形状，但对装甲板左右两侧谁更靠近相机、整车 yaw/roll/pitch 应该如何分摊并不总是敏感。此时滤波器可能更依赖上一时刻预测，把状态沿时间方向“带过去”，在切板或大角度斜视时表现为姿态被预测误导。
+
+为补上这个约束，`ArmorTarget::update()` 在 `matched_armors.size() == 1` 且 `armor_pnp()` 成功时，会额外构造一个一维 `DiffMeasure`。它先用 IPPE 解出当前完整装甲板在相机坐标系下的位姿，再计算左、右灯条中心点的深度差：
+
+```text
+depth_diff = z(left_light_center_in_camera) - z(right_light_center_in_camera)
+```
+
+这个量不直接把 IPPE 的完整三维位姿写进滤波器，只取“左右灯条哪个更靠前、相差多少”这一维几何信息。滤波器的预测观测同样由当前整车状态生成左右灯条中心深度差，然后用 `depth_diff` 残差更新状态；观测噪声由 `r_sigma_armor_lights_depth_diff` 配置。这样可以在单装甲板场景下给车体姿态增加一个独立约束，抑制共面 PnP 和纯图像重投影在斜视角下的歧义，同时避免过度相信 IPPE 的绝对位置和姿态。
 
 从数学上看，多观测更新可以写成：
 
@@ -401,11 +412,11 @@ delta_x = K (z - h(x))
 x <- inject(delta_x, x)
 ```
 
-这里的 `delta_x` 是误差状态，不是普通状态增量。对位姿部分，`delta_x` 中的 `delta_rho/delta_rot` 会通过 `Exp_SE3` 右乘到整车位姿；对速度、半径和高度等欧氏量，则继续使用普通加法注入。
+这里的 `delta_x` 是误差状态，不是普通状态增量。对姿态部分，`delta_x` 中的 `delta_rot` 会通过 `Exp_SO3` 右乘到整车姿态；对位置、速度、半径和高度等欧氏量，则继续使用普通加法注入。
 
 当一帧中加入更多有效观测时，`H^T R^-1 H` 提供的信息量增加，后验状态的不确定性会下降。也就是说，同时利用装甲板和灯条不是简单堆叠特征点，而是在滤波框架内增加了对整车状态的独立约束。
 
-为避免错误观测进入滤波器，跟踪器使用门控贪心匹配。完整装甲板先通过 IPPE PnP 得到粗位姿，再构造 yaw、pitch、distance 与 SO(3) 旋转观测用于编号匹配；角度残差会做跨 `+-pi` 归一化，旋转残差使用 `Log(R_meas * R_pred^T)` 表达。单独灯条则根据预测端点检查长度、倾角和位置门限，并以端点距离作为匹配代价。只有通过门控的装甲板和灯条才会进入 `update_multi`。
+为避免错误观测进入滤波器，跟踪器使用门控贪心匹配。完整装甲板匹配时，算法先根据预测装甲板在相机坐标系下的法向可见性选出最多 3 个候选编号，再把每个候选编号的左右灯条端点投影成四点轮廓，与检测四点计算中心误差、边角度误差和周长比例误差；三项按配置权重加权后进入门控和 `greedy_match`。当前实现中 IPPE PnP 主要用于初始化和单完整装甲板的深度差观测，不再作为常规编号匹配的核心代价。单独灯条则根据预测端点检查长度、倾角和位置门限，并以端点距离作为匹配代价。只有通过门控的装甲板和灯条才会进入 `update_multi`。
 
 因此，本项目的“整车”状态估计不是简单的“先 PnP 再滤波”，而是把整车几何约束前移到观测模型中：由整车状态直接生成装甲板和灯条的图像预测，再用真实图像点反向修正整车状态。在比赛场景中，这种设计带来更高的观测利用率、更稳定的切板过程，以及更好的遮挡和远距离鲁棒性。
 
@@ -413,9 +424,9 @@ x <- inject(delta_x, x)
 
 大多数RoboMaster 视觉算法使用的神经网络模型都采用固定尺寸输入，需要在输入神经网络前通常需要对工业相机图像进行缩放、填充或裁剪。常见做法是使用 `letterbox`：在保持原图长宽比的前提下，将图像缩放到网络输入尺寸，再用 `padding` 补齐空白区域。该方法能避免几何形变，但也带来一个问题：工业相机图像的长宽比通常与网络输入长宽比不一致，整幅图经过 `letterbox` 后往往会被整体缩小，远距离装甲板本来只占很少像素，缩放后有效纹理和边缘信息进一步减少，导致关键点回归、分类和置信度都会下降。
 
-我们利用“整车”状态估计提供的几何先验，在检测阶段引入一种显式的空间注意力机制。不再把整张图像无差别地送入检测器，而是根据当前整车状态、相机外参和时间戳预测，将目标在当前图像中的可能区域重投影出来，并构造与神经网络输入比例一致的 ROI。这样网络输入关注的是目标高概率出现区域，而不是包含大量背景的整幅图像。
+我们利用“整车”状态估计提供的几何先验，在检测阶段引入一种显式的空间注意力机制。不再把整张图像无差别地送入检测器，而是根据当前整车状态、相机外参和时间戳预测，将目标在当前图像中的可能区域重投影出来，并构造随跟踪置信度自适应变化的 ROI。这样网络输入关注的是目标高概率出现区域，而不是包含大量背景的整幅图像。
 
-代码中这一逻辑由 `ArmorTarget::get_net_focus_roi()` 提供。目标跟踪稳定后，`expanded()` 会预测所有装甲板左右灯条端点在图像中的位置，生成包围框并进行比例扩展；随后按网络输入宽高比修正 ROI。应用层会把这个 ROI 传给 `ArmorDetector`，网络推理在 ROI 内执行，检测结果再通过变换矩阵和 ROI 偏移回到原图坐标。
+代码中这一逻辑由 `ArmorTarget::get_net_focus_roi()` 提供。目标跟踪稳定后，`expanded()` 会预测所有装甲板左右灯条端点在图像中的位置，生成包围框并进行比例扩展；随后先按网络输入宽高比修正 ROI，再扩成方形搜索区域。若目标长时间未更新，ROI 会按 `lost_time_thres` 从当前预测区域逐步扩大到整图，避免预测漂移后彻底丢失目标。应用层会把这个 ROI 传给 `ArmorDetector`，网络推理在 ROI 内执行，检测结果再通过变换矩阵和 ROI 偏移回到原图坐标。
 
 对于神经网络识别链路，这种 ROI 机制有两个直接收益。第一，ROI 的长宽比可以主动匹配网络输入，减少 letterbox padding 和无效背景区域，使输入像素更多用于描述目标本身。第二，当目标距离较远时，ROI 裁剪后再 resize 到网络输入尺寸，相当于对目标区域进行局部放大，保留并增强远距离小目标的灯条边缘、数字区域和角点结构。
 

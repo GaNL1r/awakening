@@ -415,7 +415,7 @@ int ArmorTarget::update(
             id,
             false
         );
-        if (matched_armors.size() == 1 && armor_pnp(a, camera_info, camera_cv_in_odom)) {
+        if (matched_armors.size() == 1 && armor_pnp(a, camera_info, camera_cv_in_odom)) { //单个装甲板容易退化，使状态被时间误导，这里用ippe解出的深度差进行约束
             auto armor_pose_in_camera_cv = camera_cv_in_odom.inverse() * a.pose;
             auto object_points = getArmorKeyPoints3D<Vec3>(a.number);
             auto point_in_camera = [&](ArmorKeyPointsIndex index) -> Vec3 {
@@ -430,7 +430,6 @@ int ArmorTarget::update(
                 / 2.0;
             const double depth_diff = left_center.z() - right_center.z();
             DiffVecZ observation_diff;
-            // observation_diff << left_center.z(), right_center.z();
             observation_diff << depth_diff;
             DiffMeasure measure_diff { .ctx = ctx };
             const auto u_r_diff = [&](const DiffVecZ& z) {
