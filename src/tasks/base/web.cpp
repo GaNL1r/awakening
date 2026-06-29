@@ -89,7 +89,7 @@ struct Web::Impl {
             }
             auto rune0_pose = auto_buff::motion_model::rune_pose(target_state.x.data(), 0);
             auto vroll_in_rune = ISO3::Identity();
-            vroll_in_rune.translation().x() = target_state.v_roll(rune_target.voter)*2.0;
+            vroll_in_rune.translation().x() = target_state.v_roll(rune_target.voter) * 2.0;
             auto vroll_pose = odom_in_camera_cv * rune0_pose * vroll_in_rune;
             rune0_pose = odom_in_camera_cv * rune0_pose;
             auto center_image_points = utils::reprojection(

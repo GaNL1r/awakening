@@ -250,13 +250,50 @@ void RuneTarget::fan_pnp(
     bool in_r
 ) noexcept {
     auto key_points = r.points;
-    r.pose = utils::solve_pnp(
-        key_points,
-        in_r ? RuneFanBladeWithR::Point3DRZERO<cv::Point3f>::build()
-             : RuneFanBladeWithR::Point3DTargetCenterZERO<cv::Point3f>::build(),
-        camera_info.camera_matrix,
-        camera_info.distortion_coefficients
-    );
+    std::vector<cv::Mat> rvecs;
+    std::vector<cv::Mat> tvecs;
+    if (!cv::solvePnPGeneric(
+            in_r ? RuneFanBladeWithR::Point3DRZERO<cv::Point3f>::build()
+                 : RuneFanBladeWithR::Point3DTargetCenterZERO<cv::Point3f>::build(),
+            key_points,
+            camera_info.camera_matrix,
+            camera_info.distortion_coefficients,
+            rvecs,
+            tvecs,
+            false,
+            cv::SOLVEPNP_IPPE,
+            cv::noArray(),
+            cv::noArray()
+        ))
+    {
+        return;
+    }
+
+    bool has_valid = false;
+    for (size_t i = 0; i < rvecs.size(); ++i) {
+        cv::Mat R_cv;
+        cv::Rodrigues(rvecs[i], R_cv);
+        Mat3 R_eigen;
+        cv::cv2eigen(R_cv, R_eigen);
+        Vec3 axis_x = R_eigen.col(0);
+        Vec3 t_eigen;
+        cv::cv2eigen(tvecs[i], t_eigen);
+        Vec3 front_normal = -axis_x;
+        if (front_normal.dot(-t_eigen) > 0)
+        { //选择正面朝向相机，这里重投影误差已经进行过排序，所以直接break
+            r.pose.translation() = t_eigen;
+            r.pose.linear() = R_eigen;
+            has_valid = true;
+            break;
+        }
+    }
+    // r.pose = utils::solve_pnp(
+    //     key_points,
+    //     in_r ? RuneFanBladeWithR::Point3DRZERO<cv::Point3f>::build()
+    //          : RuneFanBladeWithR::Point3DTargetCenterZERO<cv::Point3f>::build(),
+    //     camera_info.camera_matrix,
+    //     camera_info.distortion_coefficients
+    // );
 
     r.pose = camera_cv_in_odom * r.pose;
 }
@@ -269,13 +306,50 @@ void RuneTarget::fan_target_pnp(
 ) noexcept {
     a.sort_corners(r);
     auto key_points = a.key_points;
-    a.pose = utils::solve_pnp(
-        key_points,
-        in_r ? RuneFanTarget::Point3DRZERO<cv::Point3f>::build_no_r()
-             : RuneFanTarget::Point3DTargetCenterZERO<cv::Point3f>::build_no_r(),
-        camera_info.camera_matrix,
-        camera_info.distortion_coefficients
-    );
+    std::vector<cv::Mat> rvecs;
+    std::vector<cv::Mat> tvecs;
+    if (!cv::solvePnPGeneric(
+            in_r ? RuneFanTarget::Point3DRZERO<cv::Point3f>::build_no_r()
+                 : RuneFanTarget::Point3DTargetCenterZERO<cv::Point3f>::build_no_r(),
+            key_points,
+            camera_info.camera_matrix,
+            camera_info.distortion_coefficients,
+            rvecs,
+            tvecs,
+            false,
+            cv::SOLVEPNP_IPPE,
+            cv::noArray(),
+            cv::noArray()
+        ))
+    {
+        return;
+    }
+
+    bool has_valid = false;
+    for (size_t i = 0; i < rvecs.size(); ++i) {
+        cv::Mat R_cv;
+        cv::Rodrigues(rvecs[i], R_cv);
+        Mat3 R_eigen;
+        cv::cv2eigen(R_cv, R_eigen);
+        Vec3 axis_x = R_eigen.col(0);
+        Vec3 t_eigen;
+        cv::cv2eigen(tvecs[i], t_eigen);
+        Vec3 front_normal = -axis_x;
+        if (front_normal.dot(-t_eigen) > 0)
+        { //选择正面朝向相机，这里重投影误差已经进行过排序，所以直接break
+            a.pose.translation() = t_eigen;
+            a.pose.linear() = R_eigen;
+            has_valid = true;
+            break;
+        }
+    }
+    // a.pose = utils::solve_pnp(
+    //     key_points,
+    //     in_r ? RuneFanTarget::Point3DRZERO<cv::Point3f>::build_no_r()
+    //          : RuneFanTarget::Point3DTargetCenterZERO<cv::Point3f>::build_no_r(),
+    //     camera_info.camera_matrix,
+    //     camera_info.distortion_coefficients
+    // );
     a.pose = camera_cv_in_odom * a.pose;
 }
 [[nodiscard]] Eigen::Matrix<double, motion_model::X_N, motion_model::X_N>
@@ -380,7 +454,7 @@ std::optional<std::pair<bool, cv::Point2f>> RuneTarget::match_r(
         if (error > avg_hand_length * 0.2) {
             continue;
         }
-        
+
         if (error < min_cost) {
             min_cost = error;
             best_id = i;
@@ -502,11 +576,21 @@ std::vector<std::pair<int, RuneFanTarget>> RuneTarget::match_fan_target(
     const CameraInfo& camera_info,
     const ISO3& camera_cv_in_odom
 ) const noexcept {
-    if (!r) {
-        return {};
-    }
+    cv::Point2f r_tag;
+    // if (!r) {
+    auto pred_state = target_state;
+    pred_state.predict(timestamp, voter);
+    RVecZ r_prediction;
+    auto r_measure_ctx = r_ctx;
+    r_measure_ctx.camera_cv_in_odom = camera_cv_in_odom;
+    RMeasure r_measure { .ctx = r_measure_ctx };
+    r_measure.h(pred_state.x, r_prediction);
+    r_tag = cv::Point2f(r_prediction[idx::R_X], r_prediction[idx::R_Y]);
+    // } else {
+    //     r_tag = r->second;
+    // }
     return match_fans_by_ypd(*this, fans, timestamp, [&](RuneFanTarget& fan) {
-        fan_target_pnp(fan, r->second, camera_info, camera_cv_in_odom, false);
+        fan_target_pnp(fan, r_tag, camera_info, camera_cv_in_odom, false);
     });
 }
 [[nodiscard]] cv::Rect RuneTarget::get_net_focus_roi(

@@ -23,14 +23,14 @@ struct RuneTracker::Impl {
             AWAKENING_WARN("TOO FAR");
         }
         update_fsm(found, detection.timestamp);
-        detection.rune_rs.erase(
-            std::remove_if(
-                detection.rune_rs.begin(),
-                detection.rune_rs.end(),
-                [](const RuneR& r) { return r.laji; }
-            ),
-            detection.rune_rs.end()
-        );
+        // detection.rune_rs.erase(
+        //     std::remove_if(
+        //         detection.rune_rs.begin(),
+        //         detection.rune_rs.end(),
+        //         [](const RuneR& r) { return r.laji; }
+        //     ),
+        //     detection.rune_rs.end()
+        // );
         return target_.fast_copy_without_ekf();
     }
     bool init_target(

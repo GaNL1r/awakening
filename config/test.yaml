@@ -1,5 +1,5 @@
-mode: auto_aim
-enemy_color: blue
+mode: auto_buff
+enemy_color: red
 bullet_speed: 23.5
 
 serial:
@@ -166,10 +166,10 @@ rune_detector:
   cv:
     bin_threshold: 70
     color_diff_thresh: 10
-    rune_r_min_area: 1
+    rune_r_min_area: 10
     rune_r_max_area: 999999999
-    rune_r_1x1ratio_tol: 0.7
-    rune_r_fill_ratio_min: 0.1
+    rune_r_1x1ratio_tol: 0.1
+    rune_r_fill_ratio_min: 0.4
     rune_pan_min_area: 10
     rune_pan_max_area: 99999999
     rune_pan_cluster_radius: 70

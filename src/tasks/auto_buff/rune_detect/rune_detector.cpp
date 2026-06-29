@@ -1,11 +1,15 @@
 #include "rune_detector.hpp"
 #include "rune_infer.hpp"
 #include "tasks/auto_buff/type.hpp"
+#include "tasks/base/common.hpp"
 #include "utils/common/image.hpp"
 #include <cstdlib>
 #include <memory>
 #include <opencv2/core/mat.hpp>
+#include <opencv2/core/types.hpp>
 #include <opencv2/highgui.hpp>
+#include <opencv2/imgproc.hpp>
+#include <optional>
 #include <vector>
 #if USE_OPENVINO
     #include "utils/net_detector/openvino/net_detector_openvino.hpp"
@@ -48,6 +52,13 @@ struct RuneDetector::Impl {
             cv_params.load(config["cv"]);
         }
     } params_;
+    struct CVCtx {
+        cv::Mat bin;
+        cv::Mat src;
+        std::vector<std::vector<cv::Point>> contours;
+        std::vector<cv::Vec4i> hierarchy;
+        std::vector<bool> used_flags;
+    };
     Impl(const YAML::Node& config) {
         params_.load(config);
         auto backend = config["backend"].as<std::string>();
@@ -85,18 +96,59 @@ struct RuneDetector::Impl {
                 throw std::runtime_error("Invalid backend");
             }
         }
-    }
-    cv::Mat preprocess(const cv::Mat& src, PixelFormat format) const noexcept {
-        cv::Mat bin;
-        if (format == PixelFormat::RGB) {
-            cv::cvtColor(src, bin, cv::COLOR_RGB2GRAY);
-        } else if (format == PixelFormat::BGR) {
-            cv::cvtColor(src, bin, cv::COLOR_BGR2GRAY);
-        } else {
-            bin = src;
-        }
-        cv::threshold(bin, bin, params_.cv_params.bin_threshold, 255, cv::THRESH_BINARY);
 
+    }
+    static std::vector<cv::Point> normalizeContour(const std::vector<cv::Point>& cnt) {
+        cv::Rect box = cv::boundingRect(cnt);
+        std::vector<cv::Point> out;
+        out.reserve(cnt.size());
+
+        for (auto& p: cnt) {
+            float nx = float(p.x - box.x) / float(box.width);
+            float ny = float(p.y - box.y) / float(box.height);
+            out.emplace_back(int(nx * 1000), int(ny * 1000));
+        }
+        return out;
+    }
+    cv::Mat
+    preprocess(const cv::Mat& src, PixelFormat format, EnemyColor enemy_color) const noexcept {
+        cv::Mat bin;
+        std::vector<cv::Mat> ch;
+        cv::split(src, ch);
+        cv::Mat b, r;
+        if (format == PixelFormat::RGB) {
+            b = ch[2];
+            r = ch[0];
+        } else if (format == PixelFormat::BGR) {
+            b = ch[0];
+            r = ch[2];
+        }
+        if (enemy_color == EnemyColor::RED) {
+            cv::subtract(b, r, bin);
+        } else {
+            cv::subtract(r, b, bin); // B - R
+        }
+        cv::threshold(bin, bin, 100, 255, cv::THRESH_BINARY);
+        // if (format == PixelFormat::RGB) {
+        //     cv::cvtColor(src, bin, cv::COLOR_RGB2GRAY);
+        // } else if (format == PixelFormat::BGR) {
+        //     cv::cvtColor(src, bin, cv::COLOR_BGR2GRAY);
+        // } else {
+        //     bin = src;
+        // }
+        // cv::threshold(bin, bin, params_.cv_params.bin_threshold, 255, cv::THRESH_BINARY);
+        // int ksize = 3;
+        // cv::Mat kernel = cv::getStructuringElement(cv::MORPH_ELLIPSE, cv::Size(ksize, ksize));
+        // // cv::erode(bin, bin, kernel, cv::Point(-1, -1), 1);
+        // cv::morphologyEx(bin, bin, cv::MORPH_OPEN, kernel);
+        // ksize = 3;
+        // kernel = cv::getStructuringElement(cv::MORPH_ELLIPSE, cv::Size(ksize, ksize));
+        // // cv::morphologyEx(bin, bin, cv::MORPH_CLOSE, kernel);
+        // cv::dilate(bin, bin, kernel, cv::Point(-1, -1), 1);
+        // cv::namedWindow("Binary Image", cv::WINDOW_NORMAL);
+        // cv::resizeWindow("Binary Image", 640, 480);
+        // cv::imshow("Binary Image", bin);
+        // cv::waitKey(1);
         return bin;
     };
     RuneColor get_color(const cv::Mat& src, const cv::Rect& rect, PixelFormat format) const {
@@ -134,65 +186,68 @@ struct RuneDetector::Impl {
                 break;
         }
 
-        // if (std::abs(R - B) < params_.cv_params.color_diff_thresh) {
-        //     return RuneColor::NONE;
-        // }
+        if (std::abs(R - B) < params_.cv_params.color_diff_thresh) {
+            return RuneColor::NONE;
+        }
         if (R > B) {
             return RuneColor::RED;
         } else {
             return RuneColor::BLUE;
         }
     }
-    void color_filter(
-        const cv::Mat& src,
-        PixelFormat format,
-        const std::vector<std::vector<cv::Point>>& contours,
-        std::vector<bool>& used_flags,
-        EnemyColor enemy_color
-    ) const noexcept {
+    void color_filter(CVCtx& cv, PixelFormat format, EnemyColor enemy_color) const noexcept {
         bool need_red = enemy_color == EnemyColor::BLUE;
-        for (int i = 0; i < contours.size(); i++) {
-            cv::Rect2f r = cv::boundingRect(contours[i]);
+        for (int i = 0; i < cv.contours.size(); i++) {
+            cv::Rect2f r = cv::boundingRect(cv.contours[i]);
             if (r.width < 5 || r.height < 5)
                 continue;
 
-            cv::Rect2f rr = r & cv::Rect2f(0, 0, src.cols, src.rows);
+            cv::Rect2f rr = r & cv::Rect2f(0, 0, cv.src.cols, cv.src.rows);
             if (rr.width < 2 || rr.height < 2)
                 continue;
 
-            auto color = get_color(src, rr, format);
+            auto color = get_color(cv.src, rr, format);
             bool invalid = false;
 
             if (need_red) {
                 if (color != RuneColor::RED) {
-                    used_flags[i] = true;
+                    cv.used_flags[i] = true;
                 }
             } else {
                 if (color != RuneColor::BLUE) {
-                    used_flags[i] = true;
+                    cv.used_flags[i] = true;
                 }
             }
         }
     }
+    std::vector<int> get_child_contours(int idx, const std::vector<cv::Vec4i>& hierarchy) const {
+        std::vector<int> children;
 
-    std::vector<RuneR> get_rune_rs(
-        const std::vector<std::vector<cv::Point>>& contours,
-        const std::vector<cv::Vec4i>& hierarchy,
-        std::vector<bool>& used_flags
-    ) const noexcept {
+        int child = hierarchy[idx][2]; // first child
+
+        while (child != -1) {
+            children.push_back(child);
+            child = hierarchy[child][0]; // next sibling
+        }
+
+        return children;
+    }
+    std::vector<RuneR> get_rune_rs(CVCtx& cv) const noexcept {
         std::vector<RuneR> result;
-
-        for (int i = 0; i < contours.size(); i++) {
-            if (used_flags[i])
-                continue;
-            if (hierarchy[i][3] != -1)
+        for (int i = 0; i < (int)cv.contours.size(); i++) {
+            if (cv.used_flags[i])
                 continue;
 
-            double area = cv::contourArea(contours[i]);
+            // if (cv.hierarchy[i][3] != -1)
+            //     continue;
+
+            double area = cv::contourArea(cv.contours[i]);
             if (area < params_.cv_params.rune_r_min_area
                 || area > params_.cv_params.rune_r_max_area)
                 continue;
-            cv::RotatedRect rr = cv::minAreaRect(contours[i]);
+
+            cv::RotatedRect rr = cv::minAreaRect(cv.contours[i]);
+
             float w = rr.size.width;
             float h = rr.size.height;
 
@@ -201,13 +256,14 @@ struct RuneDetector::Impl {
                 continue;
 
             double rect_area = w * h;
-
             double fill_ratio = area / rect_area;
             if (fill_ratio < params_.cv_params.rune_r_fill_ratio_min)
                 continue;
-
+            mark_parent(i, cv.hierarchy, cv.used_flags);
+            cv.used_flags[i] = true;
             result.emplace_back(RuneR { .rr = rr });
         }
+
 
         return result;
     }
@@ -227,13 +283,14 @@ struct RuneDetector::Impl {
             used_flags[p] = true;
         }
     }
-    std::vector<RuneFanTarget> get_rune_fan_targets(
-        const std::vector<std::vector<cv::Point>>& contours,
-        const std::vector<cv::Vec4i>& hierarchy,
-        std::vector<bool>& used_flags
-    ) const noexcept {
+    std::vector<RuneFlowingLight> get_rune_flowings(CVCtx& cv) const noexcept {
+        std::vector<RuneFlowingLight> results;
+
+        return results;
+    }
+    std::vector<RuneFanTarget> get_rune_fan_targets(CVCtx& cv) const noexcept {
         std::vector<RuneFanTarget> results;
-        if (hierarchy.empty())
+        if (cv.hierarchy.empty())
             return results;
 
         struct Node {
@@ -244,11 +301,11 @@ struct RuneDetector::Impl {
 
         std::vector<Node> candidates;
 
-        for (int i = 0; i < contours.size(); i++) {
-            if (used_flags[i])
+        for (int i = 0; i < cv.contours.size(); i++) {
+            if (cv.used_flags[i])
                 continue;
 
-            const auto& cnt = contours[i];
+            const auto& cnt = cv.contours[i];
 
             double contour_area = cv::contourArea(cnt);
             if (contour_area < params_.cv_params.rune_pan_min_area
@@ -260,7 +317,7 @@ struct RuneDetector::Impl {
                 continue;
 
             cv::Point2f center(m.m10 / m.m00, m.m01 / m.m00);
-            int top_parent = find_top_parent(i, hierarchy);
+            int top_parent = find_top_parent(i, cv.hierarchy);
 
             candidates.push_back({ i, center, top_parent });
         }
@@ -274,6 +331,8 @@ struct RuneDetector::Impl {
         }
 
         for (auto& [parent_top_id, idx_list]: groups) {
+            if (parent_top_id == -1)
+                continue;
             int M = idx_list.size();
             if (M < 3 || M > 7)
                 continue;
@@ -363,7 +422,18 @@ struct RuneDetector::Impl {
 
                 if (dist_list.size() < 4)
                     continue;
+                const auto& top_contour = cv.contours[parent_top_id];
 
+                double area = cv::contourArea(top_contour);
+                double perimeter = cv::arcLength(top_contour, true);
+
+                if (perimeter < 1e-6)
+                    continue;
+
+                double roundness = 4.0 * CV_PI * area / (perimeter * perimeter);
+
+                if (roundness < 0.5)
+                    continue;
                 RuneFanTarget fan_target;
                 fan_target.center = rr.center;
                 fan_target.rr = rr;
@@ -381,8 +451,8 @@ struct RuneDetector::Impl {
 
                     if (cluster_size[cid2] >= 3) {
                         int contour_index = candidates[idx_list[i]].idx;
-                        used_flags[contour_index] = true;
-                        mark_parent(contour_index, hierarchy, used_flags);
+                        cv.used_flags[contour_index] = true;
+                        mark_parent(contour_index, cv.hierarchy, cv.used_flags);
                     }
                 }
             }
@@ -403,23 +473,32 @@ struct RuneDetector::Impl {
                 fan_blade.add_offset(focus.tl());
             }
         }
+        CVCtx cv1;
+        cv1.src = roi;
+        cv1.bin = preprocess(roi, frame.img_frame.format, enemy_color);
+        cv::findContours(
+            cv1.bin,
+            cv1.contours,
+            cv1.hierarchy,
+            cv::RETR_TREE,
+            cv::CHAIN_APPROX_SIMPLE
+        );
 
-        auto bin = preprocess(roi, frame.img_frame.format);
-        std::vector<std::vector<cv::Point>> contours;
-        std::vector<cv::Vec4i> hierarchy;
-        cv::findContours(bin, contours, hierarchy, cv::RETR_TREE, cv::CHAIN_APPROX_SIMPLE);
-        std::vector<bool> used_flags;
-        used_flags.assign(contours.size(), false);
-        // color_filter(roi, frame.img_frame.format, contours, used_flags, enemy_color);
-        result.fan_targets = get_rune_fan_targets(contours, hierarchy, used_flags);
-        result.rune_rs = get_rune_rs(contours, hierarchy, used_flags);
+        cv1.used_flags.assign(cv1.contours.size(), false);
+        // color_filter(cv1, frame.img_frame.format, enemy_color);
+        result.fan_targets = get_rune_fan_targets(cv1);
+        result.rune_flowing_lights = get_rune_flowings(cv1);
+        result.rune_rs = get_rune_rs(cv1);
         for (auto& rune_r: result.rune_rs) {
-            rune_r.color = get_color(roi, rune_r.rr.boundingRect2f(), frame.img_frame.format);
+            rune_r.color = get_color(cv1.src, rune_r.rr.boundingRect2f(), frame.img_frame.format);
             rune_r.add_offset(focus.tl());
+        }
+        for (auto& rune_flowing_light: result.rune_flowing_lights) {
+            rune_flowing_light.add_offset(focus.tl());
         }
         for (auto& fan_target: result.fan_targets) {
             fan_target.color =
-                get_color(roi, fan_target.rr.boundingRect2f(), frame.img_frame.format);
+                get_color(cv1.src, fan_target.rr.boundingRect2f(), frame.img_frame.format);
             fan_target.add_offset(focus.tl());
         }
         return result;
