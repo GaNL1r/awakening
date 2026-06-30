@@ -1,5 +1,5 @@
-mode: auto_buff
-enemy_color: red
+mode: auto_aim
+enemy_color: blue
 bullet_speed: 23.5
 
 serial:
@@ -116,7 +116,7 @@ armor_tracker:
 auto_aim_fsm:
   single_whole_up: 1.5 
   single_whole_down: 1.0
-  whole_pair_up: 7.5 
+  whole_pair_up: 17.5 
   whole_pair_down: 6.5 #1s内至少换2次板子  2pi  否则轨迹规划无意义
   pair_center_up: 16.5
   pair_center_down: 15.0

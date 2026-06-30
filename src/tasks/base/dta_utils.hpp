@@ -380,6 +380,7 @@ public:
     }
 
     [[nodiscard]] std::optional<std::pair<int, int>> find_limit_interval(
+        const std::vector<GimbalState>& cp_vec,
         const std::vector<GimbalState::State>& s,
         const std::vector<double>& prefix,
         int near_change_idx,
@@ -387,7 +388,8 @@ public:
     ) const noexcept {
         const int N = static_cast<int>(s.size());
         std::optional<std::pair<int, int>> interval;
-        if (near_change_idx >= 0) {
+        if (near_change_idx >= 0 && near_change_idx + 1 < N
+            && cp_vec[near_change_idx].aim_id != cp_vec[near_change_idx + 1].aim_id) {
             int l = std::clamp(near_change_idx, 0, N - 1);
             int r = std::clamp(near_change_idx + 1, 0, N - 1);
             if (l < r)
@@ -403,8 +405,31 @@ public:
         const int base_l = interval->first;
         const int base_r = interval->second;
 
+        int left_run_start = base_l;
+        while (left_run_start > 0
+               && cp_vec[left_run_start - 1].aim_id == cp_vec[left_run_start].aim_id) {
+            --left_run_start;
+        }
+
+        int right_run_end = base_r;
+        while (right_run_end + 1 < N
+               && cp_vec[right_run_end].aim_id == cp_vec[right_run_end + 1].aim_id) {
+            ++right_run_end;
+        }
+
+        const double left_mid_time = 0.5 * (prefix[left_run_start] + prefix[base_l]);
+        const auto left_limit_it =
+            std::lower_bound(prefix.begin() + left_run_start, prefix.begin() + base_l + 1, left_mid_time);
+        const int left_limit = static_cast<int>(std::distance(prefix.begin(), left_limit_it));
+
+        const double right_mid_time = 0.5 * (prefix[base_r] + prefix[right_run_end]);
+        const auto right_limit_it =
+            std::upper_bound(prefix.begin() + base_r, prefix.begin() + right_run_end + 1, right_mid_time);
+        const int right_limit = static_cast<int>(std::distance(prefix.begin(), right_limit_it)) - 1;
+
         auto radius_interval = [&](int radius) -> std::pair<int, int> {
-            return { std::max(0, base_l - radius), std::min(N - 1, base_r + radius) };
+            return { std::max(left_limit, base_l - radius),
+                     std::min(right_limit, base_r + radius) };
         };
 
         auto acc_at_radius = [&](int radius) -> double {
@@ -413,7 +438,7 @@ public:
         };
 
         if (acc_at_radius(0) > max_acc) {
-            const int max_radius = std::max(base_l, N - 1 - base_r);
+            const int max_radius = std::max(base_l - left_limit, right_limit - base_r);
             int best_radius = max_radius;
 
             for (int radius = 1; radius <= max_radius; ++radius) {
@@ -430,6 +455,7 @@ public:
 
     void limit_traj(
         Traj& traj,
+        const std::vector<GimbalState>& cp_vec,
         const std::vector<GimbalState::State>& s,
         const std::vector<double>& prefix,
         int near_change_idx,
@@ -446,7 +472,7 @@ public:
             return Seg::build(s[l], s[r], dur, false);
         };
 
-        const auto interval = find_limit_interval(s, prefix, near_change_idx, max_acc);
+        const auto interval = find_limit_interval(cp_vec, s, prefix, near_change_idx, max_acc);
         traj.limit_interval = interval;
 
         if (!interval) {
@@ -486,6 +512,7 @@ public:
 
     void limit_traj_suffix(
         Traj& traj,
+        const std::vector<GimbalState>& cp_vec,
         const std::vector<GimbalState::State>& s,
         const std::vector<double>& prefix,
         int near_change_idx,
@@ -504,7 +531,7 @@ public:
         };
 
         const auto old_interval = traj.limit_interval;
-        const auto interval = find_limit_interval(s, prefix, near_change_idx, max_acc);
+        const auto interval = find_limit_interval(cp_vec, s, prefix, near_change_idx, max_acc);
         int rebuild_start = static_cast<int>(std::min(first_raw_seg, static_cast<size_t>(N - 2)));
         if (old_interval)
             rebuild_start = std::min(rebuild_start, old_interval->first);
@@ -541,8 +568,8 @@ public:
         if (N < 2)
             return;
         const int best_idx = nearest_change_idx(cp_vec, prefix, current_time);
-        limit_traj(yaw_traj, yaw_state_buf, prefix, best_idx, max_yaw_acc);
-        limit_traj(pitch_traj, pitch_state_buf, prefix, best_idx, max_pitch_acc);
+        limit_traj(yaw_traj, cp_vec, yaw_state_buf, prefix, best_idx, max_yaw_acc);
+        limit_traj(pitch_traj, cp_vec, pitch_state_buf, prefix, best_idx, max_pitch_acc);
     }
     void build_limit_incremental(
         double max_yaw_acc,
@@ -563,9 +590,18 @@ public:
         compute_node_states_from(cp_vec, prefix, yaw_state_buf, pitch_state_buf, first_changed_cp);
         const int best_idx = nearest_change_idx(cp_vec, prefix, current_time);
         const size_t first_raw_seg = first_changed_cp == 0 ? 0 : first_changed_cp - 1;
-        limit_traj_suffix(yaw_traj, yaw_state_buf, prefix, best_idx, max_yaw_acc, first_raw_seg);
+        limit_traj_suffix(
+            yaw_traj,
+            cp_vec,
+            yaw_state_buf,
+            prefix,
+            best_idx,
+            max_yaw_acc,
+            first_raw_seg
+        );
         limit_traj_suffix(
             pitch_traj,
+            cp_vec,
             pitch_state_buf,
             prefix,
             best_idx,

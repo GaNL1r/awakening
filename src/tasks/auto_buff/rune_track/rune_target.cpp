@@ -306,50 +306,50 @@ void RuneTarget::fan_target_pnp(
 ) noexcept {
     a.sort_corners(r);
     auto key_points = a.key_points;
-    std::vector<cv::Mat> rvecs;
-    std::vector<cv::Mat> tvecs;
-    if (!cv::solvePnPGeneric(
-            in_r ? RuneFanTarget::Point3DRZERO<cv::Point3f>::build_no_r()
-                 : RuneFanTarget::Point3DTargetCenterZERO<cv::Point3f>::build_no_r(),
-            key_points,
-            camera_info.camera_matrix,
-            camera_info.distortion_coefficients,
-            rvecs,
-            tvecs,
-            false,
-            cv::SOLVEPNP_IPPE,
-            cv::noArray(),
-            cv::noArray()
-        ))
-    {
-        return;
-    }
+    // std::vector<cv::Mat> rvecs;
+    // std::vector<cv::Mat> tvecs;
+    // if (!cv::solvePnPGeneric(
+    //         in_r ? RuneFanTarget::Point3DRZERO<cv::Point3f>::build_no_r()
+    //              : RuneFanTarget::Point3DTargetCenterZERO<cv::Point3f>::build_no_r(),
+    //         key_points,
+    //         camera_info.camera_matrix,
+    //         camera_info.distortion_coefficients,
+    //         rvecs,
+    //         tvecs,
+    //         false,
+    //         cv::SOLVEPNP_IPPE,
+    //         cv::noArray(),
+    //         cv::noArray()
+    //     ))
+    // {
+    //     return;
+    // }
 
-    bool has_valid = false;
-    for (size_t i = 0; i < rvecs.size(); ++i) {
-        cv::Mat R_cv;
-        cv::Rodrigues(rvecs[i], R_cv);
-        Mat3 R_eigen;
-        cv::cv2eigen(R_cv, R_eigen);
-        Vec3 axis_x = R_eigen.col(0);
-        Vec3 t_eigen;
-        cv::cv2eigen(tvecs[i], t_eigen);
-        Vec3 front_normal = -axis_x;
-        if (front_normal.dot(-t_eigen) > 0)
-        { //选择正面朝向相机，这里重投影误差已经进行过排序，所以直接break
-            a.pose.translation() = t_eigen;
-            a.pose.linear() = R_eigen;
-            has_valid = true;
-            break;
-        }
-    }
-    // a.pose = utils::solve_pnp(
-    //     key_points,
-    //     in_r ? RuneFanTarget::Point3DRZERO<cv::Point3f>::build_no_r()
-    //          : RuneFanTarget::Point3DTargetCenterZERO<cv::Point3f>::build_no_r(),
-    //     camera_info.camera_matrix,
-    //     camera_info.distortion_coefficients
-    // );
+    // bool has_valid = false;
+    // for (size_t i = 0; i < rvecs.size(); ++i) {
+    //     cv::Mat R_cv;
+    //     cv::Rodrigues(rvecs[i], R_cv);
+    //     Mat3 R_eigen;
+    //     cv::cv2eigen(R_cv, R_eigen);
+    //     Vec3 axis_x = R_eigen.col(0);
+    //     Vec3 t_eigen;
+    //     cv::cv2eigen(tvecs[i], t_eigen);
+    //     Vec3 front_normal = -axis_x;
+    //     if (front_normal.dot(-t_eigen) > 0)
+    //     { //选择正面朝向相机，这里重投影误差已经进行过排序，所以直接break
+    //         a.pose.translation() = t_eigen;
+    //         a.pose.linear() = R_eigen;
+    //         has_valid = true;
+    //         break;
+    //     }
+    // }
+    a.pose = utils::solve_pnp(
+        key_points,
+        in_r ? RuneFanTarget::Point3DRZERO<cv::Point3f>::build_no_r()
+             : RuneFanTarget::Point3DTargetCenterZERO<cv::Point3f>::build_no_r(),
+        camera_info.camera_matrix,
+        camera_info.distortion_coefficients
+    );
     a.pose = camera_cv_in_odom * a.pose;
 }
 [[nodiscard]] Eigen::Matrix<double, motion_model::X_N, motion_model::X_N>
@@ -376,7 +376,7 @@ RuneTarget::ypdmeasurement_covariance(const Eigen::Matrix<double, motion_model::
     r.setZero(); //copy下sp_vision_25 这个参数不用在观测，差不多就行
     r(idx::YPD_Y, idx::YPD_Y) = 4e-3;
     r(idx::YPD_P, idx::YPD_P) = 4e-3;
-    r(idx::YPD_D, idx::YPD_D) = z[idx::YPD_D] * z[idx::YPD_D] * 0.1;
+    r(idx::YPD_D, idx::YPD_D) = 0.5;
     r(idx::ROT_YAW, idx::ROT_YAW) = 0.1;
     r(idx::ROT_ROLL, idx::ROT_ROLL) = 0.05;
     return r;
@@ -449,12 +449,12 @@ std::optional<std::pair<bool, cv::Point2f>> RuneTarget::match_r(
         / fan_hand_length_vec.size();
     int best_id = -1;
     double min_cost = std::numeric_limits<double>::max();
+    // std::cout<<avg_hand_length<<std::endl;
     for (size_t i = 0; i < rs.size(); ++i) {
         const double error = cv::norm(rs[i].rr.center - avg_r);
         if (error > avg_hand_length * 0.2) {
             continue;
         }
-
         if (error < min_cost) {
             min_cost = error;
             best_id = i;
@@ -675,4 +675,5 @@ std::vector<std::pair<int, RuneFanTarget>> RuneTarget::match_fan_target(
 
     return square;
 }
-} // namespace awakening::auto_buff
+}
+

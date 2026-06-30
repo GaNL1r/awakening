@@ -75,7 +75,7 @@ struct RuneFanBladeWithR {
     double confidence = 0;
     void draw(cv::Mat& img) const {
         for (int i = 0; i < points.size(); ++i) {
-            cv::circle(img, points[i], 3, cv::Scalar(0, 255, 0), cv::FILLED);
+            cv::circle(img, points[i], 5, cv::Scalar(0, 255, 0), cv::FILLED);
         }
     }
     void add_offset(const cv::Point2f& offset) {
@@ -194,9 +194,9 @@ struct RuneFanTarget {
 
     void draw(cv::Mat& img) const {
         for (int i = 0; i < 4; ++i) {
-            cv::circle(img, corners[i], 3, cv::Scalar(255, 0, 0), cv::FILLED);
+            cv::circle(img, corners[i], 5, cv::Scalar(255, 0, 255), cv::FILLED);
         }
-        cv::circle(img, center, 3, cv::Scalar(0, 0, 255), cv::FILLED);
+        cv::circle(img, center, 7, cv::Scalar(0, 0, 255), cv::FILLED);
     }
     void sort_corners(const cv::Point2f& r) {
         if (corners.size() != 4)

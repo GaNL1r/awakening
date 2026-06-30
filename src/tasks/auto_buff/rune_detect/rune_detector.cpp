@@ -128,7 +128,7 @@ struct RuneDetector::Impl {
         } else {
             cv::subtract(r, b, bin); // B - R
         }
-        cv::threshold(bin, bin, 100, 255, cv::THRESH_BINARY);
+        cv::threshold(bin, bin, 170, 255, cv::THRESH_BINARY);
         // if (format == PixelFormat::RGB) {
         //     cv::cvtColor(src, bin, cv::COLOR_RGB2GRAY);
         // } else if (format == PixelFormat::BGR) {
@@ -137,18 +137,20 @@ struct RuneDetector::Impl {
         //     bin = src;
         // }
         // cv::threshold(bin, bin, params_.cv_params.bin_threshold, 255, cv::THRESH_BINARY);
-        // int ksize = 3;
-        // cv::Mat kernel = cv::getStructuringElement(cv::MORPH_ELLIPSE, cv::Size(ksize, ksize));
+        int ksize = 3;
+        cv::Mat kernel = cv::getStructuringElement(cv::MORPH_ELLIPSE, cv::Size(ksize, ksize));
         // // cv::erode(bin, bin, kernel, cv::Point(-1, -1), 1);
-        // cv::morphologyEx(bin, bin, cv::MORPH_OPEN, kernel);
+        cv::morphologyEx(bin, bin, cv::MORPH_OPEN, kernel);
         // ksize = 3;
         // kernel = cv::getStructuringElement(cv::MORPH_ELLIPSE, cv::Size(ksize, ksize));
-        // // cv::morphologyEx(bin, bin, cv::MORPH_CLOSE, kernel);
-        // cv::dilate(bin, bin, kernel, cv::Point(-1, -1), 1);
-        // cv::namedWindow("Binary Image", cv::WINDOW_NORMAL);
-        // cv::resizeWindow("Binary Image", 640, 480);
-        // cv::imshow("Binary Image", bin);
-        // cv::waitKey(1);
+        // cv::morphologyEx(bin, bin, cv::MORPH_CLOSE, kernel);
+        cv::dilate(bin, bin, kernel, cv::Point(-1, -1), 1);
+
+
+        cv::namedWindow("Binary Image", cv::WINDOW_NORMAL);
+        cv::resizeWindow("Binary Image", 640, 480);
+        cv::imshow("Binary Image", bin);
+        cv::waitKey(1);
         return bin;
     };
     RuneColor get_color(const cv::Mat& src, const cv::Rect& rect, PixelFormat format) const {
@@ -232,14 +234,14 @@ struct RuneDetector::Impl {
 
         return children;
     }
-    std::vector<RuneR> get_rune_rs(CVCtx& cv) const noexcept {
+    std::vector<RuneR> get_rune_rs(CVCtx& cv,cv::Rect focus) const noexcept {
         std::vector<RuneR> result;
         for (int i = 0; i < (int)cv.contours.size(); i++) {
             if (cv.used_flags[i])
                 continue;
 
-            // if (cv.hierarchy[i][3] != -1)
-            //     continue;
+            if (cv.hierarchy[i][3] != -1)
+                continue;
 
             double area = cv::contourArea(cv.contours[i]);
             if (area < params_.cv_params.rune_r_min_area
@@ -247,7 +249,8 @@ struct RuneDetector::Impl {
                 continue;
 
             cv::RotatedRect rr = cv::minAreaRect(cv.contours[i]);
-
+            if (!focus.contains(rr.center))
+                    continue;
             float w = rr.size.width;
             float h = rr.size.height;
 
@@ -331,8 +334,8 @@ struct RuneDetector::Impl {
         }
 
         for (auto& [parent_top_id, idx_list]: groups) {
-            if (parent_top_id == -1)
-                continue;
+            // if (parent_top_id == -1)
+            //     continue;
             int M = idx_list.size();
             if (M < 3 || M > 7)
                 continue;
@@ -422,18 +425,18 @@ struct RuneDetector::Impl {
 
                 if (dist_list.size() < 4)
                     continue;
-                const auto& top_contour = cv.contours[parent_top_id];
+                // const auto& top_contour = cv.contours[parent_top_id];
 
-                double area = cv::contourArea(top_contour);
-                double perimeter = cv::arcLength(top_contour, true);
+                // double area = cv::contourArea(top_contour);
+                // double perimeter = cv::arcLength(top_contour, true);
 
-                if (perimeter < 1e-6)
-                    continue;
+                // if (perimeter < 1e-6)
+                //     continue;
 
-                double roundness = 4.0 * CV_PI * area / (perimeter * perimeter);
+                // double roundness = 4.0 * CV_PI * area / (perimeter * perimeter);
 
-                if (roundness < 0.5)
-                    continue;
+                // if (roundness < 0.5)
+                //     continue;
                 RuneFanTarget fan_target;
                 fan_target.center = rr.center;
                 fan_target.rr = rr;
@@ -488,7 +491,10 @@ struct RuneDetector::Impl {
         // color_filter(cv1, frame.img_frame.format, enemy_color);
         result.fan_targets = get_rune_fan_targets(cv1);
         result.rune_flowing_lights = get_rune_flowings(cv1);
-        result.rune_rs = get_rune_rs(cv1);
+        auto roi_center = cv::Point2f(focus.width / 2.0, focus.height / 2.0);
+        double side = focus.width / 5.0;
+        cv::Rect focus_r = cv::Rect(roi_center.x - side / 2.0, roi_center.y - side / 2.0, side, side);
+        result.rune_rs = get_rune_rs(cv1, focus_r);
         for (auto& rune_r: result.rune_rs) {
             rune_r.color = get_color(cv1.src, rune_r.rr.boundingRect2f(), frame.img_frame.format);
             rune_r.add_offset(focus.tl());
@@ -516,4 +522,5 @@ RuneDetection
 RuneDetector::detect(const CommonFrame& frame, const cv::Rect& focus, EnemyColor enemy_color) {
     return _impl->detect(frame, focus, enemy_color);
 }
-} // namespace awakening::auto_buff
+}
+
