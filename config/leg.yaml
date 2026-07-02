@@ -1,5 +1,5 @@
 mode: auto_aim
-enemy_color: red
+enemy_color: blue
 bullet_speed: 23.0
 
 serial:
@@ -54,16 +54,16 @@ armor_detector:
       execution_mode: "PERFORMANCE"
       infer_request_buffer_num: 10
     tensorrt:
-      model_path: ${ROOT_DIR}/model/opt-1208-001.onnx
-      copy_context_num: 3
+      model_path: ${ROOT_DIR}/model/0708.onnx
+      copy_context_num: 4
       min_free_mem_ratio: 0.1
       use_cuda_preproces: true
     armor_infer:
-      model_type: tup
+      model_type: rp
       conf_threshold: 0.2
   number_classifier:
     enable: true
-    model_path: ${ROOT_DIR}/model/mlp.onnx
+    model_path: ${ROOT_DIR}/model/mlp_finetuned.onnx
     label_path: ${ROOT_DIR}/model/label.txt
   color_classifier:
     enable: true
@@ -80,56 +80,55 @@ armor_detector:
 
 
 armor_tracker:
-  lost_time_thres: 0.5
+  lost_time_thres: 1.5
   lost_time_thres_outpost: 2.0
   tracking_thres: 10
-  match_gate_armor: 50.0
-  match_gate_not_all_init_armor: 100.0
   qxyz_common: [30.0, 30.0, 1.0]
-  qyaw_common: 100.0
-  qxyz_output: [1.0, 1.0, 0.5]
+  qyaw_common: 30.0
+  qxyz_output: [1.0, 1.0, 1.0]
   qyaw_output: 0.01
   q_r: 0.0000001
   q_l: 0.0000001
   q_h: 0.0000001
-  q_outpost_dz: 0.01
+  q_wpr: 0.00001
+  q_outpost_dz: 0.0000001
   enable_lights_measure: true
+  armor_match_gate: 200.0
+  armor_match_gate_not_all_init: 1000.0
+  armor_match_w_center_err: 5.0
+  armor_match_w_angle_err: 10.0
+  armor_match_w_side_length_err: 1.0
   light_match_length_ratio_gate: 0.2
   light_match_angle_gate: 0.2
   light_match_pos_gate_by_length_ratio: 5.0
-  r_uv_at_1m: 70.0
-  r_uv_min: 30.0
+  r_sigma_px_by_length_ratio: 0.2
+  r_sigma_length_by_length_ratio: 0.5
+  r_sigma_angle: 0.5
+  r_sigma_armor_lights_depth_diff: 0.1
   esekf_iter_num: 5
+
 
 
 auto_aim_fsm:
   single_whole_up: 1.5 
   single_whole_down: 1.0
-  whole_pair_up: 10.5 
-  whole_pair_down: 9.5 #1s内至少换2次板子  2pi  否则轨迹规划无意义
+  whole_pair_up: 17.5 
+  whole_pair_down: 6.5 #1s内至少换2次板子  2pi  否则轨迹规划无意义
   pair_center_up: 16.5
   pair_center_down: 15.0
   transfer_time: 0.5
 
 very_aimer:
-  base_yaw_offset: -0.5
-  base_pitch_offset: 1.0
-  # base_yaw_offset: -0.0
-  # base_pitch_offset: -0.0
-  sample_total_time: 1.0
-  
-  sample_horizon: 200
-
-  fire_delay_min: 0.01
-  fire_delay_max: 0.05
-  
+  base_yaw_offset: -0.0
+  base_pitch_offset: -0.5
+  sample_total_time: 0.5
+  sample_horizon: 100
+  fire_delay_min: 0.00
+  fire_delay_max: 0.00
   max_yaw_acc: 40
   max_pitch_acc: 50
-  
-
   prediction_delay: 0.00
   aim_center_more_prediction_time: 0.0
-
   shooting_range_h: 0.12
   shooting_range_w_small: 0.12
   shooting_range_w_large: 0.24
@@ -162,10 +161,10 @@ rune_detector:
   cv:
     bin_threshold: 70
     color_diff_thresh: 10
-    rune_r_min_area: 1
+    rune_r_min_area: 10
     rune_r_max_area: 999999999
-    rune_r_1x1ratio_tol: 0.7
-    rune_r_fill_ratio_min: 0.1
+    rune_r_1x1ratio_tol: 0.1
+    rune_r_fill_ratio_min: 0.4
     rune_pan_min_area: 10
     rune_pan_max_area: 99999999
     rune_pan_cluster_radius: 70
@@ -179,15 +178,15 @@ rune_tracker:
   q_xyz: [0.0001, 0.0001, 0.0001]
   q_yaw: 0.1
   q_roll: 10.0
-  q_a: 0.00001
-  q_w: 0.00001
-  q_tau: 0.000001
-  match_gate: 50.0
+  q_a: 0.01
+  q_w: 0.01
+  q_tau: 0.01
+  match_gate: 30.0
   voter_state_need_count: 50
   voter_mode_need_count: 20
   big_args_continue_time: 1.0
-  r_uv_cv: 30.0
-  r_uv_net: 80.0
+  r_sigma_pix_by_hand_length_ratio_cv: 0.05
+  r_sigma_pix_by_hand_length_ratio_net: 0.2
 
 rune_aimer:
   base_yaw_offset: -0.0
@@ -217,7 +216,7 @@ camera:
     offset_x: 0
     offset_y: 0
     acquisition_frame_rate_enable: true
-    acquisition_frame_rate: 250
+    acquisition_frame_rate: 200
     exposure_time: 1500
     gain: 16.9
     gamma: 0.7 #Bayer用不了

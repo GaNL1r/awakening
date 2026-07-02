@@ -41,7 +41,7 @@ find_package(Ceres REQUIRED)
 find_package(HikSDK REQUIRED)
 find_package(MvSDK REQUIRED)
 find_package(spdlog REQUIRED)
-
+find_package(TBB REQUIRED)
 set(RERUN_FOUND FALSE)
 if(BUILD_WITH_RERUN)
     find_package(rerun_sdk CONFIG QUIET)
@@ -114,6 +114,7 @@ target_link_libraries(${PROJECT_NAME}_utils
     Eigen3::Eigen
     Ceres::ceres
     spdlog::spdlog
+    TBB::tbb
     ${OpenCV_LIBS}
     ${BUILD_LIBS}
     

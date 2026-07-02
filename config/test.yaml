@@ -54,12 +54,12 @@ armor_detector:
       execution_mode: "PERFORMANCE"
       infer_request_buffer_num: 10
     tensorrt:
-      model_path: ${ROOT_DIR}/model/opt-1208-001.onnx
-      copy_context_num: 3
+      model_path: ${ROOT_DIR}/model/0708.onnx
+      copy_context_num: 4
       min_free_mem_ratio: 0.1
       use_cuda_preproces: true
     armor_infer:
-      model_type: tup
+      model_type: rp
       conf_threshold: 0.2
   number_classifier:
     enable: true
@@ -92,7 +92,7 @@ armor_tracker:
   q_h: 0.0000001
   q_wpr: 0.1
   q_outpost_dz: 0.0000001
-  enable_lights_measure: true
+  enable_lights_measure: false
   armor_match_gate: 200.0
   armor_match_gate_not_all_init: 1000.0
   armor_match_w_center_err: 5.0
@@ -126,7 +126,7 @@ auto_aim_fsm:
 very_aimer:
   base_yaw_offset: -0.0
   base_pitch_offset: -0.5
-  sample_total_time: 1.0
+  sample_total_time: 0.5
   sample_horizon: 100
   fire_delay_min: 0.00
   fire_delay_max: 0.00

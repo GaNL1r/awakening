@@ -153,10 +153,22 @@ struct Predict {
         if (voter.state != Voter::Collecting) {
             x[idx::V_ROLL] = T(0);
         }
-        x[idx::A] = ceres::fmin(x[idx::A], A_UPPER);
-        x[idx::W] = ceres::fmin(x[idx::W], W_UPPER);
-        x[idx::A] = ceres::fmax(x[idx::A], A_LOWER);
-        x[idx::W] = ceres::fmax(x[idx::W], W_LOWER);
+        // x[idx::A] = ceres::fmin(x[idx::A], A_UPPER);
+        // x[idx::W] = ceres::fmin(x[idx::W], W_UPPER);
+        // x[idx::A] = ceres::fmax(x[idx::A], A_LOWER);
+        // x[idx::W] = ceres::fmax(x[idx::W], W_LOWER);
+        if (x[idx::A] > T(A_UPPER)) {
+            x[idx::A] = T(A_UPPER);
+        }
+        if (x[idx::W] > T(W_UPPER)) {
+            x[idx::W] = T(W_UPPER);
+        }
+        if (x[idx::A] < T(A_LOWER)) {
+            x[idx::A] = T(A_LOWER);
+        }
+        if (x[idx::W] < T(W_LOWER)) {
+            x[idx::W] = T(W_LOWER);
+        }
     }
     inline void f(const VecX& x0, VecX& x1) const {
         assert(x0.size() == X_N);

@@ -369,9 +369,14 @@ struct DiffMeasure {
         const auto right_center = (point_in_camera(ArmorKeyPointsIndex::RIGHT_TOP)
                                    + point_in_camera(ArmorKeyPointsIndex::RIGHT_BOTTOM))
             * T(0.5);
-        // z[0] = (left_center.z());
-        // z[1] = (right_center.z());
+        // const auto top_center = (point_in_camera(ArmorKeyPointsIndex::LEFT_TOP)
+        //                           + point_in_camera(ArmorKeyPointsIndex::RIGHT_TOP))
+        //     * T(0.5);
+        // const auto bottom_center = (point_in_camera(ArmorKeyPointsIndex::LEFT_BOTTOM)
+        //                              + point_in_camera(ArmorKeyPointsIndex::RIGHT_BOTTOM))
+        //     * T(0.5);
         z[0] = left_center.z() - right_center.z();
+        // z[1] = top_center.z() - bottom_center.z();
     }
 
     template<typename T>

@@ -659,6 +659,10 @@ int main(int argc, char** argv) {
             s.x[idx::VCX] -= vel.x();
             s.x[idx::VCY] -= vel.y();
             s.x[idx::VCZ] -= vel.z();
+            // s.x[idx::VCX] =0;
+            // s.x[idx::VCY] =0;
+            // s.x[idx::VCZ] =0;
+            // s.x[idx::VYAW] =12.0;
         });
         a_target.this_id = old_this_id;
         auto r_target = rune_target.read();

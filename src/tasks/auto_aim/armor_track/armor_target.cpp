@@ -372,6 +372,7 @@ int ArmorTarget::update(
             Eigen::Matrix<double, UVLZ_N, UVLZ_N> r;
             r.setZero();
             auto length = cv::norm(top - bottom); //用灯条长短描述位置误差的强度，可以线性可以log
+            // length = std::log1p(length * length);
             const double sigma_px = cfg.r_sigma_px_by_length_ratio * length;
             double sigma_x = sigma_px;
             double sigma_y = sigma_px;
@@ -386,8 +387,8 @@ int ArmorTarget::update(
                      / 2.0);
             }
             double sigma_angle = cfg.r_sigma_angle;
-            sigma_angle *= std::cos(z(idx::UV_ANGLE)
-            ); //越接近垂直上下点的垂直灯条方向偏移越大，这个实际还是需要考虑遮挡模型
+            // sigma_angle *= std::cos(z(idx::UV_ANGLE)
+            // ); //越接近垂直上下点的垂直灯条方向偏移越大，这个实际还是需要考虑遮挡模型
             r(idx::UV_ANGLE, idx::UV_ANGLE) = sigma_angle * sigma_angle / 2.0;
             r(idx::UV_CENTER_X, idx::UV_CENTER_X) = sigma_x * sigma_x / 2.0;
             r(idx::UV_CENTER_Y, idx::UV_CENTER_Y) = sigma_y * sigma_y / 2.0;
@@ -428,9 +429,16 @@ int ArmorTarget::update(
             const Vec3 right_center = (point_in_camera(ArmorKeyPointsIndex::RIGHT_TOP)
                                        + point_in_camera(ArmorKeyPointsIndex::RIGHT_BOTTOM))
                 / 2.0;
-            const double depth_diff = left_center.z() - right_center.z();
+            // const Vec3 top_center = (point_in_camera(ArmorKeyPointsIndex::LEFT_TOP)
+            //                           + point_in_camera(ArmorKeyPointsIndex::RIGHT_TOP))
+            //     / 2.0;
+            // const Vec3 bottom_center = (point_in_camera(ArmorKeyPointsIndex::LEFT_BOTTOM)
+            //                              + point_in_camera(ArmorKeyPointsIndex::RIGHT_BOTTOM))
+            //     / 2.0;
+            const double rl_depth_diff = left_center.z() - right_center.z();
+            // const double tb_depth_diff = top_center.z() - bottom_center.z();
             DiffVecZ observation_diff;
-            observation_diff << depth_diff;
+            observation_diff << rl_depth_diff;
             DiffMeasure measure_diff { .ctx = ctx };
             obs.push_back(esekf->make_obs(
                 observation_diff,
@@ -441,6 +449,7 @@ int ArmorTarget::update(
                     auto r_sigma = cfg.r_sigma_armor_lights_depth_diff;
                     // / std::abs(z[0] / getArmorWH(target_number).first); //实际触发到这里的情况深度差都不大，这么映射太猛了
                     r(0, 0) = r_sigma * r_sigma / 2.0;
+                    r(1, 1) = r_sigma * r_sigma / 2.0;
                     return r;
                 },
                 [](const DiffVecZ& z_pred, const DiffVecZ& z) {
@@ -473,9 +482,6 @@ int ArmorTarget::update(
     }
 
     for (const auto& [id, is_left, light]: matched_lights) {
-        if (used_id[id]) {
-            continue;
-        }
         used_id[id] = true;
         add_uvl_obs(light.top, light.bottom, id, is_left);
     }
