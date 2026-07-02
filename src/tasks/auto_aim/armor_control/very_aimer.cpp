@@ -509,13 +509,7 @@ struct VeryAimer::Impl {
                 return cmd;
             }
             if (limit_traj_.size() > old_limit_size) {
-                const size_t first_changed_cp = old_limit_size == 0 ? 0 : old_limit_size - 1;
-                limit_traj_.build_limit_incremental(
-                    params_.max_yaw_acc,
-                    params_.max_pitch_acc,
-                    time_in_traj,
-                    first_changed_cp
-                );
+                limit_traj_.build_limit(params_.max_yaw_acc, params_.max_pitch_acc, time_in_traj);
             }
             if (fsm == AutoAimFsm::AIM_WHOLE_CAR_CENTER) { //瞄准中间的目标和控制不一样
                 if (!replenish_traj(

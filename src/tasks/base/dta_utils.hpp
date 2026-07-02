@@ -216,32 +216,10 @@ public:
                 seg_prefix_time[i + 1] = seg_prefix_time[i] + segs[i].duration();
             }
         }
-        void rebuild_prefix_from(size_t seg_pos, double first_time) {
-            seg_prefix_time.resize(segs.size() + 1);
-            if (seg_pos == 0) {
-                seg_prefix_time[0] = first_time;
-            }
-            for (size_t i = seg_pos; i < segs.size(); ++i) {
-                seg_prefix_time[i + 1] = seg_prefix_time[i] + segs[i].duration();
-            }
-        }
-        size_t erase_suffix_from_raw_seg(int raw_seg_idx) {
-            size_t keep = 0;
-            while (keep < segs.size() && seg_end_idx[keep] <= raw_seg_idx) {
-                ++keep;
-            }
-            segs.resize(keep);
-            seg_start_idx.resize(keep);
-            seg_end_idx.resize(keep);
-            seg_prefix_time.resize(keep + 1);
-            return keep;
-        }
     };
 
     Traj yaw_traj;
     Traj pitch_traj;
-    std::vector<GimbalState::State> yaw_state_buf;
-    std::vector<GimbalState::State> pitch_state_buf;
     static inline double angle_diff(double a, double b) noexcept {
         double d = a - b;
         while (d > M_PI)
@@ -271,192 +249,107 @@ public:
         Trajectory::clear();
         yaw_traj.clear();
         pitch_traj.clear();
-        yaw_state_buf.clear();
-        pitch_state_buf.clear();
     }
 
-    void copy_node_positions_from(
-        const std::vector<GimbalState>& gp,
-        std::vector<GimbalState::State>& yaw,
-        std::vector<GimbalState::State>& pitch,
-        size_t first
-    ) const noexcept {
-        const size_t N = gp.size();
-        first = std::min(first, N);
-        if (yaw.size() < first || pitch.size() < first) {
-            first = 0;
-        }
-        yaw.resize(N);
-        pitch.resize(N);
-        for (size_t i = first; i < N; ++i) {
-            yaw[i] = gp[i].yaw_state;
-            pitch[i] = gp[i].pitch_state;
-            yaw[i].v = yaw[i].a = 0.0;
-            pitch[i].v = pitch[i].a = 0.0;
-        }
+    struct SegmentDesc {
+        int l = 0;
+        int r = 0;
+        bool on_traj = true;
+    };
+
+    [[nodiscard]] static inline GimbalState::State average_motion_state(
+        const GimbalState::State& s0,
+        const GimbalState::State& s1,
+        double T
+    ) noexcept {
+        GimbalState::State s = s0;
+        s.v = T > 1e-9 ? (s1.p - s0.p) / T : 0.0;
+        s.a = 0.0;
+        return s;
     }
 
-    void copy_node_positions(
-        const std::vector<GimbalState>& gp,
-        std::vector<GimbalState::State>& yaw,
-        std::vector<GimbalState::State>& pitch
-    ) const noexcept {
-        copy_node_positions_from(gp, yaw, pitch, 0);
-    }
-
-    void compute_node_states(
-        const std::vector<GimbalState>& gp,
+    [[nodiscard]] static inline double segment_avg_v(
+        const std::vector<GimbalState::State>& s,
         const std::vector<double>& prefix,
-        std::vector<GimbalState::State>& yaw,
-        std::vector<GimbalState::State>& pitch
-    ) const noexcept {
-        const size_t N = gp.size();
-        yaw.resize(N);
-        pitch.resize(N);
-        for (size_t i = 0; i < N; ++i) {
-            yaw[i] = gp[i].yaw_state;
-            pitch[i] = gp[i].pitch_state;
-        }
-        if (N < 2)
-            return;
-        auto compute_one = [&](std::vector<GimbalState::State>& s, size_t i) {
-            if (i == 0 || i + 1 == N) {
-                s[i].v = 0.0;
-                s[i].a = 0.0;
-                return;
-            }
-
-            const bool same_prev = gp[i - 1].aim_id == gp[i].aim_id;
-            const bool same_next = gp[i].aim_id == gp[i + 1].aim_id;
-            const double dt0 = prefix[i] - prefix[i - 1];
-            const double dt1 = prefix[i + 1] - prefix[i];
-
-            if (same_prev && same_next) {
-                const double denom = dt0 + dt1;
-                const double w0 = dt1 / denom;
-                const double w1 = dt0 / denom;
-                s[i].v = w0 * (s[i].p - s[i - 1].p) / dt0 + w1 * (s[i + 1].p - s[i].p) / dt1;
-                s[i].a = 2.0 * ((s[i + 1].p - s[i].p) / dt1 - (s[i].p - s[i - 1].p) / dt0) / denom;
-                return;
-            }
-
-            if (same_prev) {
-                s[i].v = (s[i].p - s[i - 1].p) / dt0;
-                s[i].a = 0.0;
-                return;
-            }
-
-            if (same_next) {
-                s[i].v = (s[i + 1].p - s[i].p) / dt1;
-                s[i].a = 0.0;
-                return;
-            }
-
-            s[i].v = 0.0;
-            s[i].a = 0.0;
-        };
-        auto compute_va = [&](std::vector<GimbalState::State>& s) {
-            // 边界
-            s.front().v = s.back().v = 0.0;
-            s.front().a = s.back().a = 0.0;
-
-            for (size_t i = 1; i + 1 < N; ++i) {
-                compute_one(s, i);
-            }
-        };
-
-        compute_va(yaw);
-        compute_va(pitch);
+        const SegmentDesc& d
+    ) noexcept {
+        const double T = prefix[d.r] - prefix[d.l];
+        return T > 1e-9 ? (s[d.r].p - s[d.l].p) / T : 0.0;
     }
 
-    [[nodiscard]] std::pair<std::vector<GimbalState::State>, std::vector<GimbalState::State>>
-    compute_node_states(const std::vector<GimbalState>& gp, const std::vector<double>& prefix)
-        const noexcept {
-        std::vector<GimbalState::State> yaw, pitch;
-        compute_node_states(gp, prefix, yaw, pitch);
-        return { yaw, pitch };
-    }
-
-    void compute_node_states_from(
-        const std::vector<GimbalState>& gp,
+    [[nodiscard]] static inline Seg build_sampled_center_seg(
+        const std::vector<GimbalState::State>& s,
         const std::vector<double>& prefix,
-        std::vector<GimbalState::State>& yaw,
-        std::vector<GimbalState::State>& pitch,
-        size_t first
-    ) const noexcept {
-        const size_t N = gp.size();
-        if (yaw.size() < std::min(first, N) || pitch.size() < std::min(first, N)) {
-            compute_node_states(gp, prefix, yaw, pitch);
-            return;
+        const std::vector<SegmentDesc>& descs,
+        size_t center
+    ) noexcept {
+        const auto& d = descs[center];
+        const double T = prefix[d.r] - prefix[d.l];
+        if (!d.on_traj || center == 0 || center + 1 == descs.size()) {
+            auto head = s[d.l];
+            auto tail = s[d.r];
+            head.v = head.a = 0.0;
+            tail.v = tail.a = 0.0;
+            return Seg::build(head, tail, T, d.on_traj);
         }
-        yaw.resize(N);
-        pitch.resize(N);
-        if (N == 0)
-            return;
 
-        first = std::min(first, N - 1);
-        for (size_t i = first; i < N; ++i) {
-            yaw[i] = gp[i].yaw_state;
-            pitch[i] = gp[i].pitch_state;
-        }
-        if (N < 2)
-            return;
+        const bool has_left = d.on_traj && center > 0 && descs[center - 1].on_traj;
+        const bool has_right = d.on_traj && center + 1 < descs.size() && descs[center + 1].on_traj;
+        const double left_v = has_left ? segment_avg_v(s, prefix, descs[center - 1]) : 0.0;
+        const double right_v = has_right ? segment_avg_v(s, prefix, descs[center + 1]) : 0.0;
+        const double center_a = (has_left && has_right && T > 1e-9) ? (right_v - left_v) / T : 0.0;
 
-        auto compute_one = [&](std::vector<GimbalState::State>& s, size_t i) {
-            if (i == 0 || i + 1 == N) {
-                s[i].v = 0.0;
-                s[i].a = 0.0;
-                return;
+        auto head = s[d.l];
+        auto tail = s[d.r];
+        head.v = has_left ? left_v : 0.0;
+        tail.v = has_right ? right_v : 0.0;
+        head.a = center_a;
+        tail.a = center_a;
+        return Seg::build(head, tail, T, d.on_traj);
+    }
+
+    [[nodiscard]] std::vector<SegmentDesc>
+    make_segment_descs(int N, const std::optional<std::pair<int, int>>& interval) const {
+        std::vector<SegmentDesc> descs;
+        if (N <= 1)
+            return descs;
+
+        descs.reserve(N - 1);
+        for (int i = 0; i < N - 1; ++i) {
+            if (interval && i == interval->first) {
+                descs.push_back({ interval->first, interval->second, false });
+                i = interval->second - 1;
+            } else {
+                descs.push_back({ i, i + 1, true });
             }
+        }
+        return descs;
+    }
 
-            const bool same_prev = gp[i - 1].aim_id == gp[i].aim_id;
-            const bool same_next = gp[i].aim_id == gp[i + 1].aim_id;
-            const double dt0 = prefix[i] - prefix[i - 1];
-            const double dt1 = prefix[i + 1] - prefix[i];
+    [[nodiscard]] size_t seed_desc_idx(
+        const std::vector<SegmentDesc>& descs,
+        const std::optional<std::pair<int, int>>& interval
+    ) const noexcept {
+        if (descs.empty())
+            return 0;
 
-            if (same_prev && same_next) {
-                const double denom = dt0 + dt1;
-
-                if (dt0 <= 1e-6 || dt1 <= 1e-6 || denom < 1e-6) {
-                    s[i].v = s[i].a = 0.0;
-                    return;
+        if (interval) {
+            for (size_t i = 0; i < descs.size(); ++i) {
+                if (descs[i].l <= interval->first && descs[i].r >= interval->second) {
+                    return i;
                 }
-
-                const double w0 = dt1 / denom;
-                const double w1 = dt0 / denom;
-                s[i].v = w0 * (s[i].p - s[i - 1].p) / dt0 + w1 * (s[i + 1].p - s[i].p) / dt1;
-                s[i].a = 2.0 * ((s[i + 1].p - s[i].p) / dt1 - (s[i].p - s[i - 1].p) / dt0) / denom;
-                return;
             }
-
-            if (same_prev && dt0 > 1e-6) {
-                s[i].v = (s[i].p - s[i - 1].p) / dt0;
-                s[i].a = 0.0;
-                return;
-            }
-
-            if (same_next && dt1 > 1e-6) {
-                s[i].v = (s[i + 1].p - s[i].p) / dt1;
-                s[i].a = 0.0;
-                return;
-            }
-
-            s[i].v = 0.0;
-            s[i].a = 0.0;
-        };
-
-        for (size_t i = first; i < N; ++i) {
-            compute_one(yaw, i);
-            compute_one(pitch, i);
         }
+
+        return descs.size() / 2;
     }
 
-    [[nodiscard]] int nearest_change_idx(
+    [[nodiscard]] std::optional<std::pair<int, int>> find_nearest_change_interval(
         const std::vector<GimbalState>& cp_vec,
         const std::vector<double>& prefix,
         double current_time
     ) const noexcept {
-        int best_idx = -1;
+        std::optional<std::pair<int, int>> interval;
         double best_dist = std::numeric_limits<double>::max();
         for (size_t i = 0; i + 1 < cp_vec.size(); ++i) {
             if (cp_vec[i].aim_id == cp_vec[i + 1].aim_id)
@@ -464,32 +357,22 @@ public:
 
             const double seg_mid = 0.5 * (prefix[i] + prefix[i + 1]);
             const double dist = std::abs(seg_mid - current_time);
-
             if (dist < best_dist) {
                 best_dist = dist;
-                best_idx = static_cast<int>(i);
+                interval.emplace(static_cast<int>(i), static_cast<int>(i + 1));
             }
         }
-        return best_idx;
+        return interval;
     }
 
-    [[nodiscard]] std::optional<std::pair<int, int>> find_limit_interval(
+    [[nodiscard]] std::optional<std::pair<int, int>> expand_limit_interval(
         const std::vector<GimbalState>& cp_vec,
         const std::vector<GimbalState::State>& s,
         const std::vector<double>& prefix,
-        int near_change_idx,
+        std::optional<std::pair<int, int>> interval,
         double max_acc
     ) const noexcept {
         const int N = static_cast<int>(s.size());
-        std::optional<std::pair<int, int>> interval;
-        if (near_change_idx >= 0 && near_change_idx + 1 < N
-            && cp_vec[near_change_idx].aim_id != cp_vec[near_change_idx + 1].aim_id)
-        {
-            int l = std::clamp(near_change_idx, 0, N - 1);
-            int r = std::clamp(near_change_idx + 1, 0, N - 1);
-            if (l < r)
-                interval.emplace(l, r);
-        }
         if (!interval)
             return interval;
 
@@ -554,111 +437,12 @@ public:
         return interval;
     }
 
-    struct SegmentDesc {
-        int l = 0;
-        int r = 0;
-        bool on_traj = true;
-    };
-
-    [[nodiscard]] static inline GimbalState::State average_motion_state(
-        const GimbalState::State& s0,
-        const GimbalState::State& s1,
-        double T
-    ) noexcept {
-        GimbalState::State s = s0;
-        s.v = T > 1e-9 ? (s1.p - s0.p) / T : 0.0;
-        s.a = 0.0;
-        return s;
-    }
-
-    [[nodiscard]] static inline Seg build_average_motion_seg(
-        const GimbalState::State& s0,
-        const GimbalState::State& s1,
-        double T,
-        bool on_traj
-    ) noexcept {
-        auto head = average_motion_state(s0, s1, T);
-        auto tail = s1;
-        tail.v = head.v;
-        tail.a = 0.0;
-        return Seg::build(head, tail, T, on_traj);
-    }
-
-    [[nodiscard]] static inline double segment_avg_v(
-        const std::vector<GimbalState::State>& s,
-        const std::vector<double>& prefix,
-        const SegmentDesc& d
-    ) noexcept {
-        const double T = prefix[d.r] - prefix[d.l];
-        return T > 1e-9 ? (s[d.r].p - s[d.l].p) / T : 0.0;
-    }
-
-    [[nodiscard]] static inline Seg build_sampled_center_seg(
-        const std::vector<GimbalState::State>& s,
-        const std::vector<double>& prefix,
-        const std::vector<SegmentDesc>& descs,
-        size_t center
-    ) noexcept {
-        const auto& d = descs[center];
-        const double T = prefix[d.r] - prefix[d.l];
-        const double center_v = segment_avg_v(s, prefix, d);
-        const double left_v = center > 0 ? segment_avg_v(s, prefix, descs[center - 1]) : center_v;
-        const double right_v =
-            center + 1 < descs.size() ? segment_avg_v(s, prefix, descs[center + 1]) : center_v;
-        const double center_a = T > 1e-9 ? (right_v - left_v) / T : 0.0;
-
-        auto head = s[d.l];
-        auto tail = s[d.r];
-        head.v = left_v;
-        tail.v = right_v;
-        head.a = center_a;
-        tail.a = center_a;
-        return Seg::build(head, tail, T, d.on_traj);
-    }
-
-    [[nodiscard]] std::vector<SegmentDesc>
-    make_segment_descs(int N, const std::optional<std::pair<int, int>>& interval) const {
-        std::vector<SegmentDesc> descs;
-        if (N <= 1)
-            return descs;
-
-        descs.reserve(N - 1);
-        for (int i = 0; i < N - 1; ++i) {
-            if (interval && i == interval->first) {
-                descs.push_back({ interval->first, interval->second, false });
-                i = interval->second - 1;
-            } else {
-                descs.push_back({ i, i + 1, true });
-            }
-        }
-        return descs;
-    }
-
-    [[nodiscard]] size_t center_desc_idx(
-        const std::vector<SegmentDesc>& descs,
-        const std::vector<double>& prefix,
-        double current_time
-    ) const noexcept {
-        if (descs.empty())
-            return 0;
-
-        for (size_t i = 0; i < descs.size(); ++i) {
-            if (current_time >= prefix[descs[i].l] && current_time <= prefix[descs[i].r]) {
-                return i;
-            }
-        }
-
-        if (current_time < prefix[descs.front().l])
-            return 0;
-        return descs.size() - 1;
-    }
-
     void build_continuous_centered_traj(
         Traj& traj,
         const std::vector<GimbalState::State>& s,
         const std::vector<double>& prefix,
         const std::vector<SegmentDesc>& descs,
-        double current_time
+        size_t seed
     ) const noexcept {
         traj.segs.clear();
         traj.seg_start_idx.clear();
@@ -668,7 +452,7 @@ public:
             return;
 
         std::vector<Seg> segs(descs.size());
-        const size_t center = center_desc_idx(descs, prefix, current_time);
+        const size_t center = std::min(seed, descs.size() - 1);
 
         auto duration = [&](const SegmentDesc& d) { return prefix[d.r] - prefix[d.l]; };
 
@@ -701,54 +485,59 @@ public:
         traj.rebuild_prefix(prefix[descs.front().l]);
     }
 
+    template<typename ProjectState>
     void limit_traj(
         Traj& traj,
         const std::vector<GimbalState>& cp_vec,
-        const std::vector<GimbalState::State>& s,
         const std::vector<double>& prefix,
-        int near_change_idx,
+        std::optional<std::pair<int, int>> change_interval,
         double max_acc,
-        double current_time
+        ProjectState&& project
     ) const noexcept {
         traj.clear();
 
-        const int N = static_cast<int>(s.size());
+        const int N = static_cast<int>(cp_vec.size());
         if (N <= 1)
             return;
 
-        const auto interval = find_limit_interval(cp_vec, s, prefix, near_change_idx, max_acc);
+        std::vector<GimbalState::State> s;
+        s.resize(cp_vec.size());
+        for (size_t i = 0; i < cp_vec.size(); ++i) {
+            s[i] = project(cp_vec[i]);
+            s[i].v = 0.0;
+            s[i].a = 0.0;
+        }
+
+        const auto interval = expand_limit_interval(cp_vec, s, prefix, change_interval, max_acc);
         traj.limit_interval = interval;
         const auto descs = make_segment_descs(N, interval);
-        build_continuous_centered_traj(traj, s, prefix, descs, current_time);
+        build_continuous_centered_traj(traj, s, prefix, descs, seed_desc_idx(descs, change_interval));
     }
 
     void build_limit(double max_yaw_acc, double max_pitch_acc, double current_time) noexcept {
         auto& cp_vec = get_cp_vec();
         const auto& prefix = get_prefix();
         unwrap_states(cp_vec);
-        copy_node_positions(cp_vec, yaw_state_buf, pitch_state_buf);
         const int N = static_cast<int>(cp_vec.size());
         if (N < 2)
             return;
-        const int best_idx = nearest_change_idx(cp_vec, prefix, current_time);
-        limit_traj(yaw_traj, cp_vec, yaw_state_buf, prefix, best_idx, max_yaw_acc, current_time);
+        const auto change_interval = find_nearest_change_interval(cp_vec, prefix, current_time);
+        limit_traj(
+            yaw_traj,
+            cp_vec,
+            prefix,
+            change_interval,
+            max_yaw_acc,
+            [](const GimbalState& s) { return s.yaw_state; }
+        );
         limit_traj(
             pitch_traj,
             cp_vec,
-            pitch_state_buf,
             prefix,
-            best_idx,
+            change_interval,
             max_pitch_acc,
-            current_time
+            [](const GimbalState& s) { return s.pitch_state; }
         );
-    }
-    void build_limit_incremental(
-        double max_yaw_acc,
-        double max_pitch_acc,
-        double current_time,
-        size_t /*first_changed_cp*/
-    ) noexcept {
-        build_limit(max_yaw_acc, max_pitch_acc, current_time);
     }
     [[nodiscard]] inline GimbalState::State state_at(double t, const Traj& traj) const noexcept {
         if (traj.segs.empty())
