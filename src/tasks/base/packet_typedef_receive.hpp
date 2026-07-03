@@ -35,6 +35,7 @@ struct ReceiveRobotData {
     uint32_t bullet_count; //发出弹+1
     float operator_yaw_offset;
     float operator_pitch_offset;
+    uint8_t mode;
 
     static std::optional<ReceiveRobotData> create(const std::vector<uint8_t>& data) {
         if (data.size() != sizeof(ReceiveRobotData) || data[0] != ID)
@@ -67,6 +68,7 @@ struct ReceiveRobotData {
             j["bullet_count"] = Web::val(bullet_count);
             j["operator_yaw_offset"] = Web::val(operator_yaw_offset);
             j["operator_pitch_offset"] = Web::val(operator_pitch_offset);
+            j["mode"] = Web::val(mode);
         });
     }
 

@@ -15,5 +15,6 @@ public:
     AWAKENING_IMPL_DEFINITION(RuneAimer)
     std::pair<double, double> get_yaw_pitch_offset();
     void set_operator_offset(std::pair<double, double> offset);
+    bool tick_fire(const RuneTarget& _target, const GimbalCmd& cmd) const noexcept;
 };
 } // namespace awakening::auto_buff

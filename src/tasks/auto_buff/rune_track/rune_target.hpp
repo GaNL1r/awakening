@@ -53,7 +53,6 @@ struct FanWC {
     std::array<TimePoint, FAN_NUM> fan_times;
     void reset() {
         is_visible.fill(false);
-        fan_times.fill(TimePoint());
     }
     void update(int i, const TimePoint& timestamp) {
         is_visible[i] = true;

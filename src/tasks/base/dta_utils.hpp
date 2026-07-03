@@ -511,7 +511,13 @@ public:
         const auto interval = expand_limit_interval(cp_vec, s, prefix, change_interval, max_acc);
         traj.limit_interval = interval;
         const auto descs = make_segment_descs(N, interval);
-        build_continuous_centered_traj(traj, s, prefix, descs, seed_desc_idx(descs, change_interval));
+        build_continuous_centered_traj(
+            traj,
+            s,
+            prefix,
+            descs,
+            seed_desc_idx(descs, change_interval)
+        );
     }
 
     void build_limit(double max_yaw_acc, double max_pitch_acc, double current_time) noexcept {

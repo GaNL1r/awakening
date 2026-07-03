@@ -698,6 +698,13 @@ int main(int argc, char** argv) {
             rune_aimer.set_operator_offset(operator_offset);
             cmd =
                 rune_aimer.aim(r_target, bullet_speed, shoot_in_gimbal_odom, gimbal_in_gimbal_odom);
+            bool can_fire = rune_aimer.tick_fire(r_target, cmd);
+            if (can_fire) {
+                AWAKENING_INFO("you can fire!");
+                cmd.fire_advice = true;
+            } else {
+                cmd.fire_advice = false;
+            }
         }
 
         if (serial) {
@@ -720,20 +727,26 @@ int main(int argc, char** argv) {
                 tf->pose_a_in_b(SimpleFrame::GIMBAL, SimpleFrame::GIMBAL_ODOM, Clock::now());
             auto rpy =
                 utils::matrix2rpy<double>(gimbal_in_gimbal_odom.linear(), utils::RPYOrder::ZYX);
-            daedalus_shm_client->send_gimbal_cmd(
-                cmd.yaw,
-                -cmd.pitch,
-                cmd.appear ? 1.0 : -1.0,
-                (std::abs(angles::shortest_angular_distance_degrees(
-                     angles::to_degrees(rpy[2]),
-                     cmd.target_yaw
-                 )) < cmd.enable_yaw_diff
-                 && std::abs(angles::shortest_angular_distance_degrees(
-                        angles::to_degrees(-rpy[1]),
-                        cmd.target_pitch
-                    ))
-                     < cmd.enable_pitch_diff)
-            );
+            static TimePoint last_fire;
+            bool fire = cmd.fire_advice
+                && (std::abs(angles::shortest_angular_distance_degrees(
+                        angles::to_degrees(rpy[2]),
+                        cmd.target_yaw
+                    )) < cmd.enable_yaw_diff
+                    && std::abs(angles::shortest_angular_distance_degrees(
+                           angles::to_degrees(-rpy[1]),
+                           cmd.target_pitch
+                       ))
+                        < cmd.enable_pitch_diff);
+            if (fire) {
+                last_fire = Clock::now();
+            }
+            bool send_fire = false;
+            if (Clock::now() - last_fire < std::chrono::milliseconds(100)) {
+                send_fire = true;
+            }
+            daedalus_shm_client
+                ->send_gimbal_cmd(cmd.yaw, -cmd.pitch, cmd.appear ? 1.0 : -1.0, send_fire);
             // daedalus_shm_client
             //     ->send_gimbal_cmd(cmd.yaw, -cmd.pitch, cmd.appear ? 1.0 : -1.0, false);
         }
