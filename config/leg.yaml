@@ -1,5 +1,5 @@
 mode: auto_aim
-enemy_color: blue
+enemy_color: red
 bullet_speed: 23.0
 
 serial:
@@ -8,7 +8,7 @@ serial:
   baud_rate: 115200
   char_size: 8
   read_buf_size: 4096
-serial_send_to_image_microseconds: 2500
+serial_send_to_image_microseconds: -6000
 use_sim: false
 
 record:
@@ -19,7 +19,7 @@ tf:
     t: [0.05,0.0,0.1]
     R: [1.0,0.0,0.0,0.0,1.0,0.0,0.0,0.0,1.0]
   shoot_in_gimbal:
-    t: [0.2,0.0,0.0]
+    t: [0.1,0.0,0.0]
     R: [1.0,0.0,0.0,0.0,1.0,0.0,0.0,0.0,1.0]
 wheel_odometry:
   q_xyz: [10.0,10.0,1.0]
@@ -54,12 +54,12 @@ armor_detector:
       execution_mode: "PERFORMANCE"
       infer_request_buffer_num: 10
     tensorrt:
-      model_path: ${ROOT_DIR}/model/0708.onnx
+      model_path: ${ROOT_DIR}/model/opt-1208-001.onnx
       copy_context_num: 4
       min_free_mem_ratio: 0.1
       use_cuda_preproces: true
     armor_infer:
-      model_type: rp
+      model_type: tup
       conf_threshold: 0.2
   number_classifier:
     enable: true
@@ -70,10 +70,11 @@ armor_detector:
     diff_threshold: 20.0
   cv:
     light:
-      bin_threshold: 120.0
+      bin_threshold: 150.0
+      net_ref_threshold_tol: 50.0
       min_wh_ratio: 0.001
       max_wh_ratio: 0.4
-      max_angle: 40.0
+      max_angle: 181.0
     armor:
       min_ratio: 0.8
       max_ratio: 5.0
@@ -90,10 +91,10 @@ armor_tracker:
   q_r: 0.0000001
   q_l: 0.0000001
   q_h: 0.0000001
-  q_wpr: 0.00001
+  q_wpr: 0.1
   q_outpost_dz: 0.0000001
   enable_lights_measure: true
-  armor_match_gate: 200.0
+  armor_match_gate: 300.0
   armor_match_gate_not_all_init: 1000.0
   armor_match_w_center_err: 5.0
   armor_match_w_angle_err: 10.0
@@ -120,11 +121,11 @@ auto_aim_fsm:
 
 very_aimer:
   base_yaw_offset: -0.0
-  base_pitch_offset: -0.5
+  base_pitch_offset: 1.0
   sample_total_time: 0.5
   sample_horizon: 100
-  fire_delay_min: 0.00
-  fire_delay_max: 0.00
+  fire_delay_min: 0.01
+  fire_delay_max: 0.05
   max_yaw_acc: 40
   max_pitch_acc: 50
   prediction_delay: 0.00
@@ -205,6 +206,7 @@ rune_aimer:
     resistance: 0.001
 
 camera: 
+  type: hik
   hik_camera:
     target_sn: DA2166465
     adc_bit_depth: Bits_8
@@ -216,7 +218,7 @@ camera:
     offset_x: 0
     offset_y: 0
     acquisition_frame_rate_enable: true
-    acquisition_frame_rate: 200
+    acquisition_frame_rate: 250
     exposure_time: 1500
     gain: 16.9
     gamma: 0.7 #Bayer用不了

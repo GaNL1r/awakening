@@ -111,6 +111,10 @@ struct ArmorTracker::Impl {
             {
                 candidates.emplace_back(a);
             }
+            // if (a.number == target.target_number)
+            // {
+            //     candidates.emplace_back(a);
+            // }
         }
         target.predict_ekf(armors.timestamp);
         auto matched_armors =

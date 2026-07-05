@@ -71,6 +71,7 @@ armor_detector:
   cv:
     light:
       bin_threshold: 120.0
+      net_ref_threshold_tol: 50.0
       min_wh_ratio: 0.001
       max_wh_ratio: 0.4
       max_angle: 40.0
@@ -92,7 +93,7 @@ armor_tracker:
   q_h: 0.0000001
   q_wpr: 0.1
   q_outpost_dz: 0.0000001
-  enable_lights_measure: false
+  enable_lights_measure: true
   armor_match_gate: 200.0
   armor_match_gate_not_all_init: 1000.0
   armor_match_w_center_err: 5.0
@@ -124,6 +125,7 @@ auto_aim_fsm:
 
 
 very_aimer:
+  type: "mpc"
   base_yaw_offset: -0.0
   base_pitch_offset: -0.5
   sample_total_time: 0.5

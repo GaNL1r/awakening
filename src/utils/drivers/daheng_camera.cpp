@@ -47,6 +47,7 @@ void DahengCamera::stop() {
         return;
     }
     running_ = false;
+    stop_source_thread();
     if (daemon_thread_.joinable()) {
         daemon_thread_.join();
     }
@@ -58,6 +59,42 @@ void DahengCamera::stop() {
     }
 
     AWAKENING_INFO("daheng_camera has stop");
+}
+
+bool DahengCamera::start_capture() {
+    auto status = GXStreamOn(device_handle_);
+    if (status != GX_STATUS_SUCCESS) {
+        AWAKENING_ERROR("daheng_camera: GXStreamOn failed: {}", int(status));
+        return false;
+    }
+    running_ = true;
+    return true;
+}
+
+ImageFrame DahengCamera::read() {
+    ImageFrame img_frame;
+    if (!device_handle_) {
+        AWAKENING_ERROR("daheng_camera: camera is not initialized");
+        return img_frame;
+    }
+
+    Frame frame;
+    frame.frame_data.pImgBuf = frame_buffer_.data();
+    frame.frame_data.nImgSize = static_cast<uint32_t>(frame_buffer_.size());
+    auto status = GXGetImage(device_handle_, &frame.frame_data, 100);
+    if (status != GX_STATUS_SUCCESS || frame.frame_data.nStatus != 0) {
+        AWAKENING_ERROR(
+            "daheng_camera: GXGetImage failed: status={} frame_status={}",
+            int(status),
+            int(frame.frame_data.nStatus)
+        );
+        return img_frame;
+    }
+
+    const auto current_time = Clock::now();
+    const auto half_exposure = std::chrono::microseconds(static_cast<long>(get_ExposureTime() / 2));
+    frame.timestamp = current_time - half_exposure;
+    return to_image_frame(frame);
 }
 
 void DahengCamera::restart() {

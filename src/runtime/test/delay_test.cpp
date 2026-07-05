@@ -4,7 +4,7 @@
 #include "tasks/base/common.hpp"
 #include "tasks/base/packet_typedef_receive.hpp"
 #include "tasks/base/packet_typedef_send.hpp"
-#include "utils/drivers/hik_camera.hpp"
+#include "utils/drivers/camera_factory.hpp"
 #include "utils/drivers/serial_driver.hpp"
 #include "utils/runtime_tf.hpp"
 #include "utils/signal_guard.hpp"
@@ -71,16 +71,16 @@ int main(int argc, char** argv) {
     }
 
     auto camera_config = config["camera"];
-    std::unique_ptr<HikCamera> camera;
+    std::unique_ptr<Camera> camera;
     utils::SignalGuard::add_callback([&]() {
         if (camera) {
             camera->stop();
         }
     });
 
-    camera = std::make_unique<HikCamera>(camera_config["hik_camera"], s);
+    camera = create_camera(camera_config, s, "hik");
     camera->init();
-    if (!camera->running_) {
+    if (!camera->is_running()) {
         return 0;
     }
 

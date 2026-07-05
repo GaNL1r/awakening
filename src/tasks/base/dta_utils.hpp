@@ -1,12 +1,16 @@
 #pragma once
 
+#include "angles.h"
 #include "tasks/base/common.hpp"
 #include "tasks/base/traj.hpp"
+#include "tinympc/tiny_api.hpp"
 #include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <limits>
+#include <memory>
 #include <optional>
+#include <tbb/parallel_invoke.h>
 #include <utility>
 #include <vector>
 
@@ -24,6 +28,13 @@ struct GimbalState {
         double v;
         double a;
         bool on_traj;
+        static State lerp(const State& s0, const State& s1, double a) noexcept {
+            State r { .p = utils::lerp_angle(s0.p, s1.p, a),
+                      .v = std::lerp(s0.v, s1.v, a),
+                      .a = std::lerp(s0.a, s1.a, a) };
+
+            return r;
+        }
     };
     State yaw_state;
     State pitch_state;
@@ -35,15 +46,8 @@ struct GimbalState {
     static GimbalState lerp(const GimbalState& s0, const GimbalState& s1, double a) noexcept {
         GimbalState r;
         r.aim_id = (a < 0.5) ? s0.aim_id : s1.aim_id;
-        r.yaw_state =
-            GimbalState::State { .p = utils::lerp_angle(s0.yaw_state.p, s1.yaw_state.p, a),
-                                 .v = std::lerp(s0.yaw_state.v, s1.yaw_state.v, a),
-                                 .a = std::lerp(s0.yaw_state.a, s1.yaw_state.a, a) };
-        r.pitch_state =
-            GimbalState::State { .p = utils::lerp_angle(s0.pitch_state.p, s1.pitch_state.p, a),
-                                 .v = std::lerp(s0.pitch_state.v, s1.pitch_state.v, a),
-                                 .a = std::lerp(s0.pitch_state.a, s1.pitch_state.a, a) };
-
+        r.yaw_state = State::lerp(s0.yaw_state, s1.yaw_state, a);
+        r.pitch_state = State::lerp(s0.pitch_state, s1.pitch_state, a);
         return r;
     }
 };
@@ -182,6 +186,7 @@ struct QuinticSegment {
         return s;
     }
 };
+
 class LimitTrajectory: public Trajectory<GimbalState, double> {
 public:
     using Seg = QuinticSegment<double>;
@@ -220,30 +225,14 @@ public:
 
     Traj yaw_traj;
     Traj pitch_traj;
-    static inline double angle_diff(double a, double b) noexcept {
-        double d = a - b;
-        while (d > M_PI)
-            d -= 2 * M_PI;
-        while (d < -M_PI)
-            d += 2 * M_PI;
-        return d;
-    }
 
-    static inline double unwrap_angle(double prev, double curr) noexcept {
-        return prev + angle_diff(curr, prev);
-    }
-
-    void unwrap_states_from(std::vector<GimbalState>& s, size_t first) const noexcept {
+    void unwrap_states(std::vector<GimbalState>& s) const noexcept {
         if (s.size() < 2)
             return;
-        first = std::max<size_t>(first, 1);
-        for (size_t i = first; i < s.size(); ++i) {
-            s[i].yaw_state.p = unwrap_angle(s[i - 1].yaw_state.p, s[i].yaw_state.p);
-            s[i].pitch_state.p = unwrap_angle(s[i - 1].pitch_state.p, s[i].pitch_state.p);
+        for (size_t i = 1; i < s.size(); ++i) {
+            s[i].yaw_state.p = angles::unwrap_angle(s[i - 1].yaw_state.p, s[i].yaw_state.p);
+            s[i].pitch_state.p = angles::unwrap_angle(s[i - 1].pitch_state.p, s[i].pitch_state.p);
         }
-    }
-    void unwrap_states(std::vector<GimbalState>& s) const noexcept {
-        unwrap_states_from(s, 1);
     }
     void clear() {
         Trajectory::clear();
@@ -508,6 +497,117 @@ public:
             [](const GimbalState& s) { return s.pitch_state; }
         );
     }
+
+    void update_limit_after_append(
+        double max_yaw_acc,
+        double max_pitch_acc,
+        double current_time,
+        size_t old_size
+    ) noexcept {
+        auto& cp_vec = get_cp_vec();
+        const auto& prefix = get_prefix();
+        const size_t N = cp_vec.size();
+        if (N < 2) {
+            return;
+        }
+        if (old_size >= N) {
+            return;
+        }
+        if (old_size < 2 || yaw_traj.segs.empty() || pitch_traj.segs.empty()) {
+            build_limit(max_yaw_acc, max_pitch_acc, current_time);
+            return;
+        }
+
+        unwrap_appended_states(cp_vec, old_size);
+
+        const int first_tail_idx = static_cast<int>(old_size) - 2;
+        const auto change_interval = find_nearest_change_interval(cp_vec, prefix, current_time);
+        if (interval_touches_tail(change_interval, first_tail_idx)
+            || interval_touches_tail(yaw_traj.limit_interval, first_tail_idx)
+            || interval_touches_tail(pitch_traj.limit_interval, first_tail_idx))
+        {
+            build_limit(max_yaw_acc, max_pitch_acc, current_time);
+            return;
+        }
+
+        append_unlimited_tail(yaw_traj, cp_vec, prefix, first_tail_idx, [](const GimbalState& s) {
+            return s.yaw_state;
+        });
+        append_unlimited_tail(pitch_traj, cp_vec, prefix, first_tail_idx, [](const GimbalState& s) {
+            return s.pitch_state;
+        });
+    }
+
+private:
+    void unwrap_appended_states(std::vector<GimbalState>& cp_vec, size_t old_size) const noexcept {
+        if (cp_vec.size() < 2)
+            return;
+        size_t begin = old_size == 0 ? 1 : old_size;
+        begin = std::max<size_t>(begin, 1);
+        for (size_t i = begin; i < cp_vec.size(); ++i) {
+            cp_vec[i].yaw_state.p =
+                angles::unwrap_angle(cp_vec[i - 1].yaw_state.p, cp_vec[i].yaw_state.p);
+            cp_vec[i].pitch_state.p =
+                angles::unwrap_angle(cp_vec[i - 1].pitch_state.p, cp_vec[i].pitch_state.p);
+        }
+    }
+
+    [[nodiscard]] static bool interval_touches_tail(
+        const std::optional<std::pair<int, int>>& interval,
+        int first_tail_idx
+    ) noexcept {
+        return interval && interval->second >= first_tail_idx;
+    }
+
+    template<typename ProjectState>
+    void append_unlimited_tail(
+        Traj& traj,
+        const std::vector<GimbalState>& cp_vec,
+        const std::vector<double>& prefix,
+        int first_tail_idx,
+        ProjectState&& project
+    ) const noexcept {
+        const int N = static_cast<int>(cp_vec.size());
+        if (N <= 1)
+            return;
+
+        first_tail_idx = std::clamp(first_tail_idx, 0, N - 2);
+        const int first_knot_idx = std::max(0, first_tail_idx - 1);
+
+        std::vector<GimbalState::State> s(cp_vec.size());
+        for (size_t i = 0; i < cp_vec.size(); ++i) {
+            s[i] = project(cp_vec[i]);
+            s[i].v = 0.0;
+            s[i].a = 0.0;
+        }
+
+        std::vector<SegmentDesc> knot_descs;
+        knot_descs.reserve(static_cast<size_t>(N - first_knot_idx - 1));
+        for (int i = first_knot_idx; i < N - 1; ++i) {
+            knot_descs.push_back({ i, i + 1, true });
+        }
+        const auto knots = estimate_knot_states(s, prefix, knot_descs);
+
+        auto first_removed =
+            std::lower_bound(traj.seg_start_idx.begin(), traj.seg_start_idx.end(), first_tail_idx);
+        const size_t first_removed_idx =
+            static_cast<size_t>(std::distance(traj.seg_start_idx.begin(), first_removed));
+
+        traj.segs.resize(first_removed_idx);
+        traj.seg_start_idx.resize(first_removed_idx);
+        traj.seg_end_idx.resize(first_removed_idx);
+
+        for (int i = first_tail_idx; i < N - 1; ++i) {
+            const double duration = prefix[i + 1] - prefix[i];
+            traj.push_seg(Seg::build(knots[i], knots[i + 1], duration, true), i, i + 1);
+        }
+
+        const double first_time =
+            traj.seg_prefix_time.empty() ? prefix[first_tail_idx] : traj.seg_prefix_time.front();
+        traj.rebuild_prefix(first_time);
+    }
+
+public:
     [[nodiscard]] inline GimbalState::State state_at(double t, const Traj& traj) const noexcept {
         if (traj.segs.empty())
             return {};
@@ -529,6 +629,151 @@ public:
     [[nodiscard]] inline GimbalState state_at(double t) const noexcept {
         GimbalState::State yaw = state_at(t, yaw_traj);
         GimbalState::State pitch = state_at(t, pitch_traj);
+        return GimbalState(yaw, pitch);
+    }
+};
+class TinyMpcAxisSolver {
+public:
+    struct Params {
+        float q_pos { 9e6f };
+        float q_vel { 0.0f };
+        float r { 1.0f };
+        float max_acc { 50.0f };
+        float state_min { -std::numeric_limits<float>::infinity() };
+        float state_max { std::numeric_limits<float>::infinity() };
+        int horizon { 100 };
+        double dt;
+        int max_iter;
+    } params_;
+    void reset() {
+        auto make_even = [](int x) { return x % 2 == 0 ? x : x + 1; };
+        const int mpc_horizon = make_even(params_.horizon) + 1;
+        auto dt = params_.dt;
+        Eigen::MatrixXd A { { 1, dt }, { 0, 1 } };
+        Eigen::MatrixXd B { { 0 }, { dt } };
+        Eigen::VectorXd f { { 0, 0 } };
+        Eigen::Matrix<double, 2, 1> Q { params_.q_pos, params_.q_vel };
+        Eigen::Matrix<double, 1, 1> R { params_.r };
+        tiny_setup(&_solver, A, B, f, Q.asDiagonal(), R.asDiagonal(), 1.0, 2, 1, mpc_horizon, 0);
+        Eigen::MatrixXd x_min = Eigen::MatrixXd::Constant(2, mpc_horizon, params_.state_min);
+        Eigen::MatrixXd x_max = Eigen::MatrixXd::Constant(2, mpc_horizon, params_.state_max);
+        Eigen::MatrixXd u_min = Eigen::MatrixXd::Constant(1, mpc_horizon - 1, -params_.max_acc);
+        Eigen::MatrixXd u_max_pitch =
+            Eigen::MatrixXd::Constant(1, mpc_horizon - 1, params_.max_acc);
+        tiny_set_bound_constraints(_solver, x_min, x_max, u_min, u_max_pitch);
+        _solver->settings->max_iter = params_.max_iter;
+    }
+    Trajectory<GimbalState::State, double>
+    solve(const Trajectory<GimbalState::State, double>& ref_traj, double t_current) {
+        auto make_even = [](int x) { return x % 2 == 0 ? x : x + 1; };
+        const int mpc_horizon = make_even(params_.horizon) + 1;
+        const int half_horizon = make_even(params_.horizon) / 2;
+        const auto trajVecToEigen = [&](const Trajectory<GimbalState::State, double>& traj) {
+            Eigen::Matrix<double, 2, Eigen::Dynamic> mat(2, mpc_horizon);
+            for (int k = 0; k < mpc_horizon; ++k) {
+                int i = k - half_horizon;
+                double t_add = i * params_.dt;
+                double t = t_current + t_add;
+                auto state = traj.Trajectory::state_at(t);
+                mat(0, k) = state.p;
+                mat(1, k) = state.v;
+            }
+
+            return mat;
+        };
+        auto traj_eigen = trajVecToEigen(ref_traj);
+        Eigen::VectorXd x0(2);
+        x0 << traj_eigen(0, 0), traj_eigen(1, 0);
+        tiny_set_x0(_solver, x0);
+        _solver->work->Xref = traj_eigen.block(0, 0, 2, mpc_horizon);
+        tiny_solve(_solver);
+        Trajectory<GimbalState::State, double> control_traj;
+        control_traj.reserve(mpc_horizon);
+        for (int k = 0; k < mpc_horizon; ++k) {
+            GimbalState::State tp;
+            tp.p = _solver->work->x(0, k);
+            tp.v = _solver->work->x(1, k);
+            tp.a = _solver->work->u(0, k);
+            int i = k - half_horizon;
+            double t_add = i * params_.dt;
+            double t = t_current + t_add;
+            control_traj.push_back(tp, t);
+        }
+        return control_traj;
+    }
+
+    TinySolver* _solver;
+};
+class TinyMpcTrajectory {
+public:
+    using Ptr = std::unique_ptr<TinyMpcTrajectory>;
+    TinyMpcAxisSolver yaw_solver_;
+    TinyMpcAxisSolver pitch_solver_;
+    Trajectory<GimbalState::State, double> yaw_control_traj_;
+    Trajectory<GimbalState::State, double> pitch_control_traj_;
+    struct Params {
+        double yaw_max_acc { 50.0f };
+        double pitch_max_acc { 50.0f };
+        int horizon { 100 };
+        double dt;
+        int max_iter;
+    };
+    TinyMpcTrajectory(const Params& p) {
+        yaw_solver_.params_.dt = p.dt;
+        pitch_solver_.params_.dt = p.dt;
+        yaw_solver_.params_.horizon = p.horizon;
+        pitch_solver_.params_.horizon = p.horizon;
+        yaw_solver_.params_.max_iter = p.max_iter;
+        pitch_solver_.params_.max_iter = p.max_iter;
+        yaw_solver_.params_.max_acc = p.yaw_max_acc;
+        pitch_solver_.params_.max_acc = p.pitch_max_acc;
+        yaw_solver_.reset();
+        pitch_solver_.reset();
+    }
+    static Ptr create(const Params& p) {
+        return std::make_unique<TinyMpcTrajectory>(p);
+    }
+    void solve(Trajectory<GimbalState, double>& ref_traj, double t_current) {
+        Trajectory<GimbalState::State, double> yaw_ref_traj;
+        Trajectory<GimbalState::State, double> pitch_ref_traj;
+        const auto& yp_cp = ref_traj.get_cp_vec();
+        const auto& yp_prefix = ref_traj.get_prefix();
+        for (int i = 0; i < yp_cp.size(); ++i) {
+            yaw_ref_traj.push_back(yp_cp[i].yaw_state, yp_prefix[i]);
+            pitch_ref_traj.push_back(yp_cp[i].pitch_state, yp_prefix[i]);
+        }
+        auto compute_va = [&](Trajectory<GimbalState::State, double>& j) {
+            auto& s = j.get_cp_vec();
+            const auto& prefix = j.get_prefix();
+            s.front().v = s.back().v = 0.0;
+            s.front().a = s.back().a = 0.0;
+
+            for (size_t i = 1; i + 1 < s.size(); ++i) {
+                const double dt0 = prefix[i] - prefix[i - 1];
+                const double dt1 = prefix[i + 1] - prefix[i];
+                const double denom = dt0 + dt1;
+                const double w0 = dt1 / denom;
+                const double w1 = dt0 / denom;
+
+                s[i].v = w0 * (s[i].p - s[i - 1].p) / dt0 + w1 * (s[i + 1].p - s[i].p) / dt1;
+
+                s[i].a = 2.0 * ((s[i + 1].p - s[i].p) / dt1 - (s[i].p - s[i - 1].p) / dt0) / denom;
+            }
+        };
+        tbb::parallel_invoke(
+            [&]() {
+                compute_va(yaw_ref_traj);
+                yaw_control_traj_ = yaw_solver_.solve(yaw_ref_traj, t_current);
+            },
+            [&]() {
+                compute_va(pitch_ref_traj);
+                pitch_control_traj_ = pitch_solver_.solve(pitch_ref_traj, t_current);
+            }
+        );
+    };
+    [[nodiscard]] inline GimbalState state_at(double t) const noexcept {
+        GimbalState::State yaw = yaw_control_traj_.state_at(t);
+        GimbalState::State pitch = pitch_control_traj_.state_at(t);
         return GimbalState(yaw, pitch);
     }
 };

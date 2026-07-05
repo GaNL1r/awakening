@@ -2,7 +2,7 @@
 #include "tasks/auto_aim/armor_detect/armor_detector.hpp"
 #include "tasks/auto_aim/armor_track/armor_tracker.hpp"
 #include "utils/buffer.hpp"
-#include "utils/drivers/uvc_camera.hpp"
+#include "utils/drivers/camera_factory.hpp"
 #include <memory>
 #include <opencv2/core/types.hpp>
 #include <unordered_map>
@@ -11,7 +11,7 @@ namespace awakening::auto_aim {
 class ArmorOmni {
 public:
     struct One {
-        std::unique_ptr<UVCCamera> camera;
+        std::unique_ptr<Camera> camera;
         std::unique_ptr<ArmorTracker> tracker;
         ArmorTarget target;
         CameraInfo camera_info;
@@ -24,8 +24,8 @@ public:
             int frame_id,
             int cv_frame_id,
             const YAML::Node& tracker_config) {
-            camera = std::make_unique<UVCCamera>(config["uvc_camera"]);
-            camera->start();
+            camera = create_camera(config, "uvc");
+            camera->start_capture();
             this->frame_id = frame_id;
             this->cv_frame_id = cv_frame_id;
             this->total_score = 0.0;

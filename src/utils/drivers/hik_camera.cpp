@@ -55,6 +55,7 @@ void HikCamera::stop() {
         return;
     }
     running_ = false;
+    stop_source_thread();
     if (daemon_thread_.joinable()) {
         daemon_thread_.join();
     }
@@ -65,6 +66,37 @@ void HikCamera::stop() {
     }
     AWAKENING_INFO("hik_camera has stop ");
 }
+
+bool HikCamera::start_capture() {
+    int n_ret = MV_CC_StartGrabbing(camera_handle_);
+    if (n_ret != MV_OK) {
+        AWAKENING_ERROR("Failed to start camera grabbing!");
+        return false;
+    }
+    running_ = true;
+    return true;
+}
+
+ImageFrame HikCamera::read() {
+    ImageFrame img_frame;
+    if (!camera_handle_) {
+        AWAKENING_ERROR("hik_camera: camera is not initialized");
+        return img_frame;
+    }
+
+    Frame frame;
+    int n_ret = MV_CC_GetImageBuffer(camera_handle_, &frame.out_frame, 100);
+    if (n_ret != MV_OK) {
+        AWAKENING_ERROR("MV_CC_GetImageBuffer fail: {}", n_ret);
+        return img_frame;
+    }
+
+    const auto current_time = Clock::now();
+    const auto half_exposure = std::chrono::microseconds(static_cast<long>(get_ExposureTime() / 2));
+    frame.timestamp = current_time - half_exposure;
+    return to_image_frame(frame);
+}
+
 void HikCamera::restart() {
     AWAKENING_WARN("Restarting camera");
     MV_CC_StopGrabbing(camera_handle_);

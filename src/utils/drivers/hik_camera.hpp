@@ -2,6 +2,7 @@
 #include "MvCameraControl.h"
 #include "utils/common/image.hpp"
 #include "utils/common/type_common.hpp"
+#include "utils/drivers/camera.hpp"
 #include "utils/logger.hpp"
 #include "utils/scheduler/node.hpp"
 #include "utils/scheduler/scheduler.hpp"
@@ -15,29 +16,36 @@
 #include <utility>
 namespace awakening {
 
-class HikCamera {
+class HikCamera: public Camera {
 public:
     struct Frame {
         MV_FRAME_OUT out_frame;
         TimePoint timestamp;
     };
-    HikCamera(const YAML::Node& config, Scheduler& scheduler): scheduler_(scheduler) {
+    HikCamera(const YAML::Node& config, Scheduler& scheduler):
+        Camera(&scheduler),
+        scheduler_ref_(scheduler) {
         config_ = config;
         running_ = true;
     }
-    void init() {
+    void init() override {
         load(config_);
     }
     ~HikCamera() {
         stop();
     }
     void load(const YAML::Node& config);
-    void stop();
-    void restart();
+    void stop() override;
+    void restart() override;
+    bool is_running() const override {
+        return running_;
+    }
+    ImageFrame read() override;
+    bool start_capture() override;
     template<typename Tag>
     void start(std::string source_name) {
         using IO = IOPair<Tag, ImageFrame>;
-        source_snapshot_id_ = scheduler_.register_source<IO>(source_name);
+        source_snapshot_id_ = scheduler_ref_.register_source<IO>(source_name);
         int n_ret = MV_CC_StartGrabbing(camera_handle_);
         if (n_ret != MV_OK) {
             AWAKENING_ERROR("Failed to start camera grabbing!");
@@ -71,7 +79,7 @@ public:
 
                 frame.timestamp = current_time - half_exposure;
                 auto img_frame = to_image_frame(frame);
-                scheduler_.runtime_push_source<IO>(
+                scheduler_ref_.runtime_push_source<IO>(
                     source_snapshot_id_,
                     [f = std::move(img_frame)]() {
                         return std::make_tuple(std::optional<typename IO::second_type>(std::move(f))
@@ -193,7 +201,7 @@ public:
 
 #define HIK_GEN_MEMBER_GET_SET(type, camera_handle, param) \
     type param##_val {}; \
-    inline void set_##param(const type& v) { \
+    inline void set_##param(type v) { \
         param##_val = v; \
         HikSetRangeDispatch(camera_handle, #param, param##_val); \
     } \
@@ -224,8 +232,7 @@ public:
     std::string trigger_source_;
     int64_t trigger_activation_;
     PixelFormat target_format_ = PixelFormat::BGR;
-    Scheduler& scheduler_;
-    size_t source_snapshot_id_;
+    Scheduler& scheduler_ref_;
     std::thread daemon_thread_;
     bool use_cuda_cvt_ = false;
 };

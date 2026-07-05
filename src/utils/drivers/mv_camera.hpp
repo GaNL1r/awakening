@@ -2,6 +2,7 @@
 #pragma once
 #include "CameraApi.h"
 #include "utils/common/image.hpp"
+#include "utils/drivers/camera.hpp"
 #include "utils/logger.hpp"
 #include "utils/scheduler/scheduler.hpp"
 #include <algorithm>
@@ -12,9 +13,11 @@
     #include "utils/cuda/cvtcolor.hpp"
 #endif
 namespace awakening {
-class MvCamera {
+class MvCamera: public Camera {
 public:
-    MvCamera(const YAML::Node& config, Scheduler& scheduler): scheduler_(scheduler) {
+    MvCamera(const YAML::Node& config, Scheduler& scheduler):
+        Camera(&scheduler),
+        scheduler_ref_(scheduler) {
         config_ = config;
         running_ = true;
         CameraSdkInit(0);
@@ -22,12 +25,17 @@ public:
     ~MvCamera() {
         stop();
     }
-    void stop();
-    void restart();
+    void stop() override;
+    void restart() override;
+    bool is_running() const override {
+        return running_;
+    }
+    ImageFrame read() override;
+    bool start_capture() override;
     template<typename Tag>
     void start(std::string source_name) {
         using IO = IOPair<Tag, ImageFrame>;
-        source_snapshot_id_ = scheduler_.register_source<IO>(source_name);
+        source_snapshot_id_ = scheduler_ref_.register_source<IO>(source_name);
         CameraPlay(h_camera_);
         running_ = true;
         daemon_thread_ = std::thread(&MvCamera::run_loop<IO>, this);
@@ -74,9 +82,13 @@ public:
                 frame.timestamp = current_time - half_exposure;
 
                 frame.format = PixelFormat::BGR;
-                scheduler_.runtime_push_source<IO>(source_snapshot_id_, [f = std::move(frame)]() {
-                    return std::make_tuple(std::optional<typename IO::second_type>(std::move(f)));
-                });
+                scheduler_ref_.runtime_push_source<IO>(
+                    source_snapshot_id_,
+                    [f = std::move(frame)]() {
+                        return std::make_tuple(std::optional<typename IO::second_type>(std::move(f))
+                        );
+                    }
+                );
             } else {
                 AWAKENING_ERROR("Failed to get image buffer!");
                 fail_count++;
@@ -88,10 +100,10 @@ public:
         }
         AWAKENING_INFO("Exiting image capture loop.");
     }
-    void init();
+    void init() override;
     void load(const YAML::Node& config);
-    void set_ExposureTime(double exposure_time);
-    double get_ExposureTime();
+    double get_ExposureTime() const override;
+    void set_ExposureTime(double exposure_time) override;
     void set_rgb_gain(int r_gain, int b_gain, int g_gain);
     void set_analog_gain(double analog_gain);
     void set_gamma(double gamma);
@@ -100,9 +112,8 @@ public:
     YAML::Node config_;
     CameraHandle h_camera_;
     tSdkCameraCapbility t_capability_; // 设备描述信息
-    size_t source_snapshot_id_;
     std::thread daemon_thread_;
-    Scheduler& scheduler_;
+    Scheduler& scheduler_ref_;
     bool use_cuda_cvt_ = false;
 };
 } // namespace awakening

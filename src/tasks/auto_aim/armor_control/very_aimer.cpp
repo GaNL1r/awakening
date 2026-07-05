@@ -52,6 +52,18 @@ struct VeryAimer::Impl {
         ballistic_trajectory_ = BallisticTrajectory::create(config["ballistic_trajectory"]);
         base_yaw_offset_rad_ = angles::from_degrees(config["base_yaw_offset"].as<double>());
         base_pitch_offset_rad_ = angles::from_degrees(config["base_pitch_offset"].as<double>());
+        auto type = config["type"].as<std::string>();
+        if (type == "mpc" || type == "MPC") {
+            dta_utils::TinyMpcTrajectory::Params mpc_p {
+                .yaw_max_acc = params_.max_yaw_acc,
+                .pitch_max_acc = params_.max_pitch_acc,
+                .horizon = params_.sample_horizon,
+                .dt = params_.sample_total_time / params_.sample_horizon,
+                .max_iter = 10,
+            };
+            mpc_traj_ = dta_utils::TinyMpcTrajectory::create(mpc_p);
+            AWAKENING_INFO("very_aimer: using TinyMpcTrajectory");
+        }
     }
     [[nodiscard]] int
     select_armor(const ArmorTarget& target, const AutoAimFsm& auto_aim_fsm) const noexcept {
@@ -442,8 +454,12 @@ struct VeryAimer::Impl {
             if (!build_traj(limit_traj_, aim_traj_, limit_traj_cp0_, fsm, horizon, dt)) {
                 return cmd;
             }
+            if (!mpc_traj_) {
+                limit_traj_.build_limit(params_.max_yaw_acc, params_.max_pitch_acc, time_in_traj);
+            } else {
+                mpc_traj_->solve(limit_traj_, time_in_traj);
+            }
 
-            limit_traj_.build_limit(params_.max_yaw_acc, params_.max_pitch_acc, time_in_traj);
             if (fsm == AutoAimFsm::AIM_WHOLE_CAR_CENTER) { //瞄准中间的目标和控制不一样
                 aim_center_target_traj_.clear();
                 aim_center_target_traj_.reserve(horizon + 1);
@@ -509,7 +525,17 @@ struct VeryAimer::Impl {
                 return cmd;
             }
             if (limit_traj_.size() > old_limit_size) {
-                limit_traj_.build_limit(params_.max_yaw_acc, params_.max_pitch_acc, time_in_traj);
+                if (!mpc_traj_) {
+                    limit_traj_.update_limit_after_append(
+                        params_.max_yaw_acc,
+                        params_.max_pitch_acc,
+                        time_in_traj,
+                        old_limit_size
+                    );
+                }
+                // else {
+                //     mpc_traj_->solve(limit_traj_, time_in_traj);
+                // }
             }
             if (fsm == AutoAimFsm::AIM_WHOLE_CAR_CENTER) { //瞄准中间的目标和控制不一样
                 if (!replenish_traj(
@@ -537,7 +563,14 @@ struct VeryAimer::Impl {
             use_center_target ? aim_center_aim_traj_ : aim_traj_;
         auto target_gimbal_state = target_traj.Trajectory::state_at(time_in_traj);
         //目标轨迹，一定击中目标
-        auto control = limit_traj_.dta_utils::LimitTrajectory::state_at(time_in_traj);
+        auto get_control = [&](double t) {
+            if (!mpc_traj_) {
+                return limit_traj_.dta_utils::LimitTrajectory::state_at(t);
+            } else {
+                return mpc_traj_->state_at(t);
+            }
+        };
+        auto control = get_control(time_in_traj);
         //控制轨迹，轨迹优化后最优控制（并非最优，下位机实际vel acc 可以基于error和上位机规划叠加）
         double control_yaw = angles::normalize_angle(control.yaw_state.p + limit_traj_cp0_.yaw);
         double control_pitch =
@@ -608,7 +641,7 @@ struct VeryAimer::Impl {
                ) < cmd.enable_pitch_diff;
         if (fsm != AutoAimFsm::AIM_WHOLE_CAR_CENTER) {
             auto delay_fire = [&](double delay) {
-                auto delay_control = limit_traj_.LimitTrajectory::state_at(time_in_traj + delay);
+                auto delay_control = get_control(time_in_traj + delay);
                 auto delay_target = target_traj.Trajectory::state_at(time_in_traj + delay);
                 auto delay_enable = cal_enbale_diff(time_in_traj + delay);
                 const double control_yaw =
@@ -650,6 +683,7 @@ struct VeryAimer::Impl {
     double base_yaw_offset_rad_;
     double base_pitch_offset_rad_;
     std::pair<double, double> operator_offset_ = std::make_pair(0, 0);
+    dta_utils::TinyMpcTrajectory::Ptr mpc_traj_;
 };
 VeryAimer::VeryAimer(const YAML::Node& config) {
     _impl = std::make_unique<Impl>(config);

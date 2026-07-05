@@ -1,5 +1,7 @@
 #include "armor_detector.hpp"
 #include "armor_infer.hpp"
+#include "tasks/auto_aim/type.hpp"
+#include "tasks/base/web.hpp"
 #include "utils/logger.hpp"
 #include <algorithm>
 #include <cstddef>
@@ -48,11 +50,14 @@ struct ArmorDetector::Impl {
         struct CvParams {
             struct LightParams {
                 double bin_threshold;
+                double net_ref_threshold_tol;
                 double min_wh_ratio;
                 double max_wh_ratio;
                 double max_angle;
+
                 void load(const YAML::Node& config) {
                     bin_threshold = config["bin_threshold"].as<double>();
+                    net_ref_threshold_tol = config["net_ref_threshold_tol"].as<double>();
                     min_wh_ratio = config["min_wh_ratio"].as<double>();
                     max_wh_ratio = config["max_wh_ratio"].as<double>();
                     max_angle = config["max_angle"].as<double>();
@@ -83,8 +88,8 @@ struct ArmorDetector::Impl {
                 color_classifier_params->load(config["color_classifier"]);
             }
         }
-
-    } params_;
+    };
+    mutable Params params_;
     Impl(const YAML::Node& config) {
         params_.load(config);
         if (params_.number_classifier_params) {
@@ -491,11 +496,21 @@ struct ArmorDetector::Impl {
         light.corrected->first = find_corner(1, light.top);
         light.corrected->second = find_corner(-1, light.bottom);
     }
-    std::vector<Light>
-    detect_lights(const cv::Mat& src, PixelFormat format, cv::Rect bbox) const noexcept {
+    std::vector<Light> detect_lights(
+        const cv::Mat& src,
+        PixelFormat format,
+        cv::Rect bbox,
+        const std::optional<cv::Mat>& _gray = std::nullopt
+    ) const noexcept {
         const auto detect_roi = src(bbox);
-        cv::Mat gray, bin;
-        cv::cvtColor(detect_roi, gray, cv::COLOR_BGR2GRAY);
+        cv::Mat gray;
+        if (_gray.has_value()) {
+            gray = _gray.value();
+        } else {
+            cv::cvtColor(detect_roi, gray, cv::COLOR_BGR2GRAY);
+        }
+        cv::Mat gray_img, bin;
+        cv::cvtColor(detect_roi, gray_img, cv::COLOR_BGR2GRAY);
         cv::threshold(
             gray,
             bin,
@@ -537,7 +552,48 @@ struct ArmorDetector::Impl {
                 lights.emplace_back(std::move(light));
             }
         }
+        // static Web web;
+        // // cv::cvtColor(bin, bin, cv::COLOR_GRAY2BGR);
+        // web.write_shm(bin);
         return lights;
+    }
+    int cal_light_threshold(
+        const cv::Mat& gray,
+        const std::vector<std::pair<cv::Point2f, cv::Point2f>>& lights
+    ) const {
+        if (lights.empty())
+            return 0;
+        std::vector<int> vals(lights.size());
+        cv::parallel_for_(cv::Range(0, (int)lights.size()), [&](const cv::Range& range) {
+            for (int idx = range.start; idx < range.end; ++idx) {
+                const auto& light = lights[idx];
+                const cv::Point2f& p1 = light.first;
+                const cv::Point2f& p2 = light.second;
+                cv::Point2f d = p2 - p1;
+                float dx = d.x, dy = d.y;
+                float len2 = dx * dx + dy * dy;
+                int samples = std::max(2, (int)std::sqrt(len2));
+                double sum = 0.0;
+                int count = 0;
+                for (int j = 0; j < samples; ++j) {
+                    float t = (float)j / (samples - 1);
+                    float px = p1.x + t * dx;
+                    float py = p1.y + t * dy;
+                    int x = (int)std::round(px);
+                    int y = (int)std::round(py);
+                    if ((unsigned)x >= (unsigned)gray.cols || (unsigned)y >= (unsigned)gray.rows)
+                        continue;
+                    const uchar* row = gray.ptr<uchar>(y);
+                    sum += row[x];
+                    ++count;
+                }
+                vals[idx] = (count > 0) ? (int)(sum / count) : 0;
+            }
+        });
+        double total = 0;
+        for (int v: vals)
+            total += v;
+        return (int)(total / vals.size());
     }
     std::tuple<std::vector<Light>, std::vector<Armor>> detect_net(
         const CommonFrame& frame,
@@ -576,8 +632,45 @@ struct ArmorDetector::Impl {
         }
 
         if (detect_light) {
-            lights = detect_lights(frame.img_frame.src_img, frame.img_frame.format, *detect_light);
+            cv::Mat gray;
+            cv::cvtColor(frame.img_frame.src_img(*detect_light), gray, cv::COLOR_BGR2GRAY);
+            if (params_.cv_params.light_params.net_ref_threshold_tol > 0) {
+                std::vector<std::pair<cv::Point2f, cv::Point2f>> net_lights;
+                auto trans_local = [&](const cv::Point2f& pt) {
+                    return (pt - cv::Point2f(detect_light->tl()));
+                };
+                for (auto& armor: result) {
+                    if (armor.color_classifier) {
+                        auto l =
+                            armor.color_classifier->light_colors[Armor::ColorClassifierCtx::LEFT];
+                        auto r =
+                            armor.color_classifier->light_colors[Armor::ColorClassifierCtx::RIGHT];
+                        auto key_points = armor.key_points.landmarks();
+                        if (l != ArmorColor::NONE) {
+                            net_lights.emplace_back(
+                                trans_local(key_points[ArmorKeyPointsIndex::LEFT_TOP]),
+                                trans_local(key_points[ArmorKeyPointsIndex::LEFT_BOTTOM])
+                            );
+                        }
+                        if (r != ArmorColor::NONE) {
+                            net_lights.emplace_back(
+                                trans_local(key_points[ArmorKeyPointsIndex::RIGHT_TOP]),
+                                trans_local(key_points[ArmorKeyPointsIndex::RIGHT_BOTTOM])
+                            );
+                        }
+                    }
+                }
+                auto threshold = cal_light_threshold(gray, net_lights);
+                params_.cv_params.light_params.bin_threshold =
+                    threshold - params_.cv_params.light_params.net_ref_threshold_tol;
+            }
 
+            lights = detect_lights(
+                frame.img_frame.src_img,
+                frame.img_frame.format,
+                *detect_light,
+                std::make_optional<cv::Mat>(gray)
+            );
             for (auto& light: lights) {
                 light.add_offset(detect_light->tl());
             }
@@ -616,7 +709,6 @@ struct ArmorDetector::Impl {
                     continue;
                 }
                 Armor armor;
-
                 armor.cv.emplace(*left, *right);
                 if (!is_armor(armor)) {
                     continue;

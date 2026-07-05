@@ -2,6 +2,7 @@
 
 #include "utils/common/image.hpp"
 #include "utils/common/type_common.hpp"
+#include "utils/drivers/camera.hpp"
 #include "utils/logger.hpp"
 #include "utils/scheduler/scheduler.hpp"
 #include <atomic>
@@ -13,14 +14,16 @@
 
 namespace awakening {
 
-class DahengCamera {
+class DahengCamera: public Camera {
 public:
     struct Frame {
         GX_FRAME_DATA frame_data {};
         TimePoint timestamp {};
     };
 
-    DahengCamera(const YAML::Node& config, Scheduler& scheduler): scheduler_(scheduler) {
+    DahengCamera(const YAML::Node& config, Scheduler& scheduler):
+        Camera(&scheduler),
+        scheduler_ref_(scheduler) {
         config_ = config;
         running_ = true;
     }
@@ -29,13 +32,18 @@ public:
         stop();
     }
 
-    void init();
+    void init() override;
     void load(const YAML::Node& config);
-    void stop();
-    void restart();
+    void stop() override;
+    void restart() override;
+    bool is_running() const override {
+        return running_;
+    }
+    ImageFrame read() override;
+    bool start_capture() override;
     bool initialize_camera(const std::string& target_sn);
-    double get_ExposureTime() const;
-    void set_ExposureTime(double exposure_time);
+    double get_ExposureTime() const override;
+    void set_ExposureTime(double exposure_time) override;
     void set_Gain(double gain);
     void set_Gamma(double gamma);
     void set_Width(int width);
@@ -54,7 +62,7 @@ public:
     template<typename Tag>
     void start(std::string source_name) {
         using IO = IOPair<Tag, ImageFrame>;
-        source_snapshot_id_ = scheduler_.register_source<IO>(source_name);
+        source_snapshot_id_ = scheduler_ref_.register_source<IO>(source_name);
         auto status = GXStreamOn(device_handle_);
         if (status != GX_STATUS_SUCCESS) {
             AWAKENING_ERROR("daheng_camera: GXStreamOn failed: {}", int(status));
@@ -90,7 +98,7 @@ public:
                     std::chrono::microseconds(static_cast<long>(get_ExposureTime() / 2));
                 frame.timestamp = current_time - half_exposure;
                 auto img_frame = to_image_frame(frame);
-                scheduler_.runtime_push_source<IO>(
+                scheduler_ref_.runtime_push_source<IO>(
                     source_snapshot_id_,
                     [f = std::move(img_frame)]() mutable {
                         return std::make_tuple(std::optional<typename IO::second_type>(std::move(f))
@@ -128,8 +136,7 @@ private:
     int64_t trigger_activation_from_string(const std::string& activation) const;
 
     YAML::Node config_;
-    Scheduler& scheduler_;
-    size_t source_snapshot_id_ {};
+    Scheduler& scheduler_ref_;
     std::thread daemon_thread_;
     std::string target_sn_;
     PixelFormat target_format_ = PixelFormat::BGR;

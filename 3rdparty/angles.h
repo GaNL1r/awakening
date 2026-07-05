@@ -108,6 +108,12 @@ static inline double shortest_angular_distance_degrees(double from, double to) {
     return normalize_degrees(to - from);
 }
 
+static inline double unwrap_angle(double prev, double curr) noexcept {
+    return prev + normalize_angle(curr - prev);
+}
+static inline double unwrap_degrees(double prev, double curr) noexcept {
+    return prev + normalize_degrees(curr - prev);
+}
 /*!
  * \function
  *
