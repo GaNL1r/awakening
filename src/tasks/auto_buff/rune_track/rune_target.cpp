@@ -357,10 +357,10 @@ RuneTarget::process_noise(double dt) const noexcept {
     Eigen::Matrix<double, X_N, X_N> q;
     q.setZero();
     auto dt2 = dt * dt;
-    q(idx::CX, idx::CX) = dt2 * cfg.q_xyz.x();
-    q(idx::CY, idx::CY) = dt2 * cfg.q_xyz.y();
-    q(idx::CZ, idx::CZ) = dt2 * cfg.q_xyz.z();
-    q(idx::YAW, idx::YAW) = dt2 * cfg.q_yaw;
+    q(idx::CX, idx::CX) = dt * cfg.q_xyz.x();
+    q(idx::CY, idx::CY) = dt * cfg.q_xyz.y();
+    q(idx::CZ, idx::CZ) = dt * cfg.q_xyz.z();
+    q(idx::YAW, idx::YAW) = dt * cfg.q_yaw;
 
     utils::fill_constant_accel_noise(q, idx::ROLL, idx::V_ROLL, cfg.q_roll, dt);
     q(idx::A, idx::A) = dt * cfg.q_a;
@@ -507,7 +507,14 @@ std::tuple<int, int> RuneTarget::update(
             return diagonal_covariance<RZ_N>(sigma * sigma / 2.0);
         };
         const auto residual = [](const auto& z_pred, const auto& z) { return z - z_pred; };
-        obs.push_back(esekf->make_obs(z, measure, r_u_r, residual));
+        auto tmp_ekf = esekf.value();
+        auto tmp_state = target_state;
+        tmp_state.x = tmp_ekf.update(z, measure, r_u_r, residual);
+        if ((tmp_state.pos() - target_state.pos()).norm() < 1.0) {
+            obs.push_back(esekf->make_obs(z, measure, r_u_r, residual));
+        } else {
+            AWAKENING_WARN("FUCK r");
+        }
     }
 
     const auto fan_u_r = [&](const auto&) {
@@ -567,7 +574,7 @@ std::vector<std::pair<int, RuneFanBladeWithR>> RuneTarget::match_fan(
     const ISO3& camera_cv_in_odom
 ) const noexcept {
     return match_fans_by_ypd(*this, fans, timestamp, [&](RuneFanBladeWithR& fan) {
-        fan_pnp(fan, camera_info, camera_cv_in_odom, false);
+        fan_pnp(fan, camera_info, camera_cv_in_odom, true);
     });
 }
 std::vector<std::pair<int, RuneFanTarget>> RuneTarget::match_fan_target(
@@ -591,7 +598,7 @@ std::vector<std::pair<int, RuneFanTarget>> RuneTarget::match_fan_target(
     //     r_tag = r->second;
     // }
     return match_fans_by_ypd(*this, fans, timestamp, [&](RuneFanTarget& fan) {
-        fan_target_pnp(fan, r_tag, camera_info, camera_cv_in_odom, false);
+        fan_target_pnp(fan, r_tag, camera_info, camera_cv_in_odom, true);
     });
 }
 [[nodiscard]] cv::Rect RuneTarget::get_net_focus_roi(

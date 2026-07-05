@@ -1,3 +1,4 @@
+
 #pragma once
 #include "CameraApi.h"
 #include "utils/common/image.hpp"

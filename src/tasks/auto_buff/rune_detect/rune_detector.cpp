@@ -112,38 +112,38 @@ struct RuneDetector::Impl {
     cv::Mat
     preprocess(const cv::Mat& src, PixelFormat format, EnemyColor enemy_color) const noexcept {
         cv::Mat bin;
-        std::vector<cv::Mat> ch;
-        cv::split(src, ch);
-        cv::Mat b, r;
-        if (format == PixelFormat::RGB) {
-            b = ch[2];
-            r = ch[0];
-        } else if (format == PixelFormat::BGR) {
-            b = ch[0];
-            r = ch[2];
-        }
-        if (enemy_color == EnemyColor::RED) {
-            cv::subtract(b, r, bin);
-        } else {
-            cv::subtract(r, b, bin); // B - R
-        }
-        cv::threshold(bin, bin, 170, 255, cv::THRESH_BINARY);
+        // std::vector<cv::Mat> ch;
+        // cv::split(src, ch);
+        // cv::Mat b, r;
         // if (format == PixelFormat::RGB) {
-        //     cv::cvtColor(src, bin, cv::COLOR_RGB2GRAY);
+        //     b = ch[2];
+        //     r = ch[0];
         // } else if (format == PixelFormat::BGR) {
-        //     cv::cvtColor(src, bin, cv::COLOR_BGR2GRAY);
-        // } else {
-        //     bin = src;
+        //     b = ch[0];
+        //     r = ch[2];
         // }
-        // cv::threshold(bin, bin, params_.cv_params.bin_threshold, 255, cv::THRESH_BINARY);
+        // if (enemy_color == EnemyColor::RED) {
+        //     cv::subtract(b, r, bin);
+        // } else {
+        //     cv::subtract(r, b, bin); // B - R
+        // }
+        // cv::threshold(bin, bin, 170, 255, cv::THRESH_BINARY);
+        if (format == PixelFormat::RGB) {
+            cv::cvtColor(src, bin, cv::COLOR_RGB2GRAY);
+        } else if (format == PixelFormat::BGR) {
+            cv::cvtColor(src, bin, cv::COLOR_BGR2GRAY);
+        } else {
+            bin = src;
+        }
+        cv::threshold(bin, bin, params_.cv_params.bin_threshold, 255, cv::THRESH_BINARY);
         int ksize = 3;
         cv::Mat kernel = cv::getStructuringElement(cv::MORPH_ELLIPSE, cv::Size(ksize, ksize));
         // // cv::erode(bin, bin, kernel, cv::Point(-1, -1), 1);
-        cv::morphologyEx(bin, bin, cv::MORPH_OPEN, kernel);
+        // cv::morphologyEx(bin, bin, cv::MORPH_OPEN, kernel);
         // ksize = 3;
         // kernel = cv::getStructuringElement(cv::MORPH_ELLIPSE, cv::Size(ksize, ksize));
-        // cv::morphologyEx(bin, bin, cv::MORPH_CLOSE, kernel);
-        cv::dilate(bin, bin, kernel, cv::Point(-1, -1), 1);
+        cv::morphologyEx(bin, bin, cv::MORPH_CLOSE, kernel);
+        // cv::dilate(bin, bin, kernel, cv::Point(-1, -1), 1);
 
         // cv::namedWindow("Binary Image", cv::WINDOW_NORMAL);
         // cv::resizeWindow("Binary Image", 640, 480);
@@ -485,11 +485,11 @@ struct RuneDetector::Impl {
         );
 
         cv1.used_flags.assign(cv1.contours.size(), false);
-        // color_filter(cv1, frame.img_frame.format, enemy_color);
+        color_filter(cv1, frame.img_frame.format, enemy_color);
         result.fan_targets = get_rune_fan_targets(cv1);
         result.rune_flowing_lights = get_rune_flowings(cv1);
         auto roi_center = cv::Point2f(focus.width / 2.0, focus.height / 2.0);
-        double side = focus.width / 5.0;
+        double side = focus.width / 2.0;
         cv::Rect focus_r =
             cv::Rect(roi_center.x - side / 2.0, roi_center.y - side / 2.0, side, side);
         result.rune_rs = get_rune_rs(cv1, focus_r);

@@ -314,7 +314,7 @@ struct YPDMeasure {
     template<typename T>
     inline void operator()(const T x[X_N], T z[YPDZ_N]) const {
         const T roll = normalize_angle(x[idx::ROLL] + T(ctx.id) * T(2.0 * M_PI / FAN_NUM));
-        Eigen::Transform<T, 3, Eigen::Isometry> pose_in_odom = fan_target_pose(x, ctx.id);
+        Eigen::Transform<T, 3, Eigen::Isometry> pose_in_odom = rune_pose(x, ctx.id);
         T target_x = pose_in_odom.translation().x();
         T target_y = pose_in_odom.translation().y();
         T target_z = pose_in_odom.translation().z();

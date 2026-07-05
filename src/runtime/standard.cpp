@@ -9,7 +9,7 @@
 #include "tasks/auto_buff/type.hpp"
 #include "tasks/base/ballistic_trajectory.hpp"
 #include "tasks/base/wheel_odometry.hpp"
-#include "utils/drivers/mv_camera.hpp"
+#include "utils/drivers/daheng_camera.hpp"
 #include "utils/io/video_save.hpp"
 #include <algorithm>
 #include <array>
@@ -201,14 +201,14 @@ int main(int argc, char** argv) {
     }
 
     auto camera_config = config["camera"];
-    std::unique_ptr<HikCamera> camera;
+    std::unique_ptr<DahengCamera> camera;
     utils::SignalGuard::add_callback([&]() {
         if (camera) {
             camera->stop();
         }
     });
     if (!use_daedalus) {
-        camera = std::make_unique<HikCamera>(camera_config["hik_camera"], s);
+        camera = std::make_unique<DahengCamera>(camera_config["daheng_camera"], s);
         camera->init();
         if (!camera->running_) {
             return 0;
@@ -684,6 +684,7 @@ int main(int argc, char** argv) {
             tf->pose_a_in_b(SimpleFrame::SHOOT, SimpleFrame::GIMBAL_ODOM, Clock::now());
         auto gimbal_in_gimbal_odom =
             tf->pose_a_in_b(SimpleFrame::GIMBAL, SimpleFrame::GIMBAL_ODOM, Clock::now());
+        static ShootControlSend shoot_send;
         if (a_target.check()) {
             very_aimer.set_operator_offset(operator_offset);
             cmd = very_aimer.very_aim(
@@ -702,6 +703,7 @@ int main(int argc, char** argv) {
             if (can_fire) {
                 AWAKENING_INFO("you can fire!");
                 cmd.fire_advice = true;
+                shoot_send.shoot_count++;
             } else {
                 cmd.fire_advice = false;
             }
@@ -720,6 +722,7 @@ int main(int argc, char** argv) {
             send.enable_yaw_diff = cmd.enable_yaw_diff;
             send.enable_pitch_diff = cmd.enable_pitch_diff;
             serial->write(std::move(utils::to_vector(send)));
+            serial->write(std::move(utils::to_vector(shoot_send)));
         }
 #ifdef USE_Daedalus
         if (daedalus_shm_client) {

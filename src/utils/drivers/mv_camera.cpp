@@ -1,4 +1,5 @@
-#include "mv_camera.hpp"
+#ifdef USE_MvSDK
+    #include "mv_camera.hpp"
 namespace awakening {
 void MvCamera::stop() {
     if (!running_) {
@@ -54,9 +55,9 @@ void MvCamera::load(const YAML::Node& config) {
         auto gamma = config["gamma"].as<double>();
         set_gamma(gamma);
     }
-#ifdef USE_TRT
+    #ifdef USE_TRT
     use_cuda_cvt_ = config["use_cuda_cvt"].as<bool>();
-#endif
+    #endif
 }
 void MvCamera::set_ExposureTime(double exposure_time) {
     double exposure_line_time;
@@ -172,3 +173,4 @@ bool MvCamera::initialize_camera() {
     return false;
 }
 } // namespace awakening
+#endif

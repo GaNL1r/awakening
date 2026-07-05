@@ -257,17 +257,6 @@ public:
         bool on_traj = true;
     };
 
-    [[nodiscard]] static inline GimbalState::State average_motion_state(
-        const GimbalState::State& s0,
-        const GimbalState::State& s1,
-        double T
-    ) noexcept {
-        GimbalState::State s = s0;
-        s.v = T > 1e-9 ? (s1.p - s0.p) / T : 0.0;
-        s.a = 0.0;
-        return s;
-    }
-
     [[nodiscard]] static inline double segment_avg_v(
         const std::vector<GimbalState::State>& s,
         const std::vector<double>& prefix,
@@ -277,35 +266,55 @@ public:
         return T > 1e-9 ? (s[d.r].p - s[d.l].p) / T : 0.0;
     }
 
-    [[nodiscard]] static inline Seg build_sampled_center_seg(
+    [[nodiscard]] static inline std::vector<GimbalState::State> estimate_knot_states(
         const std::vector<GimbalState::State>& s,
         const std::vector<double>& prefix,
-        const std::vector<SegmentDesc>& descs,
-        size_t center
+        const std::vector<SegmentDesc>& descs
     ) noexcept {
-        const auto& d = descs[center];
-        const double T = prefix[d.r] - prefix[d.l];
-        if (!d.on_traj || center == 0 || center + 1 == descs.size()) {
-            auto head = s[d.l];
-            auto tail = s[d.r];
-            head.v = head.a = 0.0;
-            tail.v = tail.a = 0.0;
-            return Seg::build(head, tail, T, d.on_traj);
+        std::vector<GimbalState::State> knots = s;
+        for (auto& state: knots) {
+            state.v = 0.0;
+            state.a = 0.0;
         }
 
-        const bool has_left = d.on_traj && center > 0 && descs[center - 1].on_traj;
-        const bool has_right = d.on_traj && center + 1 < descs.size() && descs[center + 1].on_traj;
-        const double left_v = has_left ? segment_avg_v(s, prefix, descs[center - 1]) : 0.0;
-        const double right_v = has_right ? segment_avg_v(s, prefix, descs[center + 1]) : 0.0;
-        const double center_a = (has_left && has_right && T > 1e-9) ? (right_v - left_v) / T : 0.0;
+        std::vector<double> left_v(s.size(), 0.0);
+        std::vector<double> right_v(s.size(), 0.0);
+        std::vector<double> left_T(s.size(), 0.0);
+        std::vector<double> right_T(s.size(), 0.0);
+        std::vector<bool> has_left(s.size(), false);
+        std::vector<bool> has_right(s.size(), false);
 
-        auto head = s[d.l];
-        auto tail = s[d.r];
-        head.v = has_left ? left_v : 0.0;
-        tail.v = has_right ? right_v : 0.0;
-        head.a = center_a;
-        tail.a = center_a;
-        return Seg::build(head, tail, T, d.on_traj);
+        for (const auto& d: descs) {
+            if (!d.on_traj)
+                continue;
+
+            const double T = prefix[d.r] - prefix[d.l];
+            if (T <= 1e-9)
+                continue;
+
+            const double avg_v = segment_avg_v(s, prefix, d);
+            right_v[d.l] = avg_v;
+            right_T[d.l] = T;
+            has_right[d.l] = true;
+
+            left_v[d.r] = avg_v;
+            left_T[d.r] = T;
+            has_left[d.r] = true;
+        }
+
+        for (size_t i = 0; i < knots.size(); ++i) {
+            if (!has_left[i] || !has_right[i])
+                continue;
+
+            const double T = left_T[i] + right_T[i];
+            if (T <= 1e-9)
+                continue;
+
+            knots[i].v = (right_T[i] * left_v[i] + left_T[i] * right_v[i]) / T;
+            knots[i].a = 2.0 * (right_v[i] - left_v[i]) / T;
+        }
+
+        return knots;
     }
 
     [[nodiscard]] std::vector<SegmentDesc>
@@ -324,24 +333,6 @@ public:
             }
         }
         return descs;
-    }
-
-    [[nodiscard]] size_t seed_desc_idx(
-        const std::vector<SegmentDesc>& descs,
-        const std::optional<std::pair<int, int>>& interval
-    ) const noexcept {
-        if (descs.empty())
-            return 0;
-
-        if (interval) {
-            for (size_t i = 0; i < descs.size(); ++i) {
-                if (descs[i].l <= interval->first && descs[i].r >= interval->second) {
-                    return i;
-                }
-            }
-        }
-
-        return descs.size() / 2;
     }
 
     [[nodiscard]] std::optional<std::pair<int, int>> find_nearest_change_interval(
@@ -441,8 +432,7 @@ public:
         Traj& traj,
         const std::vector<GimbalState::State>& s,
         const std::vector<double>& prefix,
-        const std::vector<SegmentDesc>& descs,
-        size_t seed
+        const std::vector<SegmentDesc>& descs
     ) const noexcept {
         traj.segs.clear();
         traj.seg_start_idx.clear();
@@ -451,36 +441,15 @@ public:
         if (descs.empty())
             return;
 
-        std::vector<Seg> segs(descs.size());
-        const size_t center = std::min(seed, descs.size() - 1);
-
+        const auto knots = estimate_knot_states(s, prefix, descs);
         auto duration = [&](const SegmentDesc& d) { return prefix[d.r] - prefix[d.l]; };
-
-        segs[center] = build_sampled_center_seg(s, prefix, descs, center);
-
-        for (size_t i = center + 1; i < descs.size(); ++i) {
-            const auto& d = descs[i];
-            auto head = segs[i - 1].tail;
-            head.p = s[d.l].p;
-            auto tail = average_motion_state(s[d.l], s[d.r], duration(d));
-            tail.p = s[d.r].p;
-            segs[i] = Seg::build(head, tail, duration(d), d.on_traj);
-        }
-
-        for (size_t i = center; i-- > 0;) {
-            const auto& d = descs[i];
-            auto head = average_motion_state(s[d.l], s[d.r], duration(d));
-            head.p = s[d.l].p;
-            auto tail = segs[i + 1].head;
-            tail.p = s[d.r].p;
-            segs[i] = Seg::build(head, tail, duration(d), d.on_traj);
-        }
 
         traj.segs.reserve(descs.size());
         traj.seg_start_idx.reserve(descs.size());
         traj.seg_end_idx.reserve(descs.size());
         for (size_t i = 0; i < descs.size(); ++i) {
-            traj.push_seg(std::move(segs[i]), descs[i].l, descs[i].r);
+            const auto& d = descs[i];
+            traj.push_seg(Seg::build(knots[d.l], knots[d.r], duration(d), d.on_traj), d.l, d.r);
         }
         traj.rebuild_prefix(prefix[descs.front().l]);
     }
@@ -511,13 +480,7 @@ public:
         const auto interval = expand_limit_interval(cp_vec, s, prefix, change_interval, max_acc);
         traj.limit_interval = interval;
         const auto descs = make_segment_descs(N, interval);
-        build_continuous_centered_traj(
-            traj,
-            s,
-            prefix,
-            descs,
-            seed_desc_idx(descs, change_interval)
-        );
+        build_continuous_centered_traj(traj, s, prefix, descs);
     }
 
     void build_limit(double max_yaw_acc, double max_pitch_acc, double current_time) noexcept {

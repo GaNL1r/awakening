@@ -38,10 +38,29 @@ find_package(Eigen3 REQUIRED)
 find_package(fmt REQUIRED)
 find_package(yaml-cpp REQUIRED)
 find_package(Ceres REQUIRED)
-find_package(HikSDK REQUIRED)
-find_package(MvSDK REQUIRED)
 find_package(spdlog REQUIRED)
 find_package(TBB REQUIRED)
+find_package(HikSDK QUIET)
+find_package(MvSDK QUIET)
+set(CMAKE_PREFIX_PATH "${CMAKE_PREFIX_PATH};/home/hy/Galaxy_Linux-x86_Gige-U3_32bits-64bits_2.6.2606.9251/Galaxy_camera")
+find_package(DahengSDK QUIET)
+set(BUILD_DEFINITIONS "")
+set(BUILD_LIBS "")
+if(HikSDK_FOUND)
+    list(APPEND BUILD_DEFINITIONS USE_HikSDK)
+    list(APPEND BUILD_LIBS HikSDK::HikSDK)
+endif()
+
+if(MvSDK_FOUND)
+    list(APPEND BUILD_DEFINITIONS USE_MvSDK)
+    list(APPEND BUILD_LIBS MvSDK::MvSDK)
+endif()
+
+if(DahengSDK_FOUND)
+    list(APPEND BUILD_DEFINITIONS USE_DahengSDK)
+    list(APPEND BUILD_LIBS DahengSDK::DahengSDK)
+endif()
+
 set(RERUN_FOUND FALSE)
 if(BUILD_WITH_RERUN)
     find_package(rerun_sdk CONFIG QUIET)
@@ -54,8 +73,7 @@ if(BUILD_WITH_RERUN)
 endif()
 
 
-set(BUILD_DEFINITIONS "")
-set(BUILD_LIBS "")
+
 if(RERUN_FOUND)
     list(APPEND BUILD_DEFINITIONS USE_RERUN)
 endif()
@@ -280,10 +298,10 @@ target_link_libraries(radar_cal
 )
 endif()
 if(ROS2_FULL_FOUND)
-add_tool_executable(camera_to_ros2 src/runtime/test/camera_to_ros2.cpp)
-target_link_libraries(camera_to_ros2
-    ${PROJECT_NAME}_rcl
-)
+# add_tool_executable(camera_to_ros2 src/runtime/test/camera_to_ros2.cpp)
+# target_link_libraries(camera_to_ros2
+#     ${PROJECT_NAME}_rcl
+# )
 target_link_libraries(standard
     ${PROJECT_NAME}_rcl
 )

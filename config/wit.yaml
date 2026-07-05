@@ -1,10 +1,10 @@
-mode: auto_aim
-enemy_color: blue
-bullet_speed: 23.5
+mode: auto_buff
+enemy_color: red
+bullet_speed: 20.5
 
 serial:
-  enable: false
-  device_name: /dev/ttyACM0 
+  enable: true
+  device_name: /dev/gimbal
   baud_rate: 115200
   char_size: 8
   read_buf_size: 4096
@@ -15,11 +15,20 @@ record:
  enable: false
 
 tf:
+  # camera_in_gimbal:
+  #   t: [0.0, 0.0, 0.02]
+  #   R: [1.0, 0.0, 0.0,
+  #     0.0, 1.0, 0.0,
+  #     0.0, 0.0, 1.0]
+  # shoot_in_gimbal:
+  #   t: [0.2,0.0,0.0]
+  #   R: [1.0,0.0,0.0,0.0,1.0,0.0,0.0,0.0,1.0]
   camera_in_gimbal:
-    t: [0.14,0.05,0.0]
+    t: [0.110750382, 0.0, 0.0522]
     R: [1.0,0.0,0.0,0.0,1.0,0.0,0.0,0.0,1.0]
+
   shoot_in_gimbal:
-    t: [0.2,0.0,0.0]
+    t: [0.04375, 0.0, 0.0]
     R: [1.0,0.0,0.0,0.0,1.0,0.0,0.0,0.0,1.0]
 wheel_odometry:
   q_xyz: [10.0,10.0,1.0]
@@ -31,7 +40,7 @@ bullet_pick_up:
     resistance: 0.001
   
 auto_exposure:
-  enable: true
+  enable: false
   target_brightness: 35.0
   tolerance: 3.0
   step_gain: 15.0
@@ -42,20 +51,20 @@ auto_exposure:
 
 
 armor_detector:
-  max_infer_num: 5
-  backend: tensorrt
+  max_infer_num: 3
+  backend: openvino
   net_detector:
     openvino:
-      model_path: ${ROOT_DIR}/model/opt-1208-001.onnx
-      device_name: "CPU"
+      model_path: ${ROOT_DIR}/model/0526.onnx
+      device_name: "GPU"
       perf_mode: "THROUGHPUT"
       priority: "HIGH"
       # scheduling_core_type: "PCORE_ONLY"
       execution_mode: "PERFORMANCE"
       infer_request_buffer_num: 10
     tensorrt:
-      model_path: ${ROOT_DIR}/model/0708.onnx
-      copy_context_num: 4
+      model_path: ${ROOT_DIR}/model/opt-1208-001.onnx
+      copy_context_num: 3
       min_free_mem_ratio: 0.1
       use_cuda_preproces: true
     armor_infer:
@@ -82,7 +91,7 @@ armor_detector:
 armor_tracker:
   lost_time_thres: 1.5
   lost_time_thres_outpost: 2.0
-  tracking_thres: 10
+  tracking_thres: 2
   qxyz_common: [30.0, 30.0, 1.0]
   qyaw_common: 30.0
   qxyz_output: [1.0, 1.0, 1.0]
@@ -92,7 +101,7 @@ armor_tracker:
   q_h: 0.0000001
   q_wpr: 0.1
   q_outpost_dz: 0.0000001
-  enable_lights_measure: false
+  enable_lights_measure: true
   armor_match_gate: 200.0
   armor_match_gate_not_all_init: 1000.0
   armor_match_w_center_err: 5.0
@@ -102,9 +111,9 @@ armor_tracker:
   light_match_angle_gate: 0.2
   light_match_pos_gate_by_length_ratio: 5.0
   r_sigma_px_by_length_ratio: 0.2
-  r_sigma_length_by_length_ratio: 0.5
+  r_sigma_length_by_length_ratio: 0.3
   r_sigma_angle: 0.1
-  r_sigma_armor_lights_depth_diff: 0.1
+  r_sigma_armor_lights_depth_diff: 0.2
   esekf_iter_num: 5
 
 
@@ -116,7 +125,7 @@ armor_tracker:
 auto_aim_fsm:
   single_whole_up: 1.5 
   single_whole_down: 1.0
-  whole_pair_up: 17.5 
+  whole_pair_up: 7.5 
   whole_pair_down: 6.5 #1s内至少换2次板子  2pi  否则轨迹规划无意义
   pair_center_up: 16.5
   pair_center_down: 15.0
@@ -126,7 +135,7 @@ auto_aim_fsm:
 very_aimer:
   base_yaw_offset: -0.0
   base_pitch_offset: -0.5
-  sample_total_time: 0.5
+  sample_total_time: 1.0
   sample_horizon: 100
   fire_delay_min: 0.00
   fire_delay_max: 0.00
@@ -144,12 +153,12 @@ very_aimer:
     resistance: 0.001
 
 rune_detector:
-  max_infer_num: 5
-  backend: tensorrt
+  max_infer_num: 2
+  backend: openvino
   net_detector:
     openvino:
       model_path: ${ROOT_DIR}/model/cb_rune.onnx
-      device_name: "CPU"
+      device_name: "GPU"
       perf_mode: "THROUGHPUT"
       priority: "HIGH"
       # scheduling_core_type: "PCORE_ONLY"
@@ -164,13 +173,13 @@ rune_detector:
       model_type: cb
       conf_threshold: 0.2
   cv:
-    bin_threshold: 70
-    color_diff_thresh: 10
-    rune_r_min_area: 10
-    rune_r_max_area: 999999999
-    rune_r_1x1ratio_tol: 0.1
-    rune_r_fill_ratio_min: 0.4
-    rune_pan_min_area: 10
+    bin_threshold: 100
+    color_diff_thresh: 70
+    rune_r_min_area: 100
+    rune_r_max_area: 2000
+    rune_r_1x1ratio_tol: 0.5
+    rune_r_fill_ratio_min: 0.3
+    rune_pan_min_area: 30
     rune_pan_max_area: 99999999
     rune_pan_cluster_radius: 70
     rune_pan_max_square_ratio: 1.3
@@ -178,7 +187,7 @@ rune_detector:
 
 rune_tracker:
   lost_time_thres: 2.0
-  tracking_thres: 10
+  tracking_thres: 2
   esekf_iter_num: 5
   q_xyz: [0.0001, 0.0001, 0.0001]
   q_yaw: 0.1
@@ -186,7 +195,7 @@ rune_tracker:
   q_a: 0.01
   q_w: 0.01
   q_tau: 0.01
-  match_gate: 30.0
+  match_gate: 40.0
   voter_state_need_count: 50
   voter_mode_need_count: 20
   big_args_continue_time: 1.0
@@ -211,8 +220,9 @@ rune_aimer:
 
 
 camera: 
+  type: daheng
   hik_camera:
-    target_sn: DA1094115
+    target_sn: 00DA5133320
     adc_bit_depth: Bits_8
     pixel_format: BayerRG8 #RGB8Packed
     reverse_x: false
@@ -221,15 +231,34 @@ camera:
     height: 1080
     offset_x: 0
     offset_y: 0
-    acquisition_frame_rate_enable: false
-    acquisition_frame_rate: 60
-    exposure_time: 2000
+    acquisition_frame_rate_enable: true
+    acquisition_frame_rate: 160
+    exposure_time: 1700
     gain: 16.9
     gamma: 0.7 #Bayer用不了
     trigger_mode: Off
     trigger_source: ""
     trigger_activation: ""
     format: "bgr" 
+    use_cuda_cvt: true
+  daheng_camera:
+    target_sn: FDN24040524
+    pixel_format: BayerRG8
+    reverse_x: false
+    reverse_y: false
+    width: 1440
+    height: 1080
+    offset_x: 0
+    offset_y: 0
+    acquisition_frame_rate_enable: true
+    acquisition_frame_rate: 160
+    exposure_time: 3500
+    gain: 16.9
+    gamma: 15.0
+    trigger_mode: Off
+    trigger_source: ""
+    trigger_activation: ""
+    format: "bgr"
     use_cuda_cvt: true
   mv_camera:
     frame_speed: 0
@@ -242,34 +271,6 @@ camera:
     use_cuda_cvt: true
   camera_info:
     #8mm
-    image_width: 1440
-    image_height: 1080
-    camera_name: narrow_stereo
-    camera_matrix:
-      rows: 3
-      cols: 3
-      data: [2414.61275,    0.     ,  721.37281,
-                0.     , 2414.78302,  545.30027,
-                0.     ,    0.     ,    1.     ]
-    distortion_model: plumb_bob
-    distortion_coefficients:
-      rows: 1
-      cols: 5
-      data: [-0.028197, 0.156818, 0.001180, -0.000636, 0.000000]
-    rectification_matrix:
-      rows: 3
-      cols: 3
-      data: [1., 0., 0.,
-            0., 1., 0.,
-            0., 0., 1.]
-    projection_matrix:
-      rows: 3
-      cols: 4
-      data: [2413.68035,    0.     ,  720.88545,    0.     ,
-                0.     , 2413.51678,  545.97089,    0.     ,
-                0.     ,    0.     ,    1.     ,    0.     ]
-    #6mm
-
     image_width: 1440
     image_height: 1080
     camera_name: narrow_stereo
@@ -296,6 +297,34 @@ camera:
       data: [1798.04639,    0.     ,  735.53338,    0.     ,
                 0.     , 1801.03183,  532.11558,    0.     ,
                 0.     ,    0.     ,    1.     ,    0.     ]
+    #6mm
+
+    # image_width: 1440
+    # image_height: 1080
+    # camera_name: narrow_stereo
+    # camera_matrix:
+    #   rows: 3
+    #   cols: 3
+    #   data: [1812.55793,    0.     ,  734.91798,
+    #             0.     , 1810.46711,  531.77493,
+    #             0.     ,    0.     ,    1.     ]
+    # distortion_model: plumb_bob
+    # distortion_coefficients:
+    #   rows: 1
+    #   cols: 5
+    #   data: [-0.068720, 0.117810, 0.000829, 0.000523, 0.000000]
+    # rectification_matrix:
+    #   rows: 3
+    #   cols: 3
+    #   data: [1., 0., 0.,
+    #         0., 1., 0.,
+    #         0., 0., 1.]
+    # projection_matrix:
+    #   rows: 3
+    #   cols: 4
+    #   data: [1798.04639,    0.     ,  735.53338,    0.     ,
+    #             0.     , 1801.03183,  532.11558,    0.     ,
+    #             0.     ,    0.     ,    1.     ,    0.     ]
     #12mm
     # image_width: 1440
     # image_height: 1080

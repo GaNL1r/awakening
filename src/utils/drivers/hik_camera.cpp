@@ -1,7 +1,8 @@
-#include "hik_camera.hpp"
-#ifdef USE_TRT
-    #include "utils/cuda/cvtcolor.hpp"
-#endif
+#ifdef USE_HikSDK
+    #include "hik_camera.hpp"
+    #ifdef USE_TRT
+        #include "utils/cuda/cvtcolor.hpp"
+    #endif
 namespace awakening {
 void HikCamera::load(const YAML::Node& config) {
     std::string target_sn = config["target_sn"].as<std::string>();
@@ -44,9 +45,9 @@ void HikCamera::load(const YAML::Node& config) {
 
     auto format_str = config["format"].as<std::string>();
     target_format_ = string2PixelFormat(format_str);
-#ifdef USE_TRT
+    #ifdef USE_TRT
     use_cuda_cvt_ = config["use_cuda_cvt"].as<bool>();
-#endif
+    #endif
     AWAKENING_INFO("Camera parameters set successfully!");
 }
 void HikCamera::stop() {
@@ -93,16 +94,16 @@ ImageFrame HikCamera::to_image_frame(Frame& f) {
     const auto& ref_cvt = get_cvt_map();
     int cvt_code = ref_cvt.at(pixel_type);
     if (cvt_code != -1) {
-#ifdef USE_TRT
+    #ifdef USE_TRT
         if (use_cuda_cvt_) {
             static utils::__cuda::CvtColor cvt;
             cvt.process(src, img_frame.src_img, cvt_code);
         } else {
-#endif
+    #endif
             cv::cvtColor(src, img_frame.src_img, cvt_code);
-#ifdef USE_TRT
+    #ifdef USE_TRT
         }
-#endif
+    #endif
 
     } else {
         img_frame.src_img = src.clone();
@@ -185,3 +186,4 @@ bool HikCamera::initialize_camera(const std::string& target_sn) {
     return false;
 }
 } // namespace awakening
+#endif

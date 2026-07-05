@@ -58,5 +58,9 @@ struct SentryySendYUNTAISHOU {
     uint8_t cmd_ID = ID;
     uint8_t user_data[30];
 } __attribute__((packed));
-
+struct ShootControlSend {
+    static constexpr uint8_t ID = 0x05;
+    uint8_t cmd_ID = ID;
+    uint32_t shoot_count = 0;
+};
 } // namespace awakening
