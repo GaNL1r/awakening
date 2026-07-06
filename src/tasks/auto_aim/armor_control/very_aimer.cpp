@@ -47,6 +47,7 @@ struct VeryAimer::Impl {
             min_enable_yaw_deg = config["min_enable_yaw_deg"].as<double>();
         }
     } params_;
+    using MPCType = dta_utils::DualSmallMpcTrajectory;
     Impl(const YAML::Node& config) {
         params_.load(config);
         ballistic_trajectory_ = BallisticTrajectory::create(config["ballistic_trajectory"]);
@@ -54,15 +55,15 @@ struct VeryAimer::Impl {
         base_pitch_offset_rad_ = angles::from_degrees(config["base_pitch_offset"].as<double>());
         auto type = config["type"].as<std::string>();
         if (type == "mpc" || type == "MPC") {
-            dta_utils::TinyMpcTrajectory::Params mpc_p {
-                .yaw_max_acc = params_.max_yaw_acc,
-                .pitch_max_acc = params_.max_pitch_acc,
+            MPCType::Params mpc_p {
+                .yaw_max_acc = (float)params_.max_yaw_acc,
+                .pitch_max_acc = (float)params_.max_pitch_acc,
                 .horizon = params_.sample_horizon,
                 .dt = params_.sample_total_time / params_.sample_horizon,
                 .max_iter = 10,
             };
-            mpc_traj_ = dta_utils::TinyMpcTrajectory::create(mpc_p);
-            AWAKENING_INFO("very_aimer: using TinyMpcTrajectory");
+            mpc_traj_ = MPCType::create(mpc_p);
+            AWAKENING_INFO("very_aimer: using  MpcTrajectory");
         }
     }
     [[nodiscard]] int
@@ -457,7 +458,10 @@ struct VeryAimer::Impl {
             if (!mpc_traj_) {
                 limit_traj_.build_limit(params_.max_yaw_acc, params_.max_pitch_acc, time_in_traj);
             } else {
-                mpc_traj_->solve(limit_traj_, time_in_traj);
+                if (!mpc_traj_->solve(limit_traj_, time_in_traj)) {
+                    AWAKENING_ERROR("very_aimer: mpc solve failed");
+                    return cmd;
+                }
             }
 
             if (fsm == AutoAimFsm::AIM_WHOLE_CAR_CENTER) { //瞄准中间的目标和控制不一样
@@ -532,10 +536,12 @@ struct VeryAimer::Impl {
                         time_in_traj,
                         old_limit_size
                     );
+                } else {
+                    if (!mpc_traj_->solve(limit_traj_, time_in_traj)) {
+                        AWAKENING_ERROR("very_aimer: mpc solve failed");
+                        return cmd;
+                    }
                 }
-                // else {
-                //     mpc_traj_->solve(limit_traj_, time_in_traj);
-                // }
             }
             if (fsm == AutoAimFsm::AIM_WHOLE_CAR_CENTER) { //瞄准中间的目标和控制不一样
                 if (!replenish_traj(
@@ -683,7 +689,7 @@ struct VeryAimer::Impl {
     double base_yaw_offset_rad_;
     double base_pitch_offset_rad_;
     std::pair<double, double> operator_offset_ = std::make_pair(0, 0);
-    dta_utils::TinyMpcTrajectory::Ptr mpc_traj_;
+    MPCType::Ptr mpc_traj_;
 };
 VeryAimer::VeryAimer(const YAML::Node& config) {
     _impl = std::make_unique<Impl>(config);

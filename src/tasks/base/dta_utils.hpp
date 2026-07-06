@@ -1,6 +1,7 @@
 #pragma once
 
 #include "angles.h"
+#include "dual_small_mpc_solver.hpp"
 #include "tasks/base/common.hpp"
 #include "tasks/base/traj.hpp"
 #include "tinympc/tiny_api.hpp"
@@ -13,8 +14,93 @@
 #include <tbb/parallel_invoke.h>
 #include <utility>
 #include <vector>
-
 namespace awakening::dta_utils {
+template<typename TrackState>
+inline void update_fsm(
+    bool found,
+    TrackState& state,
+    int tracking_thres,
+    double lost_time,
+    double lost_time_thres
+) noexcept {
+    switch (state.tracker_state) {
+        case TrackState::DETECTING:
+            if (!found) {
+                state.detect_count = 0;
+                state.tracker_state = TrackState::LOST;
+                return;
+            }
+            if (++state.detect_count > tracking_thres) {
+                state.detect_count = 0;
+                state.tracker_state = TrackState::TRACKING;
+            }
+            return;
+
+        case TrackState::TRACKING:
+            if (!found) {
+                state.tracker_state = TrackState::TEMP_LOST;
+            }
+            return;
+
+        case TrackState::TEMP_LOST:
+            if (found) {
+                state.tracker_state = TrackState::TRACKING;
+                return;
+            }
+            if (lost_time > lost_time_thres) {
+                state.tracker_state = TrackState::LOST;
+            }
+            return;
+
+        default:
+            return;
+    }
+}
+
+inline double elapsed_sec(const TimePoint& from, const TimePoint& to) noexcept {
+    return std::max(0.0, std::chrono::duration<double>(to - from).count());
+}
+
+template<typename CostMatrix>
+inline std::vector<std::pair<int, int>>
+greedy_match(const CostMatrix& cost, int n_obs, int n_ids, double max_cost) {
+    std::vector<std::pair<int, int>> result;
+    std::vector<bool> used_obs(n_obs, false);
+    std::vector<bool> used_id(n_ids, false);
+
+    while (true) {
+        double best = max_cost;
+        int best_obs = -1;
+        int best_id = -1;
+
+        for (int obs = 0; obs < n_obs; ++obs) {
+            if (used_obs[obs]) {
+                continue;
+            }
+            for (int id = 0; id < n_ids; ++id) {
+                if (used_id[id]) {
+                    continue;
+                }
+                if (cost[obs][id] < best) {
+                    best = cost[obs][id];
+                    best_obs = obs;
+                    best_id = id;
+                }
+            }
+        }
+
+        if (best_obs < 0 || best_id < 0) {
+            break;
+        }
+
+        used_obs[best_obs] = true;
+        used_id[best_id] = true;
+        result.emplace_back(best_obs, best_id);
+    }
+
+    return result;
+}
+
 struct ControlPoint {
     double yaw;
     double pitch;
@@ -663,8 +749,11 @@ public:
         tiny_set_bound_constraints(_solver, x_min, x_max, u_min, u_max_pitch);
         _solver->settings->max_iter = params_.max_iter;
     }
-    Trajectory<GimbalState::State, double>
-    solve(const Trajectory<GimbalState::State, double>& ref_traj, double t_current) {
+    bool solve(
+        const Trajectory<GimbalState::State, double>& ref_traj,
+        Trajectory<GimbalState::State, double>& control_traj,
+        double t_current
+    ) {
         auto make_even = [](int x) { return x % 2 == 0 ? x : x + 1; };
         const int mpc_horizon = make_even(params_.horizon) + 1;
         const int half_horizon = make_even(params_.horizon) / 2;
@@ -687,19 +776,26 @@ public:
         tiny_set_x0(_solver, x0);
         _solver->work->Xref = traj_eigen.block(0, 0, 2, mpc_horizon);
         tiny_solve(_solver);
-        Trajectory<GimbalState::State, double> control_traj;
+        if (!_solver->work->status)
+            return false;
+        control_traj.clear();
         control_traj.reserve(mpc_horizon);
         for (int k = 0; k < mpc_horizon; ++k) {
             GimbalState::State tp;
             tp.p = _solver->work->x(0, k);
             tp.v = _solver->work->x(1, k);
+            if (k == mpc_horizon - 1) {
+                tp.a = _solver->work->u(0, k - 1);
+            } else {
+                tp.a = _solver->work->u(0, k);
+            }
             tp.a = _solver->work->u(0, k);
             int i = k - half_horizon;
             double t_add = i * params_.dt;
             double t = t_current + t_add;
             control_traj.push_back(tp, t);
         }
-        return control_traj;
+        return true;
     }
 
     TinySolver* _solver;
@@ -733,7 +829,16 @@ public:
     static Ptr create(const Params& p) {
         return std::make_unique<TinyMpcTrajectory>(p);
     }
-    void solve(Trajectory<GimbalState, double>& ref_traj, double t_current) {
+    void unwrap_states(std::vector<GimbalState>& s) const noexcept {
+        if (s.size() < 2)
+            return;
+        for (size_t i = 1; i < s.size(); ++i) {
+            s[i].yaw_state.p = angles::unwrap_angle(s[i - 1].yaw_state.p, s[i].yaw_state.p);
+            s[i].pitch_state.p = angles::unwrap_angle(s[i - 1].pitch_state.p, s[i].pitch_state.p);
+        }
+    }
+    bool solve(Trajectory<GimbalState, double>& ref_traj, double t_current) {
+        unwrap_states(ref_traj.get_cp_vec());
         Trajectory<GimbalState::State, double> yaw_ref_traj;
         Trajectory<GimbalState::State, double> pitch_ref_traj;
         const auto& yp_cp = ref_traj.get_cp_vec();
@@ -760,16 +865,18 @@ public:
                 s[i].a = 2.0 * ((s[i + 1].p - s[i].p) / dt1 - (s[i].p - s[i - 1].p) / dt0) / denom;
             }
         };
+        bool ok = true;
         tbb::parallel_invoke(
             [&]() {
                 compute_va(yaw_ref_traj);
-                yaw_control_traj_ = yaw_solver_.solve(yaw_ref_traj, t_current);
+                ok &= yaw_solver_.solve(yaw_ref_traj, yaw_control_traj_, t_current);
             },
             [&]() {
                 compute_va(pitch_ref_traj);
-                pitch_control_traj_ = pitch_solver_.solve(pitch_ref_traj, t_current);
+                ok &= pitch_solver_.solve(pitch_ref_traj, pitch_control_traj_, t_current);
             }
         );
+        return ok;
     };
     [[nodiscard]] inline GimbalState state_at(double t) const noexcept {
         GimbalState::State yaw = yaw_control_traj_.state_at(t);
@@ -777,90 +884,129 @@ public:
         return GimbalState(yaw, pitch);
     }
 };
-template<typename TrackState>
-inline void update_fsm(
-    bool found,
-    TrackState& state,
-    int tracking_thres,
-    double lost_time,
-    double lost_time_thres
-) noexcept {
-    switch (state.tracker_state) {
-        case TrackState::DETECTING:
-            if (!found) {
-                state.detect_count = 0;
-                state.tracker_state = TrackState::LOST;
-                return;
-            }
-            if (++state.detect_count > tracking_thres) {
-                state.detect_count = 0;
-                state.tracker_state = TrackState::TRACKING;
-            }
-            return;
 
-        case TrackState::TRACKING:
-            if (!found) {
-                state.tracker_state = TrackState::TEMP_LOST;
-            }
-            return;
-
-        case TrackState::TEMP_LOST:
-            if (found) {
-                state.tracker_state = TrackState::TRACKING;
-                return;
-            }
-            if (lost_time > lost_time_thres) {
-                state.tracker_state = TrackState::LOST;
-            }
-            return;
-
-        default:
-            return;
+class DualSmallMpcTrajectory {
+public:
+    using Ptr = std::unique_ptr<DualSmallMpcTrajectory>;
+    Trajectory<GimbalState> control_traj_;
+    talos::DualSmallMpcSolver::Ptr solver_;
+    struct Params {
+        float yaw_max_acc { 50.0f };
+        float pitch_max_acc { 50.0f };
+        int horizon { 100 };
+        double dt;
+        int max_iter;
+    } params_;
+    DualSmallMpcTrajectory(const Params& p) {
+        params_ = p;
+        auto yaw = talos::DualSmallMpcSolver::AxisConfig {
+            .max_acc = p.yaw_max_acc,
+        };
+        auto pitch = talos::DualSmallMpcSolver::AxisConfig {
+            .max_acc = p.pitch_max_acc,
+        };
+        auto make_even = [](int x) { return x % 2 == 0 ? x : x + 1; };
+        const int mpc_horizon = make_even(p.horizon) + 1;
+        solver_ = talos::DualSmallMpcSolver::create(p.dt, mpc_horizon, 1.0f, yaw, pitch);
     }
-}
+    static Ptr create(const Params& p) {
+        return std::make_unique<DualSmallMpcTrajectory>(p);
+    }
+    void unwrap_states(std::vector<GimbalState>& s) const noexcept {
+        if (s.size() < 2)
+            return;
+        for (size_t i = 1; i < s.size(); ++i) {
+            s[i].yaw_state.p = angles::unwrap_angle(s[i - 1].yaw_state.p, s[i].yaw_state.p);
+            s[i].pitch_state.p = angles::unwrap_angle(s[i - 1].pitch_state.p, s[i].pitch_state.p);
+        }
+    }
+    bool solve(Trajectory<GimbalState, double>& ref_traj, double t_current) {
+        unwrap_states(ref_traj.get_cp_vec());
+        auto compute_va = [&]() {
+            auto& s = ref_traj.get_cp_vec();
+            const auto& prefix = ref_traj.get_prefix();
+            s.front().yaw_state.v = s.back().yaw_state.v = 0.0;
+            s.front().pitch_state.v = s.back().pitch_state.v = 0.0;
+            s.front().yaw_state.a = s.back().yaw_state.a = 0.0;
+            s.front().pitch_state.a = s.back().pitch_state.a = 0.0;
 
-inline double elapsed_sec(const TimePoint& from, const TimePoint& to) noexcept {
-    return std::max(0.0, std::chrono::duration<double>(to - from).count());
-}
+            for (size_t i = 1; i + 1 < s.size(); ++i) {
+                const double dt0 = prefix[i] - prefix[i - 1];
+                const double dt1 = prefix[i + 1] - prefix[i];
+                const double denom = dt0 + dt1;
+                const double w0 = dt1 / denom;
+                const double w1 = dt0 / denom;
 
-template<typename CostMatrix>
-inline std::vector<std::pair<int, int>>
-greedy_match(const CostMatrix& cost, int n_obs, int n_ids, double max_cost) {
-    std::vector<std::pair<int, int>> result;
-    std::vector<bool> used_obs(n_obs, false);
-    std::vector<bool> used_id(n_ids, false);
+                s[i].yaw_state.v = w0 * (s[i].yaw_state.p - s[i - 1].yaw_state.p) / dt0
+                    + w1 * (s[i + 1].yaw_state.p - s[i].yaw_state.p) / dt1;
+                s[i].pitch_state.v = w0 * (s[i].pitch_state.p - s[i - 1].pitch_state.p) / dt0
+                    + w1 * (s[i + 1].pitch_state.p - s[i].pitch_state.p) / dt1;
 
-    while (true) {
-        double best = max_cost;
-        int best_obs = -1;
-        int best_id = -1;
-
-        for (int obs = 0; obs < n_obs; ++obs) {
-            if (used_obs[obs]) {
-                continue;
+                s[i].yaw_state.a = 2.0
+                    * ((s[i + 1].yaw_state.p - s[i].yaw_state.p) / dt1
+                       - (s[i].yaw_state.p - s[i - 1].yaw_state.p) / dt0)
+                    / denom;
+                s[i].pitch_state.a = 2.0
+                    * ((s[i + 1].pitch_state.p - s[i].pitch_state.p) / dt1
+                       - (s[i].pitch_state.p - s[i - 1].pitch_state.p) / dt0)
+                    / denom;
             }
-            for (int id = 0; id < n_ids; ++id) {
-                if (used_id[id]) {
-                    continue;
-                }
-                if (cost[obs][id] < best) {
-                    best = cost[obs][id];
-                    best_obs = obs;
-                    best_id = id;
-                }
+        };
+        compute_va();
+        auto make_even = [](int x) { return x % 2 == 0 ? x : x + 1; };
+        const int mpc_horizon = make_even(params_.horizon) + 1;
+        const int half_horizon = make_even(params_.horizon) / 2;
+        for (int k = 0; k < mpc_horizon; ++k) {
+            int i = k - half_horizon;
+            double t_add = i * params_.dt;
+            double t = t_current + t_add;
+            auto state = ref_traj.Trajectory::state_at(t);
+            solver_->set_ref_col(
+                k,
+                state.yaw_state.p,
+                state.yaw_state.v,
+                state.pitch_state.p,
+                state.pitch_state.v
+            );
+            if (k == 0) {
+                solver_->set_x0(
+                    state.yaw_state.p,
+                    state.yaw_state.v,
+                    state.pitch_state.p,
+                    state.pitch_state.v
+                );
             }
         }
+        solver_->solve();
+        // if (!solver_->solve()) {
+        //     return false;
+        // }
+        control_traj_.clear();
+        control_traj_.reserve(mpc_horizon);
+        for (int k = 0; k < mpc_horizon; ++k) {
+            GimbalState tp;
+            tp.yaw_state.p = solver_->state(talos::DualSmallMpcSolver::kYawAxis, 0, k);
+            tp.yaw_state.v = solver_->state(talos::DualSmallMpcSolver::kYawAxis, 1, k);
+            tp.pitch_state.p = solver_->state(talos::DualSmallMpcSolver::kPitchAxis, 0, k);
+            tp.pitch_state.v = solver_->state(talos::DualSmallMpcSolver::kPitchAxis, 1, k);
 
-        if (best_obs < 0 || best_id < 0) {
-            break;
+            if (k == mpc_horizon - 1) {
+                tp.yaw_state.a = solver_->input(talos::DualSmallMpcSolver::kYawAxis, k - 1);
+                tp.pitch_state.a = solver_->input(talos::DualSmallMpcSolver::kPitchAxis, k - 1);
+            } else {
+                tp.yaw_state.a = solver_->input(talos::DualSmallMpcSolver::kYawAxis, k);
+                tp.pitch_state.a = solver_->input(talos::DualSmallMpcSolver::kPitchAxis, k);
+            }
+
+            int i = k - half_horizon;
+            double t_add = i * params_.dt;
+            double t = t_current + t_add;
+            control_traj_.push_back(tp, t);
         }
-
-        used_obs[best_obs] = true;
-        used_id[best_id] = true;
-        result.emplace_back(best_obs, best_id);
+        return true;
+    };
+    [[nodiscard]] inline GimbalState state_at(double t) const noexcept {
+        return control_traj_.state_at(t);
     }
-
-    return result;
-}
-
+};
 } // namespace awakening::dta_utils
