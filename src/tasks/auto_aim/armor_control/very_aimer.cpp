@@ -98,9 +98,7 @@ struct VeryAimer::Impl {
             return best;
         };
         auto accept_all = [](int) { return true; };
-        auto accept_pair_by_height = [&](int i) {
-            return target_state.h() < 0 ? (i == 1 || i == 3) : (i == 0 || i == 2);
-        };
+        auto accept_pair = [&](int i) { return (i == 0 || i == 2); };
 
         if (auto_aim_fsm == AutoAimFsm::AIM_SINGLE_ARMOR
             && target.target_number != ArmorClass::OUTPOST && armor_num > 0)
@@ -142,7 +140,7 @@ struct VeryAimer::Impl {
                     == AutoAimFsm::AIM_WHOLE_CAR_PAIR //4选2,本质提升控制轨迹与目标轨迹重合窗口
                 && target.target_number != ArmorClass::OUTPOST)
             {
-                best_idx = pick_best_range(0, armor_num, accept_pair_by_height);
+                best_idx = pick_best_range(0, armor_num, accept_pair);
             }
             if (best_idx < 0) {
                 best_idx = pick_best_range(0, armor_num, accept_all);
@@ -187,9 +185,6 @@ struct VeryAimer::Impl {
         auto rpy = utils::matrix2rpy<double>(desired_gimbal);
         cp.yaw = rpy[2];
         cp.pitch = rpy[1];
-        // auto rvec = utils::so3_log(desired_gimbal.eval());
-        // cp.yaw = rvec[2];
-        // cp.pitch = rvec[1];
         cp.valid = true;
 
         cp.aim_point.pose = armor_pose;
@@ -663,14 +658,20 @@ struct VeryAimer::Impl {
                     && abs_angle_error(control_pitch, target_pitch) < delay_enable.second;
             };
             {
+                bool has_can = false;
+
                 double t_check = 0 + params_.fire_delay_min; //发射延迟内不让打弹
                 while (t_check < (0 + params_.fire_delay_max) && t_check <= horizon / 2.0) {
                     if (!delay_fire(+t_check)) {
                         cmd.no_shoot();
+                    } else {
+                        has_can = true;
                     }
                     t_check += (dt / 2.0);
                 }
-                //发射延迟提前开火？
+                // if (!has_can) {
+                //     cmd.no_shoot();
+                // }
             }
         }
 

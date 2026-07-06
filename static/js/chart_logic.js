@@ -20,6 +20,8 @@ const chartMap = {
   rune_w_diff: { label: "Rune W Diff", color: "#a7d46f" },
   yaw_diff: { label: "Yaw Diff", color: "#a7d46f" },
   pitch_diff: { label: "Pitch Diff", color: "#ffcf8a" },
+  enable_yaw_diff: { label: "Enable Yaw Diff", color: "#ffcf8a" },
+  enable_pitch_diff: { label: "Enable Pitch Diff", color: "#a7d46f" }
 };
 
 let mainChart = null;

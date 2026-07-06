@@ -39,6 +39,7 @@ find_package(fmt REQUIRED)
 find_package(yaml-cpp REQUIRED)
 find_package(Ceres REQUIRED)
 find_package(spdlog REQUIRED)
+find_package(Boost REQUIRED)
 find_package(TBB REQUIRED)
 find_package(HikSDK QUIET)
 find_package(MvSDK QUIET)
@@ -133,6 +134,7 @@ target_link_libraries(${PROJECT_NAME}_utils
     Ceres::ceres
     spdlog::spdlog
     TBB::tbb
+    Boost::boost
     ${OpenCV_LIBS}
     ${BUILD_LIBS}
     

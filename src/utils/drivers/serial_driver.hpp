@@ -2,6 +2,7 @@
 #include "utils/logger.hpp"
 #include "utils/scheduler/scheduler.hpp"
 #include <boost/asio.hpp>
+#include <mutex>
 #include <yaml-cpp/yaml.h>
 
 #include <algorithm>
@@ -224,6 +225,10 @@ private:
             }
         );
     }
+    std::mutex& get_mutex() const {
+        return mutex;
+    }
+    mutable std::mutex mutex;
 
 private:
     boost::asio::io_context io_;

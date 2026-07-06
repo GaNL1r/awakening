@@ -720,8 +720,12 @@ int main(int argc, char** argv) {
             send.v_pitch = cmd.v_pitch, send.a_yaw = cmd.a_yaw, send.a_pitch = cmd.a_pitch;
             send.enable_yaw_diff = cmd.enable_yaw_diff;
             send.enable_pitch_diff = cmd.enable_pitch_diff;
-            serial->write(std::move(utils::to_vector(send)));
-            serial->write(std::move(utils::to_vector(shoot_send)));
+            if (utils::is_finite(send)) {
+                serial->write(std::move(utils::to_vector(send)));
+            }
+            if (utils::is_finite(shoot_send)) {
+                serial->write(std::move(utils::to_vector(shoot_send)));
+            }
         }
 #ifdef USE_Daedalus
         if (daedalus_shm_client) {

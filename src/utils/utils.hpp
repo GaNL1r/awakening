@@ -602,4 +602,9 @@ expand_and_clip_rect(const RectType& rect, double expand_ratio, const cv::Size& 
     r = r & img_rect;
     return r;
 }
+
+template<typename T>
+bool is_finite(const T& s) {
+    return std::apply([](auto... v) { return (std::isfinite(v) && ...); }, s.to_tuple());
+}
 } // namespace awakening::utils

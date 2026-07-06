@@ -789,7 +789,6 @@ public:
             } else {
                 tp.a = _solver->work->u(0, k);
             }
-            tp.a = _solver->work->u(0, k);
             int i = k - half_horizon;
             double t_add = i * params_.dt;
             double t = t_current + t_add;
@@ -865,18 +864,19 @@ public:
                 s[i].a = 2.0 * ((s[i + 1].p - s[i].p) / dt1 - (s[i].p - s[i - 1].p) / dt0) / denom;
             }
         };
-        bool ok = true;
+        bool yaw_ok = true;
+        bool pitch_ok = true;
         tbb::parallel_invoke(
             [&]() {
                 compute_va(yaw_ref_traj);
-                ok &= yaw_solver_.solve(yaw_ref_traj, yaw_control_traj_, t_current);
+                yaw_ok = yaw_solver_.solve(yaw_ref_traj, yaw_control_traj_, t_current);
             },
             [&]() {
                 compute_va(pitch_ref_traj);
-                ok &= pitch_solver_.solve(pitch_ref_traj, pitch_control_traj_, t_current);
+                pitch_ok = pitch_solver_.solve(pitch_ref_traj, pitch_control_traj_, t_current);
             }
         );
-        return ok;
+        return yaw_ok && pitch_ok;
     };
     [[nodiscard]] inline GimbalState state_at(double t) const noexcept {
         GimbalState::State yaw = yaw_control_traj_.state_at(t);
