@@ -188,7 +188,7 @@ sudo ./run.sh debug <program> [args]  # 构建后使用 gdb 启动
 
 # 🏗️ 软件架构
 
-```Mermaid
+```mermaid
 flowchart TB
       subgraph App["运行时入口 runtime"]
           Standard["standard<br/>标准自动瞄准"]
