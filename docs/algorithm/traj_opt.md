@@ -30,7 +30,7 @@ struct GimbalState {
     int aim_id;
 };
 ```
-
+ 
 其中每个轴的状态为：
 
 ```cpp
