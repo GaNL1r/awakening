@@ -30,7 +30,7 @@ struct GimbalState {
     int aim_id;
 };
 ```
-
+ 
 其中每个轴的状态为：
 
 ```cpp
@@ -44,7 +44,7 @@ struct State {
 
 采样轨迹保存在 `Trajectory<GimbalState, double>` 中，时间轴使用 `double`。`LimitTrajectory` 继承自该轨迹容器，并额外维护两条五次多项式轨迹：
 
-```cpp
+```cpp  
 Traj yaw_traj;
 Traj pitch_traj;
 ```
