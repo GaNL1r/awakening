@@ -56,7 +56,7 @@
 - [🏗️ 软件架构](#️-软件架构)
 - [📂 文件结构](#-文件结构)
 - [🧩 核心代码结构](#-核心代码结构)
-- [🧠算法解析](#算法解析)
+- [🧠 算法详解](#-算法详解)
 - [📝 TODO](#-todo)
 - [👨‍💻 作者](#-作者)
 - [🙏 对本项目有帮助的 RoboMaster 开源项目或者个人](#-对本项目有帮助的-robomaster-开源项目或者个人)
@@ -270,7 +270,14 @@ src/
 ---
 
 
-# 🧠算法解析
+# 🧠 算法详解
+
+| 主题 | 文档 |
+| :--- | :--- |
+| “整车”状态估计 | [docs/algorithm/estimation.md](docs/algorithm/estimation.md) |
+| 轨迹优化 | [docs/algorithm/traj_opt.md](docs/algorithm/traj_opt.md) |
+| 图像识别 | [docs/algorithm/detect.md](docs/algorithm/detect.md) |
+| 并发推理 | [docs/algorithm/concurrent_inference.md](docs/algorithm/concurrent_inference.md) |
 
 ---
 
