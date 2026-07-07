@@ -52,11 +52,15 @@
     - [拉取代码并构建运行](#拉取代码并构建运行)
   - [🌐 启动远程 Web 可视化](#-启动远程-web-可视化)
   - [⚙️ 运行脚本](#️-运行脚本)
+- [🔄 数据流图](#-数据流图)
+- [🏗️ 软件架构](#️-软件架构)
 - [📂 文件结构](#-文件结构)
 - [🧩 核心代码结构](#-核心代码结构)
+- [🧠算法解析](#算法解析)
 - [📝 TODO](#-todo)
 - [👨‍💻 作者](#-作者)
 - [🙏 对本项目有帮助的 RoboMaster 开源项目或者个人](#-对本项目有帮助的-robomaster-开源项目或者个人)
+- [📚 前作](#-前作)
 
 ---
 
@@ -178,6 +182,44 @@ sudo ./run.sh debug <program> [args]  # 构建后使用 gdb 启动
 
 ---
 
+# 🔄 数据流图
+
+![数据流图](docs/数据流图.drawio.svg)
+
+# 🏗️ 软件架构
+
+```Mermaid
+flowchart TB
+      subgraph App["运行时入口 runtime"]
+          Standard["standard<br/>标准自动瞄准"]
+          Sentry["sentry<br/>哨兵算法"]
+          Radar["radar_detect / radar_cal<br/>雷达识别/标定"]
+          Tools["control_test / delay_test / map_edit<br/>测试与工具程序"]
+      end
+
+      subgraph Task["任务算法层 tasks"]
+          AutoAim["auto_aim<br/>装甲板识别 / 跟踪 / 控制"]
+          AutoBuff["auto_buff<br/>能量机关识别 / 跟踪 / 控制"]
+          WebTask["base/web<br/>Web 数据输出"]
+          SentryBrain["sentry_brain<br/>哨兵决策"]
+          RadarDetect["radar_detect<br/>雷达识别 / 定位 / 跟踪"]
+          RadarIO["radar_io<br/>雷达通信协议"]
+      end
+
+      subgraph Infra["通用基础设施 utils"]
+          Drivers["drivers<br/>相机 / 串口 / 视频输入"]
+          Net["net_detector<br/>图像神经网络推理封装"]
+          CUDA["cuda<br/>cuda代码"]
+          IO["io<br/>视频 / 点云 IO"]
+          Scheduler["scheduler<br/>调度器"]
+          TF["tf / runtime_tf<br/>坐标变换"]
+          Logger["logger / buffer / common<br/>日志与公共工具"]
+      end
+
+```
+
+---
+
 # 📂 文件结构
 
 ```text
@@ -224,6 +266,11 @@ src/
 ├── _rerun/               # Rerun 可视化
 └── pch.hpp               # 预编译头
 ```
+
+---
+
+
+# 🧠算法解析
 
 ---
 
@@ -331,3 +378,32 @@ src/
 - 哈尔滨工业大学（深圳）南工骁鹰战队  
 
   [radar_ros_ws](https://github.com/PageChen04/radar_ros_ws)
+- 东北大学 TDT 战队  
+
+  [T-DT-2024-Radar](https://github.com/T-DT-Algorithm-2024/T-DT-2024-Radar)
+
+  [T-DT_Radar](https://github.com/T-DT-Algorithm-2025/T-DT_Radar)
+
+- 福建理工大学仓侠战队  
+
+  [PowerRuneSimulator](https://github.com/iowqi/PowerRuneSimulator)
+
+- 上海交通大学交龙战队  
+
+  [adaptive_ekf.hpp](https://github.com/julyfun/rm.cv.fans/blob/main/aimer/base/math/filter/adaptive_ekf.hpp)
+
+- 武汉工程大学 Nautilus 战队  
+  费钰涵
+
+- 江苏开放大学开拓者战队  
+  刘俊豪
+
+- 江苏大学 Aurora 战队  
+  聂政华
+
+
+---
+
+# 📚 前作
+
+[wust_vision](https://github.com/WUST-RM/wust_vision)
