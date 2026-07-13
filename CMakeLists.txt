@@ -157,6 +157,10 @@ target_link_libraries(${PROJECT_NAME}_web
     ${PROJECT_NAME}_auto_aim
     ${PROJECT_NAME}_auto_buff
 )
+file(GLOB_RECURSE VSLAM_SOURCES  src/tasks/vslam/*.cpp)
+add_library(${PROJECT_NAME}_vslam SHARED ${VSLAM_SOURCES})
+awakening_enable_pch(${PROJECT_NAME}_vslam)
+
 if(RERUN_FOUND)
     # The distributed C++ SDK is static/non-PIC, so keep it at executable link scope.
     add_library(${PROJECT_NAME}_rerun STATIC src/_rerun/recorder.cpp)
@@ -272,7 +276,7 @@ endfunction()
 add_common_executable(standard src/runtime/standard.cpp)
 add_tool_executable(control_test src/runtime/test/control_test.cpp)
 add_tool_executable(delay_test src/runtime/test/delay_test.cpp)
-
+add_common_executable(vo src/runtime/vo.cpp)
 
 target_link_libraries(standard
     ${PROJECT_NAME}_auto_aim
@@ -283,6 +287,9 @@ target_link_libraries(control_test
     ${PROJECT_NAME}_web
 )
 
+target_link_libraries(vo
+    ${PROJECT_NAME}_vslam
+)
 
 if(BUILD_RADAR)
 add_tool_executable(radar_detect src/runtime/radar_detect.cpp)

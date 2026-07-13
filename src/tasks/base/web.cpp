@@ -596,8 +596,11 @@ struct Web::Impl {
         d.yaw_log.handle_once(yaw);
         last_yaw = yaw;
         d.pitch_log.handle_once(cmd.pitch);
-        d.yaw_diff_log.handle_once(std::abs(angles::normalize_degrees(yaw - gimbal_yaw_pitch.first)));
-        d.pitch_diff_log.handle_once(std::abs(angles::normalize_degrees(cmd.pitch - gimbal_yaw_pitch.second)));
+        d.yaw_diff_log.handle_once(std::abs(angles::normalize_degrees(yaw - gimbal_yaw_pitch.first))
+        );
+        d.pitch_diff_log.handle_once(
+            std::abs(angles::normalize_degrees(cmd.pitch - gimbal_yaw_pitch.second))
+        );
         d.enable_yaw_diff_log.handle_once(cmd.enable_yaw_diff);
         d.enable_pitch_diff_log.handle_once(cmd.enable_pitch_diff);
         d.target_yaw_log.handle_once(un_warp(cmd.target_yaw));
@@ -740,7 +743,7 @@ struct Web::Impl {
     X(double, 100, yaw_diff) \
     X(double, 100, pitch_diff) \
     X(double, 100, enable_yaw_diff) \
-    X(double, 100, enable_pitch_diff) 
+    X(double, 100, enable_pitch_diff)
 #define GEN_LOG(TYPE, SIZE, NAME) DatasStream<TYPE, SIZE> NAME##_log { #NAME, j, mtx };
 
 #define X(TYPE, SIZE, NAME) GEN_LOG(TYPE, SIZE, NAME)

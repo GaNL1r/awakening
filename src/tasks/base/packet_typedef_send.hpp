@@ -81,10 +81,7 @@ struct ShootControlSend {
     uint8_t cmd_ID = ID;
     uint32_t shoot_count = 0;
     auto to_tuple() const {
-        return std::tie(
-            cmd_ID,
-            shoot_count
-        );
+        return std::tie(cmd_ID, shoot_count);
     }
 };
 } // namespace awakening
