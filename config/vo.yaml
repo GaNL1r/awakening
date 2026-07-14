@@ -1,4 +1,10 @@
 orb:
+  nfeatures: 1500
+  scale_factor: 2.0
+  nlevels: 8
+  edge_threshold: 19
+  fast_threshold: 20
+  match_threshold: 20
 
 camera: 
   type: hik
@@ -14,14 +20,22 @@ camera:
     offset_y: 0
     acquisition_frame_rate_enable: true
     acquisition_frame_rate: 60
-    exposure_time: 500
-    gain: 16.9
+    exposure_time: 3500
+    gain: 10.9
     gamma: 0.7 #Bayer用不了
     trigger_mode: Off
     trigger_source: ""
     trigger_activation: ""
-    format: "bgr" 
+    format: "gray" 
     use_cuda_cvt: true
+  uvc_camera:
+    device_name: "/dev/v4l/by-path/pci-0000:00:14.0-usb-0:4:1.0-video-index0"
+    fps: 60
+    width: 1280
+    height: 720
+    exposure: 50
+    gain: 10.0
+    gamma: 100
   camera_info:
     image_width: 1440
     image_height: 1080
@@ -29,23 +43,23 @@ camera:
     camera_matrix:
       rows: 3
       cols: 3
-      data: [2419.64498,    0.     ,  719.05623,
-                0.     , 2414.38209,  538.71651,
+      data: [1812.55793,    0.     ,  734.91798,
+                0.     , 1810.46711,  531.77493,
                 0.     ,    0.     ,    1.     ]
     distortion_model: plumb_bob
     distortion_coefficients:
       rows: 1
       cols: 5
-      data: [-0.033521, 0.087954, -0.002045, -0.001438, 0.000000]
+      data: [-0.068720, 0.117810, 0.000829, 0.000523, 0.000000]
     rectification_matrix:
       rows: 3
       cols: 3
       data: [1., 0., 0.,
-             0., 1., 0.,
-             0., 0., 1.]
+            0., 1., 0.,
+            0., 0., 1.]
     projection_matrix:
       rows: 3
       cols: 4
-      data: [2413.22632,    0.     ,  717.5196 ,    0.     ,
-                0.     , 2408.83228,  537.43444,    0.     ,
+      data: [1798.04639,    0.     ,  735.53338,    0.     ,
+                0.     , 1801.03183,  532.11558,    0.     ,
                 0.     ,    0.     ,    1.     ,    0.     ]

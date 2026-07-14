@@ -2,6 +2,7 @@
 #include "backward-cpp/backward.hpp"
 #include "tasks/base/common.hpp"
 #include "tasks/vslam/feature/orb.hpp"
+#include "tasks/vslam/frame.hpp"
 #include "tasks/vslam/type.hpp"
 #include "utils/buffer.hpp"
 #include "utils/common/image.hpp"
@@ -13,8 +14,10 @@
 #include "utils/scheduler/scheduler.hpp"
 #include "utils/semaphore_guard.hpp"
 #include "utils/signal_guard.hpp"
+#include <opencv2/core/mat.hpp>
 #include <opencv2/features2d.hpp>
 #include <opencv2/highgui.hpp>
+#include <opencv2/imgproc.hpp>
 #include <vector>
 using namespace awakening;
 
@@ -26,7 +29,7 @@ struct FrameTag {};
 struct DetectTag {};
 using CameraIO = IOPair<CameraTag, ImageFrame>;
 using CommonFrameIo = IOPair<FrameTag, CommonFrame>;
-using DetectIO = IOPair<DetectTag, std::vector<vslam::Feature>>;
+using DetectIO = IOPair<DetectTag, std::vector<vslam::Frame>>;
 enum class VOFrame : int { ODOM, CAMERA, CAMERA_CV, N };
 using VOTF = utils::tf::RobotTF<VOFrame, static_cast<size_t>(VOFrame::N), false>;
 struct LogCtx {
@@ -67,9 +70,6 @@ int main(int argc, char** argv) {
     });
     camera = create_camera(camera_config, s, "hik");
     camera->init();
-    if (!camera->is_running()) {
-        return 0;
-    }
     CameraInfo camera_info;
     camera_info.load(camera_config["camera_info"]);
     vslam::Orb orb(config["orb"]);
@@ -87,7 +87,7 @@ int main(int argc, char** argv) {
         cv_in_camera.linear() = R_CV2PHYSICS;
         tf->push(VOFrame::CAMERA, VOFrame::CAMERA_CV, Clock::now(), cv_in_camera);
     }
-    utils::OrderedQueue<vslam::Feature> features_queue;
+    utils::OrderedQueue<vslam::Frame> features_queue;
     s.register_task<CameraIO, CommonFrameIo>("push_common_frame", [&](CameraIO::second_type&& f) {
         static int current_id = 0;
         if (f.src_img.empty()) {
@@ -102,23 +102,27 @@ int main(int argc, char** argv) {
 
         return std::make_tuple(std::optional<CommonFrameIo::second_type>(std::move(frame)));
     });
-    s.register_task<CommonFrameIo, DetectIO>("detector", [&](CommonFrameIo::second_type&& frame) {
+    s.register_task<CommonFrameIo, DetectIO>("detector", [&](CommonFrameIo::second_type&& f) {
         static std::unique_ptr<std::counting_semaphore<>> detector_sem;
         if (!detector_sem) {
             detector_sem = std::make_unique<std::counting_semaphore<>>(3);
         }
-        vslam::Feature feature {
-            .src = frame.img_frame.src_img,
-            .timestamp = frame.img_frame.timestamp,
-            .id = frame.id,
-            .frame_id = frame.frame_id,
+        cv::Mat gray;
+        if(f.img_frame.format!=PixelFormat::GRAY){
+            cv::cvtColor(f.img_frame.src_img, gray, cv::COLOR_BGR2GRAY);
+        }
+        vslam::Frame frame {
+            .img_gray = gray.empty() ? f.img_frame.src_img : gray,
+            .timestamp = f.img_frame.timestamp,
+            .id = f.id,
+            
         };
         {
             bool got = detector_sem->try_acquire();
             utils::SemaphoreGuard guard(*detector_sem, got); //并发控制
             if (got) {
                 auto start = Clock::now();
-                orb.detect(frame.img_frame.src_img, feature);
+                orb.detect(frame);
                 log_ctx.detect_count++;
                 auto end = Clock::now();
                 log_ctx.detect_cost +=
@@ -126,49 +130,20 @@ int main(int argc, char** argv) {
             }
         }
 
-        features_queue.enqueue(feature);
+        features_queue.enqueue(frame);
         auto batch_features = features_queue.dequeue_batch();
         return std::make_tuple(std::optional<DetectIO::second_type>(std::move(batch_features)));
     });
-    s.register_task<DetectIO>("tracker", [&](DetectIO::second_type&& features) {
+    s.register_task<DetectIO>("tracker", [&](DetectIO::second_type&& frames) {
         static std::mutex mutex;
         std::lock_guard<std::mutex> lock(mutex);
-        static int seq = -1;
-        static vslam::Feature waiting;
-        std::vector<vslam::Feature> detected;
-        for (auto& feature: features) {
-            if (feature.detected) {
-                detected.push_back(feature);
+        std::vector<vslam::Frame> detected;
+        for (auto& frame: frames) {
+            if (frame.detected) {
+                detected.push_back(frame);
             }
         }
-        std::vector<vslam::Match> matched;
-        for (auto& feature: detected) {
-            if (seq != -1) {
-                auto start = Clock::now();
-                auto match = orb.match(waiting, feature);
-                auto end = Clock::now();
-                log_ctx.match_count++;
-                log_ctx.match_cost +=
-                    std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
-                match.seq = seq;
-                matched.push_back(match);
-                // if (seq % 10 == 0) { // 每10帧显示一次匹配结果
-                //     cv::Mat img_matched;
-                //     cv::drawMatches(
-                //         waiting.src,
-                //         waiting.detected->keypoints,
-                //         feature.src,
-                //         feature.detected->keypoints,
-                //         match.matches,
-                //         img_matched
-                //     );
-                //     cv::imshow("Matched Features", img_matched);
-                //     cv::waitKey(1);
-                // }
-            }
-            waiting = feature;
-            seq++;
-        }
+        
     });
     s.add_rate_source<>("logger", 1.0, [&]() {
         double detect_avg_cost =

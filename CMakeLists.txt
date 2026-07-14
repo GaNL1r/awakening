@@ -22,16 +22,7 @@ option(BUILD_WITH_RERUN "Enable Rerun visualization when the SDK is available" O
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} ${PROJECT_SOURCE_DIR}/cmake)
 
 set(AWAKENING_PCH_HEADER ${PROJECT_SOURCE_DIR}/src/pch.hpp)
-
-function(awakening_enable_pch target_name)
-    if(BUILD_WITH_PCH AND COMMAND target_precompile_headers)
-        target_precompile_headers(
-            ${target_name}
-            PRIVATE "$<$<COMPILE_LANGUAGE:CXX>:${AWAKENING_PCH_HEADER}>"
-        )
-    endif()
-endfunction()
-
+include(AwakeningTargets)
 
 find_package(OpenCV REQUIRED)
 find_package(Eigen3 REQUIRED)
@@ -109,23 +100,18 @@ configure_file(
     ${CMAKE_BINARY_DIR}/src/param_deliver.h            
     @ONLY
 )
-add_library(relink SHARED src/relink.cpp)
-awakening_enable_pch(relink)
+awakening_add_library(relink SOURCES src/relink.cpp)
 include_directories(${PROJECT_NAME}_utils PUBLIC
     ${PROJECT_SOURCE_DIR}/src
     ${PROJECT_SOURCE_DIR}/3rdparty
     ${CMAKE_BINARY_DIR}/src
     ${OpenCV_INCLUDE_DIRS}
 )
-file(GLOB_RECURSE UTILS_SOURCES  src/utils/*.cpp 3rdparty/*.cpp 3rdparty/*.c)
+set(UTILS_SOURCE_GLOBS src/utils/*.cpp 3rdparty/*.cpp 3rdparty/*.c)
 if(BUILD_WITH_TRT)
-    file(GLOB_RECURSE UTILS_CUDA_SOURCES  src/utils/*.cu)
-    list(APPEND UTILS_SOURCES ${UTILS_CUDA_SOURCES})
+    list(APPEND UTILS_SOURCE_GLOBS src/utils/*.cu)
 endif()
-add_library(${PROJECT_NAME}_utils SHARED ${UTILS_SOURCES})
-awakening_enable_pch(${PROJECT_NAME}_utils)
-target_compile_definitions(${PROJECT_NAME}_utils PUBLIC ${BUILD_DEFINITIONS})
-target_link_libraries(${PROJECT_NAME}_utils
+awakening_add_library(${PROJECT_NAME}_utils GLOB ${UTILS_SOURCE_GLOBS} DEFINITIONS ${BUILD_DEFINITIONS} LINKS
     HikSDK::HikSDK
     MvSDK::MvSDK
     yaml-cpp
@@ -137,38 +123,20 @@ target_link_libraries(${PROJECT_NAME}_utils
     Boost::boost
     ${OpenCV_LIBS}
     ${BUILD_LIBS}
-    
 )
-file(GLOB_RECURSE AUTO_AIM_SOURCES  src/tasks/auto_aim/*.cpp)
-add_library(${PROJECT_NAME}_auto_aim SHARED ${AUTO_AIM_SOURCES})
-awakening_enable_pch(${PROJECT_NAME}_auto_aim)
-target_link_libraries(${PROJECT_NAME}_auto_aim
-     ${PROJECT_NAME}_utils
-)
-file(GLOB_RECURSE AUTO_BUFF_SOURCES  src/tasks/auto_buff/*.cpp)
-add_library(${PROJECT_NAME}_auto_buff SHARED ${AUTO_BUFF_SOURCES})
-awakening_enable_pch(${PROJECT_NAME}_auto_buff)
-target_link_libraries(${PROJECT_NAME}_auto_buff
-     ${PROJECT_NAME}_utils
-)
-add_library(${PROJECT_NAME}_web SHARED src/tasks/base/web.cpp)
-awakening_enable_pch(${PROJECT_NAME}_web)
-target_link_libraries(${PROJECT_NAME}_web
+awakening_add_library(${PROJECT_NAME}_auto_aim GLOB src/tasks/auto_aim/*.cpp LINKS ${PROJECT_NAME}_utils)
+awakening_add_library(${PROJECT_NAME}_auto_buff GLOB src/tasks/auto_buff/*.cpp LINKS ${PROJECT_NAME}_utils)
+awakening_add_library(${PROJECT_NAME}_web SOURCES src/tasks/base/web.cpp LINKS
     ${PROJECT_NAME}_auto_aim
     ${PROJECT_NAME}_auto_buff
 )
-file(GLOB_RECURSE VSLAM_SOURCES  src/tasks/vslam/*.cpp)
-add_library(${PROJECT_NAME}_vslam SHARED ${VSLAM_SOURCES})
-awakening_enable_pch(${PROJECT_NAME}_vslam)
+awakening_add_library(${PROJECT_NAME}_vslam GLOB src/tasks/vslam/*.cpp)
 
 if(RERUN_FOUND)
     # The distributed C++ SDK is static/non-PIC, so keep it at executable link scope.
-    add_library(${PROJECT_NAME}_rerun STATIC src/_rerun/recorder.cpp)
-    awakening_enable_pch(${PROJECT_NAME}_rerun)
-    target_compile_definitions(${PROJECT_NAME}_rerun PUBLIC USE_RERUN)
-    target_link_libraries(${PROJECT_NAME}_rerun
-        PUBLIC rerun_sdk
-        PRIVATE ${PROJECT_NAME}_auto_aim ${PROJECT_NAME}_auto_buff
+    awakening_add_library(${PROJECT_NAME}_rerun TYPE STATIC SOURCES src/_rerun/recorder.cpp DEFINITIONS USE_RERUN
+        LINKS rerun_sdk
+        PRIVATE_LINKS ${PROJECT_NAME}_auto_aim ${PROJECT_NAME}_auto_buff
     )
 endif()
 
@@ -210,19 +178,11 @@ if(ROS2_FULL_FOUND)
         endif()
     endforeach()
     include_directories(${ROS2_INCLUDES})
-    file(GLOB_RECURSE RCL_SOURCES  src/_rcl/*.cpp)
-    add_library(${PROJECT_NAME}_rcl SHARED EXCLUDE_FROM_ALL ${RCL_SOURCES})
-    awakening_enable_pch(${PROJECT_NAME}_rcl)
-    target_link_libraries(${PROJECT_NAME}_rcl
-    ${PROJECT_NAME}_utils
-    )
+    awakening_add_library(${PROJECT_NAME}_rcl EXCLUDE_FROM_ALL GLOB src/_rcl/*.cpp LINKS ${PROJECT_NAME}_utils)
     ament_target_dependencies(${PROJECT_NAME}_rcl  ${ROS2_PACKAGES})
     target_compile_definitions(${PROJECT_NAME}_rcl  PUBLIC ${BUILD_DEFINITIONS})
     if(BUILD_SENTRY)
-    file(GLOB_RECURSE SENTRY_BRAIN_SOURCES  src/tasks/sentry_brain/*.cpp)
-    add_library(${PROJECT_NAME}_sentry_brain SHARED EXCLUDE_FROM_ALL ${SENTRY_BRAIN_SOURCES})
-    awakening_enable_pch(${PROJECT_NAME}_sentry_brain)
-    target_link_libraries(${PROJECT_NAME}_sentry_brain
+    awakening_add_library(${PROJECT_NAME}_sentry_brain EXCLUDE_FROM_ALL GLOB src/tasks/sentry_brain/*.cpp LINKS
         ${PROJECT_NAME}_rcl
         ${PROJECT_NAME}_auto_aim 
     )
@@ -230,18 +190,12 @@ if(ROS2_FULL_FOUND)
     if(BUILD_RADAR)
     # find_package(small_gicp REQUIRED)
     find_package(Open3D REQUIRED)
-    file(GLOB_RECURSE RADAR_DETECT_SOURCES  src/tasks/radar_detect/*.cpp)
-    add_library(${PROJECT_NAME}_radar_detect SHARED EXCLUDE_FROM_ALL ${RADAR_DETECT_SOURCES})
-    awakening_enable_pch(${PROJECT_NAME}_radar_detect)
-    target_link_libraries(${PROJECT_NAME}_radar_detect
+    awakening_add_library(${PROJECT_NAME}_radar_detect EXCLUDE_FROM_ALL GLOB src/tasks/radar_detect/*.cpp LINKS
         ${PROJECT_NAME}_utils
         ${PROJECT_NAME}_rcl
         Open3D::Open3D
     )
-    file(GLOB_RECURSE RADAR_IO_SOURCES  src/tasks/radar_io/*.cpp)
-    add_library(${PROJECT_NAME}_radar_io SHARED EXCLUDE_FROM_ALL ${RADAR_IO_SOURCES})
-    awakening_enable_pch(${PROJECT_NAME}_radar_io)
-    target_link_libraries(${PROJECT_NAME}_radar_io
+    awakening_add_library(${PROJECT_NAME}_radar_io EXCLUDE_FROM_ALL GLOB src/tasks/radar_io/*.cpp LINKS
         ${PROJECT_NAME}_utils
         ${PROJECT_NAME}_rcl
     )
@@ -251,87 +205,33 @@ else()
 endif()
 
 
-function(add_common_executable exe_name src_file)
-    add_executable(${exe_name} ${src_file})
-    awakening_enable_pch(${exe_name})
-    target_link_libraries(${exe_name}  ${PROJECT_NAME}_utils relink)
-    if(RERUN_FOUND)
-        target_link_libraries(${exe_name} ${PROJECT_NAME}_rerun)
-    endif()
-endfunction()
+set(STANDARD_LINKS ${PROJECT_NAME}_auto_aim ${PROJECT_NAME}_auto_buff ${PROJECT_NAME}_web)
+set(VO_LINKS ${PROJECT_NAME}_vslam)
+if(ROS2_FULL_FOUND)
+    list(APPEND STANDARD_LINKS ${PROJECT_NAME}_rcl)
+    list(APPEND VO_LINKS ${PROJECT_NAME}_rcl)
+endif()
 
-function(add_tool_executable exe_name src_file)
-    if(BUILD_RUNTIME_TESTS)
-        add_executable(${exe_name} ${src_file})
-    else()
-        add_executable(${exe_name} EXCLUDE_FROM_ALL ${src_file})
-    endif()
-    awakening_enable_pch(${exe_name})
-    target_link_libraries(${exe_name} ${PROJECT_NAME}_utils relink)
-    if(RERUN_FOUND)
-        target_link_libraries(${exe_name} ${PROJECT_NAME}_rerun)
-    endif()
-endfunction()
-
-add_common_executable(standard src/runtime/standard.cpp)
-add_tool_executable(control_test src/runtime/test/control_test.cpp)
-add_tool_executable(delay_test src/runtime/test/delay_test.cpp)
-add_common_executable(vo src/runtime/vo.cpp)
-
-target_link_libraries(standard
-    ${PROJECT_NAME}_auto_aim
-    ${PROJECT_NAME}_auto_buff
-    ${PROJECT_NAME}_web
-)
-target_link_libraries(control_test
-    ${PROJECT_NAME}_web
-)
-
-target_link_libraries(vo
-    ${PROJECT_NAME}_vslam
-)
+awakening_add_executable(standard SOURCES src/runtime/standard.cpp LINKS ${STANDARD_LINKS})
+awakening_add_executable(control_test TOOL SOURCES src/runtime/test/control_test.cpp LINKS ${PROJECT_NAME}_web)
+awakening_add_executable(delay_test TOOL SOURCES src/runtime/test/delay_test.cpp)
+awakening_add_executable(vo SOURCES src/runtime/vo.cpp LINKS ${VO_LINKS})
 
 if(BUILD_RADAR)
-add_tool_executable(radar_detect src/runtime/radar_detect.cpp)
-target_link_libraries(radar_detect
-    ${PROJECT_NAME}_radar_detect
-    ${PROJECT_NAME}_radar_io
-)
-add_tool_executable(livox_v1_driver src/runtime/livox_v1_driver.cpp)
-target_link_libraries(livox_v1_driver
-    ${PROJECT_NAME}_radar_detect
-)
-add_tool_executable(radar_cal src/runtime/radar_cal.cpp)
-target_link_libraries(radar_cal
-    ${PROJECT_NAME}_radar_detect
-)
+    awakening_add_executable(radar_detect TOOL SOURCES src/runtime/radar_detect.cpp LINKS ${PROJECT_NAME}_radar_detect ${PROJECT_NAME}_radar_io)
+    awakening_add_executable(livox_v1_driver TOOL SOURCES src/runtime/livox_v1_driver.cpp LINKS ${PROJECT_NAME}_radar_detect)
+    awakening_add_executable(radar_cal TOOL SOURCES src/runtime/radar_cal.cpp LINKS ${PROJECT_NAME}_radar_detect)
 endif()
-if(ROS2_FULL_FOUND)
-# add_tool_executable(camera_to_ros2 src/runtime/test/camera_to_ros2.cpp)
-# target_link_libraries(camera_to_ros2
-#     ${PROJECT_NAME}_rcl
-# )
-target_link_libraries(standard
-    ${PROJECT_NAME}_rcl
-)
 
-if(BUILD_SENTRY)
-add_tool_executable(nav src/runtime/nav.cpp)
-add_common_executable(sentry src/runtime/sentry.cpp)
-add_tool_executable(map_edit src/runtime/map_edit.cpp)
-
-target_link_libraries(nav
-    ${PROJECT_NAME}_rcl
-    ${PROJECT_NAME}_utils
-)
-target_link_libraries(sentry
-    ${PROJECT_NAME}_rcl
-    ${PROJECT_NAME}_utils
-    ${PROJECT_NAME}_auto_aim
-    ${PROJECT_NAME}_auto_buff
-    ${PROJECT_NAME}_web
-    ${PROJECT_NAME}_sentry_brain
-)
-
-endif()
+if(ROS2_FULL_FOUND AND BUILD_SENTRY)
+    awakening_add_executable(nav TOOL SOURCES src/runtime/nav.cpp LINKS ${PROJECT_NAME}_rcl ${PROJECT_NAME}_utils)
+    awakening_add_executable(sentry SOURCES src/runtime/sentry.cpp LINKS
+        ${PROJECT_NAME}_rcl
+        ${PROJECT_NAME}_utils
+        ${PROJECT_NAME}_auto_aim
+        ${PROJECT_NAME}_auto_buff
+        ${PROJECT_NAME}_web
+        ${PROJECT_NAME}_sentry_brain
+    )
+    awakening_add_executable(map_edit TOOL SOURCES src/runtime/map_edit.cpp)
 endif()

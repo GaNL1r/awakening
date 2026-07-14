@@ -244,32 +244,32 @@ camera:
     use_cuda_cvt: true
   camera_info:
     #8mm
-    image_width: 1440
-    image_height: 1080
-    camera_name: narrow_stereo
-    camera_matrix:
-      rows: 3
-      cols: 3
-      data: [2414.61275,    0.     ,  721.37281,
-                0.     , 2414.78302,  545.30027,
-                0.     ,    0.     ,    1.     ]
-    distortion_model: plumb_bob
-    distortion_coefficients:
-      rows: 1
-      cols: 5
-      data: [-0.028197, 0.156818, 0.001180, -0.000636, 0.000000]
-    rectification_matrix:
-      rows: 3
-      cols: 3
-      data: [1., 0., 0.,
-            0., 1., 0.,
-            0., 0., 1.]
-    projection_matrix:
-      rows: 3
-      cols: 4
-      data: [2413.68035,    0.     ,  720.88545,    0.     ,
-                0.     , 2413.51678,  545.97089,    0.     ,
-                0.     ,    0.     ,    1.     ,    0.     ]
+    # image_width: 1440
+    # image_height: 1080
+    # camera_name: narrow_stereo
+    # camera_matrix:
+    #   rows: 3
+    #   cols: 3
+    #   data: [2414.61275,    0.     ,  721.37281,
+    #             0.     , 2414.78302,  545.30027,
+    #             0.     ,    0.     ,    1.     ]
+    # distortion_model: plumb_bob
+    # distortion_coefficients:
+    #   rows: 1
+    #   cols: 5
+    #   data: [-0.028197, 0.156818, 0.001180, -0.000636, 0.000000]
+    # rectification_matrix:
+    #   rows: 3
+    #   cols: 3
+    #   data: [1., 0., 0.,
+    #         0., 1., 0.,
+    #         0., 0., 1.]
+    # projection_matrix:
+    #   rows: 3
+    #   cols: 4
+    #   data: [2413.68035,    0.     ,  720.88545,    0.     ,
+    #             0.     , 2413.51678,  545.97089,    0.     ,
+    #             0.     ,    0.     ,    1.     ,    0.     ]
     #6mm
 
     image_width: 1440

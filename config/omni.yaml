@@ -42,7 +42,7 @@ auto_exposure:
 
 
 armor_detector:
-  max_infer_num: 2
+  max_infer_num: 3
   backend: openvino
   net_detector:
     openvino:
@@ -71,6 +71,7 @@ armor_detector:
   cv:
     light:
       bin_threshold: 120.0
+      net_ref_threshold_tol: 50.0
       min_wh_ratio: 0.001
       max_wh_ratio: 0.4
       max_angle: 40.0
@@ -90,19 +91,23 @@ armor_tracker:
   q_r: 0.0000001
   q_l: 0.0000001
   q_h: 0.0000001
-  q_wpr: 1.0
+  q_wpr: 0.0000001
   q_outpost_dz: 0.0000001
   enable_lights_measure: true
-  armor_match_gate: 400.0
+  armor_match_gate: 300.0
   armor_match_gate_not_all_init: 1000.0
+  armor_match_w_center_err: 5.0
+  armor_match_w_angle_err: 10.0
+  armor_match_w_side_length_err: 1.0
   light_match_length_ratio_gate: 0.2
   light_match_angle_gate: 0.2
-  light_match_pos_gate_by_length_ratio: 10.0
-  r_sigma_px_by_length_ratio: 0.1
-  r_sigma_length_by_length_ratio: 0.3
+  light_match_pos_gate_by_length_ratio: 5.0
+  r_sigma_px_by_length_ratio: 0.2
+  r_sigma_length_by_length_ratio: 0.5
   r_sigma_angle: 0.5
-  r_armor_lights_depth_diff: 0.001
+  r_sigma_armor_lights_depth_diff: 0.1
   esekf_iter_num: 5
+
 
 
 
@@ -122,6 +127,7 @@ auto_aim_fsm:
 
 
 very_aimer:
+  type: mpc
   base_yaw_offset: -0.5
   base_pitch_offset: -2.0
   # base_yaw_offset: -0.0
@@ -189,15 +195,15 @@ rune_tracker:
   q_xyz: [0.0001, 0.0001, 0.0001]
   q_yaw: 0.1
   q_roll: 10.0
-  q_a_raw: 0.01
-  q_w_raw: 0.01
+  q_a: 0.01
+  q_w: 0.01
   q_tau: 0.01
   match_gate: 30.0
   voter_state_need_count: 50
   voter_mode_need_count: 20
   big_args_continue_time: 1.0
-  r_uv_cv: 30.0
-  r_uv_net: 80.0
+  r_sigma_pix_by_hand_length_ratio_cv: 0.05
+  r_sigma_pix_by_hand_length_ratio_net: 0.2
 
 rune_aimer:
   base_yaw_offset: -0.0
@@ -217,6 +223,7 @@ rune_aimer:
 
 
 camera: 
+  type: hik
   hik_camera:
     target_sn: DA3038891
     adc_bit_depth: Bits_8
@@ -228,7 +235,7 @@ camera:
     offset_x: 0
     offset_y: 0
     acquisition_frame_rate_enable: true
-    acquisition_frame_rate: 150
+    acquisition_frame_rate: 250
     exposure_time: 1500
     gain: 16.9
     gamma: 0.7 #Bayer用不了
