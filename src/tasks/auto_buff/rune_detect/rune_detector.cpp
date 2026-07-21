@@ -467,7 +467,10 @@ struct RuneDetector::Impl {
         if (net_detector_) {
             utils::NetDetectorBase::OutPut net_output;
             net_output = net_detector_->detect(roi, frame.img_frame.format);
-            result.fan_blades = rune_infer_->process(net_output.output);
+            if (net_output.outputs.empty()) {
+                return result;
+            }
+            result.fan_blades = rune_infer_->process(net_output.outputs.front());
             for (auto& fan_blade: result.fan_blades) {
                 fan_blade.transform(net_output.transform_matrix);
                 fan_blade.add_offset(focus.tl());

@@ -47,7 +47,7 @@ struct VeryAimer::Impl {
             min_enable_yaw_deg = config["min_enable_yaw_deg"].as<double>();
         }
     } params_;
-    using MPCType = dta_utils::DualSmallMpcTrajectory;
+    using MPCType = dta_utils::TinyMpcTrajectory;
     Impl(const YAML::Node& config) {
         params_.load(config);
         ballistic_trajectory_ = BallisticTrajectory::create(config["ballistic_trajectory"]);

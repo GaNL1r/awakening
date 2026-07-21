@@ -607,7 +607,10 @@ struct ArmorDetector::Impl {
         std::vector<Armor> result;
 
         net_output = net_detector_->detect(roi, frame.img_frame.format);
-        result = armor_infer_->process(net_output.output);
+        if (net_output.outputs.empty()) {
+            return { lights, result };
+        }
+        result = armor_infer_->process(net_output.outputs.front());
 
         if (!net_output.resized_img.empty()) {
             if (params_.number_classifier_params) {

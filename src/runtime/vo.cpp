@@ -1,7 +1,7 @@
 #include "ascii_banner.hpp"
 #include "backward-cpp/backward.hpp"
 #include "tasks/base/common.hpp"
-#include "tasks/vslam/feature/orb.hpp"
+#include "tasks/vslam/feature/gcn2.hpp"
 #include "tasks/vslam/frame.hpp"
 #include "tasks/vslam/type.hpp"
 #include "utils/buffer.hpp"
@@ -14,11 +14,15 @@
 #include "utils/scheduler/scheduler.hpp"
 #include "utils/semaphore_guard.hpp"
 #include "utils/signal_guard.hpp"
+#include <cstring>
 #include <opencv2/core/mat.hpp>
 #include <opencv2/features2d.hpp>
 #include <opencv2/highgui.hpp>
 #include <opencv2/imgproc.hpp>
 #include <vector>
+#ifdef USE_Daedalus
+    #include "daedalus_interface/shm_client.hpp"
+#endif
 using namespace awakening;
 
 namespace backward {
@@ -61,6 +65,25 @@ int main(int argc, char** argv) {
     }
     auto config = YAML::LoadFile(config_path);
     Scheduler s;
+#ifdef USE_Daedalus
+    bool use_daedalus = false;
+    std::unique_ptr<talos::ipc::ShmClient> daedalus_shm_client;
+    if (config["use_sim"] && config["use_sim"].as<bool>()) {
+        auto client = talos::ipc::ShmClient::connect();
+        if (!client) {
+            AWAKENING_ERROR("Failed to connect to talos::ipc::ShmClient");
+            return 1;
+        }
+        use_daedalus = true;
+        daedalus_shm_client = std::make_unique<talos::ipc::ShmClient>(std::move(*client));
+    }
+#else
+    bool use_daedalus = false;
+    if (config["use_sim"] && config["use_sim"].as<bool>()) {
+        AWAKENING_ERROR("use_sim is enabled, but this binary was built without USE_Daedalus");
+        return 1;
+    }
+#endif
     auto camera_config = config["camera"];
     std::unique_ptr<Camera> camera;
     utils::SignalGuard::add_callback([&]() {
@@ -68,11 +91,14 @@ int main(int argc, char** argv) {
             camera->stop();
         }
     });
-    camera = create_camera(camera_config, s, "hik");
-    camera->init();
+    if (!use_daedalus) {
+        camera = create_camera(camera_config, s, "hik");
+        camera->init();
+    }
     CameraInfo camera_info;
     camera_info.load(camera_config["camera_info"]);
-    vslam::Orb orb(config["orb"]);
+    vslam::Gcn2 gcn(config["gcn2"]);
+    
     LogCtx log_ctx;
     auto tf = VOTF::create();
     {
@@ -88,6 +114,43 @@ int main(int argc, char** argv) {
         tf->push(VOFrame::CAMERA, VOFrame::CAMERA_CV, Clock::now(), cv_in_camera);
     }
     utils::OrderedQueue<vslam::Frame> features_queue;
+#ifdef USE_Daedalus
+    if (daedalus_shm_client) {
+        auto daedalus_imgs = s.register_source<CameraIO>("daedalus_img");
+        s.add_rate_source<>("daedalus_tick", 300.0, [&]() {
+            static bool has_camera_info = false;
+            if (!has_camera_info) {
+                auto info = daedalus_shm_client->camera_info();
+                has_camera_info = true;
+                camera_info.camera_matrix = cv::Mat::eye(3, 3, CV_64F);
+                camera_info.camera_matrix.at<double>(0, 0) = info.fx;
+                camera_info.camera_matrix.at<double>(1, 1) = info.fy;
+                camera_info.camera_matrix.at<double>(0, 2) = info.cx;
+                camera_info.camera_matrix.at<double>(1, 2) = info.cy;
+                camera_info.distortion_coefficients = cv::Mat(1, 5, CV_64F);
+                std::memcpy(
+                    camera_info.distortion_coefficients.ptr<double>(),
+                    info.distortion,
+                    5 * sizeof(double)
+                );
+            }
+
+            if (auto frame = daedalus_shm_client->recv_image()) {
+                ImageFrame img_frame {
+                    .src_img = frame->image.clone(),
+                    .format = PixelFormat::RGB,
+                    .timestamp = TimePoint(std::chrono::nanoseconds(frame->timestamp_ns)),
+                };
+                s.runtime_push_source<CameraIO>(
+                    daedalus_imgs,
+                    [f = std::move(img_frame)]() mutable {
+                        return std::make_tuple(std::optional<CameraIO::second_type>(std::move(f)));
+                    }
+                );
+            }
+        });
+    }
+#endif
     s.register_task<CameraIO, CommonFrameIo>("push_common_frame", [&](CameraIO::second_type&& f) {
         static int current_id = 0;
         if (f.src_img.empty()) {
@@ -108,8 +171,10 @@ int main(int argc, char** argv) {
             detector_sem = std::make_unique<std::counting_semaphore<>>(3);
         }
         cv::Mat gray;
-        if(f.img_frame.format!=PixelFormat::GRAY){
+        if (f.img_frame.format == PixelFormat::BGR) {
             cv::cvtColor(f.img_frame.src_img, gray, cv::COLOR_BGR2GRAY);
+        } else if (f.img_frame.format == PixelFormat::RGB) {
+            cv::cvtColor(f.img_frame.src_img, gray, cv::COLOR_RGB2GRAY);
         }
         vslam::Frame frame {
             .img_gray = gray.empty() ? f.img_frame.src_img : gray,
@@ -122,7 +187,7 @@ int main(int argc, char** argv) {
             utils::SemaphoreGuard guard(*detector_sem, got); //并发控制
             if (got) {
                 auto start = Clock::now();
-                orb.detect(frame);
+                gcn.detect(frame);
                 log_ctx.detect_count++;
                 auto end = Clock::now();
                 log_ctx.detect_cost +=
@@ -141,6 +206,9 @@ int main(int argc, char** argv) {
         for (auto& frame: frames) {
             if (frame.detected) {
                 detected.push_back(frame);
+                cv::drawKeypoints(frame.img_gray, frame.keypoints, frame.img_gray);
+                cv::imshow("Detected Features", frame.img_gray);
+                cv::waitKey(1);
             }
         }
         
@@ -160,7 +228,7 @@ int main(int argc, char** argv) {
         );
         log_ctx.reset();
     });
-    if (camera) {
+    if (!use_daedalus && camera) {
         camera->start<CameraTag>("hik");
     }
     s.build();

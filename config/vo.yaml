@@ -1,3 +1,5 @@
+use_sim: true
+
 orb:
   nfeatures: 1500
   scale_factor: 2.0
@@ -5,6 +7,25 @@ orb:
   edge_threshold: 19
   fast_threshold: 20
   match_threshold: 20
+
+gcn2:
+  backend: tensorrt
+  model_path: /home/hy/paper_work/GCNv2_SLAM/GCN2/gcn2_640x480.onnx
+  input_width: 640
+  input_height: 480
+  border: 16
+  dist_thresh: 8
+  score_threshold: 0.05
+  nfeatures: 1500
+  match_threshold: 20
+  net_detector:
+    openvino:
+      device_name: CPU
+      infer_request_buffer_num: 5
+    tensorrt:
+      copy_context_num: 3
+      min_free_mem_ratio: 0.1
+      use_cuda_preproces: false
 
 camera: 
   type: hik

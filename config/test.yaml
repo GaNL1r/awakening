@@ -125,7 +125,7 @@ auto_aim_fsm:
 
 
 very_aimer:
-  type: "mpc"
+  type: "mp"
   base_yaw_offset: -0.0
   base_pitch_offset: -0.5
   sample_total_time: 0.5

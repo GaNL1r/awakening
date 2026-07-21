@@ -130,7 +130,10 @@ struct Detector::Impl {
         const auto roi = src_img(safe_expanded);
         cv::Rect2f roi_safe_bounds(0, 0, roi.cols, roi.rows);
         auto armor_output = armor_trt_->detect(roi, frame.img_frame.format);
-        armors = armor_post_process(armor_output.output);
+        if (armor_output.outputs.empty()) {
+            return armors;
+        }
+        armors = armor_post_process(armor_output.outputs.front());
         for (auto& armor: armors) {
             armor.bbox = utils::transform_rect(armor_output.transform_matrix, armor.bbox);
             armor.color = get_color(
@@ -159,7 +162,10 @@ struct Detector::Impl {
 
         const auto roi = src_img(safe_expanded);
         auto car_output = car_trt_->detect(roi, frame.img_frame.format);
-        cars = post_process_car(car_output.output);
+        if (car_output.outputs.empty()) {
+            return cars;
+        }
+        cars = post_process_car(car_output.outputs.front());
 
         struct Ctx {
             Car* car;
@@ -229,7 +235,10 @@ struct Detector::Impl {
         }
 
         auto armor_output = armor_trt_->detect(concatenated_img, frame.img_frame.format);
-        auto armors = armor_post_process(armor_output.output);
+        if (armor_output.outputs.empty()) {
+            return cars;
+        }
+        auto armors = armor_post_process(armor_output.outputs.front());
 
         for (auto& armor: armors) {
             armor.bbox = utils::transform_rect(armor_output.transform_matrix, armor.bbox);

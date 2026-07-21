@@ -11,8 +11,10 @@
     #include <fstream>
     #include <memory>
     #include <opencv2/core/hal/interface.h>
+    #include <opencv2/dnn.hpp>
     #include <opencv2/highgui.hpp>
     #include <string>
+    #include <vector>
 namespace awakening::utils {
     #define TRT_CHECK(expr) \
         do { \
@@ -65,8 +67,18 @@ struct NetDetectorTensorrt::Impl {
 
         if (!tmp_ctx)
             throw std::runtime_error("Failed to create execution context");
-        input_name_ = engine_->getIOTensorName(0);
-        output_name_ = engine_->getIOTensorName(1);
+        const int num_io_tensors = engine_->getNbIOTensors();
+        for (int i = 0; i < num_io_tensors; ++i) {
+            const char* name = engine_->getIOTensorName(i);
+            if (engine_->getTensorIOMode(name) == nvinfer1::TensorIOMode::kINPUT) {
+                input_name_ = name;
+            } else {
+                output_names_.push_back(name);
+            }
+        }
+        if (input_name_ == nullptr || output_names_.empty()) {
+            throw std::runtime_error("Invalid TensorRT IO tensors");
+        }
         input_dims_ = nvinfer1::Dims4 { 1,
                                         config_.target_format == PixelFormat::GRAY ? 1 : 3,
                                         config_.target_h,
@@ -78,10 +90,20 @@ struct NetDetectorTensorrt::Impl {
         }
 
         input_dims_ = dims;
-        output_dims_ = tmp_ctx->getTensorShape(output_name_);
+        output_dims_.clear();
+        output_szs_.clear();
+        output_dims_.reserve(output_names_.size());
+        output_szs_.reserve(output_names_.size());
+        for (const char* output_name: output_names_) {
+            auto output_dims = tmp_ctx->getTensorShape(output_name);
+            if (output_dims.nbDims == -1) {
+                throw std::runtime_error("Output shape not specified");
+            }
+            output_dims_.push_back(output_dims);
+            output_szs_.push_back(static_cast<size_t>(volume(output_dims)));
+        }
         tmp_ctx.reset();
         input_sz_ = volume(input_dims_);
-        output_sz_ = volume(output_dims_);
         if (params_.copy_context_num < 1) {
             params_.copy_context_num = 1;
         }
@@ -107,9 +129,16 @@ struct NetDetectorTensorrt::Impl {
             ctx.context.reset(engine_->createExecutionContext());
             if (params_.use_cuda_preproces)
                 ctx.letter_box = std::make_shared<__cuda::LetterBox>(config_);
-            TRT_CHECK(cudaMalloc(&ctx.device_buffers[INPUT_IDX], input_sz_ * sizeof(float)));
-            TRT_CHECK(cudaMalloc(&ctx.device_buffers[OUTPUT_IDX], output_sz_ * sizeof(float)));
-            ctx.output_buffer.resize(output_sz_);
+            TRT_CHECK(cudaMalloc(&ctx.input_device_buffer, input_sz_ * sizeof(float)));
+            ctx.output_device_buffers.resize(output_szs_.size(), nullptr);
+            ctx.output_buffers.resize(output_szs_.size());
+            for (size_t output_idx = 0; output_idx < output_szs_.size(); ++output_idx) {
+                TRT_CHECK(cudaMalloc(
+                    &ctx.output_device_buffers[output_idx],
+                    output_szs_[output_idx] * sizeof(float)
+                ));
+                ctx.output_buffers[output_idx].resize(output_szs_[output_idx]);
+            }
             TRT_CHECK(cudaStreamCreate(&ctx.stream));
             ctx_buffers_.add_resource(std::move(ctx));
         }
@@ -186,6 +215,24 @@ struct NetDetectorTensorrt::Impl {
         AWAKENING_INFO("Engine built & saved: {}", engine_path);
     }
 
+    static cv::Mat output_to_mat(const nvinfer1::Dims& dims, float* data) {
+        if (dims.nbDims == 1) {
+            return cv::Mat(dims.d[0], 1, CV_32F, data).clone();
+        }
+        if (dims.nbDims == 2) {
+            return cv::Mat(dims.d[0], dims.d[1], CV_32F, data).clone();
+        }
+        if (dims.nbDims == 3) {
+            return cv::Mat(dims.d[0] * dims.d[1], dims.d[2], CV_32F, data).clone();
+        }
+        if (dims.nbDims == 4) {
+            int rows = dims.d[0] == 1 ? dims.d[1] * dims.d[2] :
+                dims.d[0] * dims.d[1] * dims.d[2];
+            return cv::Mat(rows, dims.d[3], CV_32F, data).clone();
+        }
+        return {};
+    }
+
     OutPut detect(const cv::Mat& img, PixelFormat format) noexcept {
         if (img.empty()) {
             return {};
@@ -210,6 +257,7 @@ struct NetDetectorTensorrt::Impl {
                 return output;
             }
             auto& ctx = *r;
+            void* input_device_buffer = ctx.input_device_buffer;
             if (params_.use_cuda_preproces) {
                 auto tensor = ctx.letter_box->letterbox_pitched(
                     img.data,
@@ -223,15 +271,15 @@ struct NetDetectorTensorrt::Impl {
                 if (!tensor) {
                     return output;
                 }
-                ctx.device_buffers[INPUT_IDX] = tensor;
+                input_device_buffer = tensor;
                 output.resized_img = ctx.letter_box->tensor_to_mat(
-                    static_cast<float*>(ctx.device_buffers[INPUT_IDX]),
+                    static_cast<float*>(input_device_buffer),
                     ctx.stream,
                     format != config_.target_format
                 );
             } else {
                 TRT_CHECK(cudaMemcpyAsync(
-                    ctx.device_buffers[INPUT_IDX],
+                    ctx.input_device_buffer,
                     blob.ptr<float>(),
                     input_sz_ * sizeof(float),
                     cudaMemcpyHostToDevice,
@@ -239,27 +287,41 @@ struct NetDetectorTensorrt::Impl {
                 ));
             }
 
-            ctx.context->setTensorAddress(input_name_, ctx.device_buffers[INPUT_IDX]);
-            ctx.context->setTensorAddress(output_name_, ctx.device_buffers[OUTPUT_IDX]);
+            ctx.context->setTensorAddress(input_name_, input_device_buffer);
+            for (size_t output_idx = 0; output_idx < output_names_.size(); ++output_idx) {
+                ctx.context->setTensorAddress(
+                    output_names_[output_idx],
+                    ctx.output_device_buffers[output_idx]
+                );
+            }
 
             if (!ctx.context->enqueueV3(ctx.stream)) {
                 AWAKENING_ERROR("enqueueV3 failed");
                 return output;
             }
 
-            TRT_CHECK(cudaMemcpyAsync(
-                ctx.output_buffer.data(),
-                ctx.device_buffers[OUTPUT_IDX],
-                output_sz_ * sizeof(float),
-                cudaMemcpyDeviceToHost,
-                ctx.stream
-            ));
+            for (size_t output_idx = 0; output_idx < output_names_.size(); ++output_idx) {
+                TRT_CHECK(cudaMemcpyAsync(
+                    ctx.output_buffers[output_idx].data(),
+                    ctx.output_device_buffers[output_idx],
+                    output_szs_[output_idx] * sizeof(float),
+                    cudaMemcpyDeviceToHost,
+                    ctx.stream
+                ));
+            }
 
             cudaStreamSynchronize(ctx.stream);
 
-            output.output =
-                cv::Mat(output_dims_.d[1], output_dims_.d[2], CV_32F, ctx.output_buffer.data())
-                    .clone();
+            output.outputs.reserve(output_names_.size());
+            for (size_t output_idx = 0; output_idx < output_names_.size(); ++output_idx) {
+                cv::Mat mat = output_to_mat(
+                    output_dims_[output_idx],
+                    ctx.output_buffers[output_idx].data()
+                );
+                if (!mat.empty()) {
+                    output.outputs.push_back(std::move(mat));
+                }
+            }
         }
 
         return output;
@@ -269,21 +331,21 @@ struct NetDetectorTensorrt::Impl {
     TRTLogger g_logger_;
     struct Ctx {
         std::shared_ptr<nvinfer1::IExecutionContext> context;
-        std::array<void*, 2> device_buffers;
-        std::vector<float> output_buffer;
+        void* input_device_buffer = nullptr;
+        std::vector<void*> output_device_buffers;
+        std::vector<std::vector<float>> output_buffers;
         cudaStream_t stream { nullptr };
         __cuda::LetterBox::Ptr letter_box;
     };
     ResourcePool<Ctx> ctx_buffers_;
-    constexpr static size_t INPUT_IDX = 0;
-    constexpr static size_t OUTPUT_IDX = 1;
 
-    size_t input_sz_ { 0 }, output_sz_ { 0 };
+    size_t input_sz_ { 0 };
 
     nvinfer1::Dims input_dims_ {};
-    nvinfer1::Dims output_dims_ {};
+    std::vector<nvinfer1::Dims> output_dims_;
+    std::vector<size_t> output_szs_;
     const char* input_name_ { nullptr };
-    const char* output_name_ { nullptr };
+    std::vector<const char*> output_names_;
     Config config_;
 };
 NetDetectorTensorrt::NetDetectorTensorrt(const YAML::Node& config, Config c) {
