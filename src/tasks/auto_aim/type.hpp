@@ -14,7 +14,7 @@
 namespace awakening::auto_aim {
 constexpr double FIFTTEN_DEGREE_RAD = 15 * CV_PI / 180;
 enum class ArmorClass : int { SENTRY = 0, NO1, NO2, NO3, NO4, NO5, OUTPOST, BASE, UNKNOWN };
-enum class ArmorType : int { SimpleSmall, Large, BuildingSmall };
+enum class ArmorType : int { SimpleSmall, Large };
 template<ArmorType T>
 struct ArmorTypeTraits; // declare
 template<>
@@ -25,11 +25,6 @@ struct ArmorTypeTraits<ArmorType::SimpleSmall> {
 template<>
 struct ArmorTypeTraits<ArmorType::Large> {
     static constexpr double WIDTH = 225.0 / 1000.0;
-    static constexpr double HEIGHT = 50.0 / 1000.0;
-};
-template<>
-struct ArmorTypeTraits<ArmorType::BuildingSmall> {
-    static constexpr double WIDTH = 133.0 / 1000.0;
     static constexpr double HEIGHT = 50.0 / 1000.0;
 };
 template<typename PointT, ArmorType T>
@@ -153,8 +148,6 @@ private:
 inline ArmorType armor_type_by_armor_class(ArmorClass armor_class) {
     if (armor_class == ArmorClass::NO1) {
         return ArmorType::Large;
-    } else if (armor_class == ArmorClass::BASE || armor_class == ArmorClass::OUTPOST) {
-        return ArmorType::BuildingSmall;
     } else {
         return ArmorType::SimpleSmall;
     }
@@ -164,10 +157,23 @@ inline std::vector<PointT> getArmorKeyPoints3D(ArmorClass armor_class) {
     auto armor_type = armor_type_by_armor_class(armor_class);
     if (armor_type == ArmorType::Large) {
         return ArmorKeyPoint3D<PointT, ArmorType::Large>::build();
-    } else if (armor_type == ArmorType::BuildingSmall) {
-        return ArmorKeyPoint3D<PointT, ArmorType::BuildingSmall>::build();
     } else {
         return ArmorKeyPoint3D<PointT, ArmorType::SimpleSmall>::build();
+    }
+}
+
+inline std::pair<double, double> getArmorWH(ArmorClass armor_class) {
+    auto armor_type = armor_type_by_armor_class(armor_class);
+    if (armor_type == ArmorType::Large) {
+        return std::make_pair(
+            ArmorKeyPoint3D<cv::Point3f, ArmorType::Large>::W,
+            ArmorKeyPoint3D<cv::Point3f, ArmorType::Large>::H
+        );
+    } else {
+        return std::make_pair(
+            ArmorKeyPoint3D<cv::Point3f, ArmorType::SimpleSmall>::W,
+            ArmorKeyPoint3D<cv::Point3f, ArmorType::SimpleSmall>::H
+        );
     }
 }
 template<typename PointT>
@@ -175,8 +181,6 @@ inline std::vector<PointT> getArmorLightKeyPoints3D(ArmorClass armor_class, bool
     auto armor_type = armor_type_by_armor_class(armor_class);
     if (armor_type == ArmorType::Large) {
         return ArmorKeyPoint3D<PointT, ArmorType::Large>::build_light(left);
-    } else if (armor_type == ArmorType::BuildingSmall) {
-        return ArmorKeyPoint3D<PointT, ArmorType::BuildingSmall>::build_light(left);
     } else {
         return ArmorKeyPoint3D<PointT, ArmorType::SimpleSmall>::build_light(left);
     }

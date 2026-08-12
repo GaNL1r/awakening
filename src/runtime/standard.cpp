@@ -9,7 +9,8 @@
 #include "tasks/auto_buff/type.hpp"
 #include "tasks/base/ballistic_trajectory.hpp"
 #include "tasks/base/wheel_odometry.hpp"
-#include "utils/drivers/mv_camera.hpp"
+#include "utils/drivers/camera.hpp"
+#include "utils/drivers/camera_factory.hpp"
 #include "utils/io/video_save.hpp"
 #include <algorithm>
 #include <array>
@@ -55,7 +56,6 @@
 #include "utils/buffer.hpp"
 #include "utils/common/image.hpp"
 #include "utils/common/type_common.hpp"
-#include "utils/drivers/hik_camera.hpp"
 #include "utils/drivers/serial_driver.hpp"
 #include "utils/logger.hpp"
 #include "utils/runtime_tf.hpp"
@@ -202,16 +202,16 @@ int main(int argc, char** argv) {
     }
 
     auto camera_config = config["camera"];
-    std::unique_ptr<HikCamera> camera;
+    std::unique_ptr<Camera> camera;
     utils::SignalGuard::add_callback([&]() {
         if (camera) {
             camera->stop();
         }
     });
     if (!use_daedalus) {
-        camera = std::make_unique<HikCamera>(camera_config["hik_camera"], s);
+        camera = create_camera(camera_config, s, "HIK");
         camera->init();
-        if (!camera->running_) {
+        if (!camera->is_running()) {
             return 0;
         }
     }

@@ -75,7 +75,7 @@ struct RuneFanBladeWithR {
     double confidence = 0;
     void draw(cv::Mat& img) const {
         for (int i = 0; i < points.size(); ++i) {
-            cv::circle(img, points[i], 3, cv::Scalar(0, 255, 0), cv::FILLED);
+            cv::circle(img, points[i], 5, cv::Scalar(0, 255, 0), cv::FILLED);
         }
     }
     void add_offset(const cv::Point2f& offset) {
@@ -107,6 +107,20 @@ struct RuneR {
         cv::circle(img, rr.center, 3, cv::Scalar(0, 0, 255), cv::FILLED);
     }
 };
+struct RuneFlowingLight {
+    cv::RotatedRect rr;
+    void add_offset(const cv::Point2f& offset) {
+        rr.center += offset;
+    }
+    void draw(cv::Mat& img) const {
+        cv::Point2f vertices[4];
+        rr.points(vertices);
+        for (int i = 0; i < 4; ++i) {
+            cv::line(img, vertices[i], vertices[(i + 1) % 4], cv::Scalar(0, 0, 255), 2);
+        }
+    }
+};
+
 struct RuneFanTarget {
     std::array<cv::Point2f, 4> corners;
     std::vector<cv::Point2f> key_points;
@@ -180,9 +194,9 @@ struct RuneFanTarget {
 
     void draw(cv::Mat& img) const {
         for (int i = 0; i < 4; ++i) {
-            cv::circle(img, corners[i], 3, cv::Scalar(255, 0, 0), cv::FILLED);
+            cv::circle(img, corners[i], 5, cv::Scalar(255, 0, 255), cv::FILLED);
         }
-        cv::circle(img, center, 3, cv::Scalar(0, 0, 255), cv::FILLED);
+        cv::circle(img, center, 7, cv::Scalar(0, 0, 255), cv::FILLED);
     }
     void sort_corners(const cv::Point2f& r) {
         if (corners.size() != 4)
@@ -273,6 +287,7 @@ struct RuneDetection {
     std::vector<RuneFanBladeWithR> fan_blades;
     std::vector<RuneR> rune_rs;
     std::vector<RuneFanTarget> fan_targets;
+    std::vector<RuneFlowingLight> rune_flowing_lights;
     void draw(cv::Mat& img) const {
         for (const auto& fan_blade: fan_blades) {
             fan_blade.draw(img);
@@ -282,6 +297,9 @@ struct RuneDetection {
         }
         for (const auto& fan_target: fan_targets) {
             fan_target.draw(img);
+        }
+        for (const auto& rune_flowing_light: rune_flowing_lights) {
+            rune_flowing_light.draw(img);
         }
     }
 };

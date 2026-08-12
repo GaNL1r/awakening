@@ -47,11 +47,24 @@ struct VeryAimer::Impl {
             min_enable_yaw_deg = config["min_enable_yaw_deg"].as<double>();
         }
     } params_;
+    using MPCType = dta_utils::TinyMpcTrajectory;
     Impl(const YAML::Node& config) {
         params_.load(config);
         ballistic_trajectory_ = BallisticTrajectory::create(config["ballistic_trajectory"]);
         base_yaw_offset_rad_ = angles::from_degrees(config["base_yaw_offset"].as<double>());
         base_pitch_offset_rad_ = angles::from_degrees(config["base_pitch_offset"].as<double>());
+        auto type = config["type"].as<std::string>();
+        if (type == "mpc" || type == "MPC") {
+            MPCType::Params mpc_p {
+                .yaw_max_acc = (float)params_.max_yaw_acc,
+                .pitch_max_acc = (float)params_.max_pitch_acc,
+                .horizon = params_.sample_horizon,
+                .dt = params_.sample_total_time / params_.sample_horizon,
+                .max_iter = 10,
+            };
+            mpc_traj_ = MPCType::create(mpc_p);
+            AWAKENING_INFO("very_aimer: using  MpcTrajectory");
+        }
     }
     [[nodiscard]] int
     select_armor(const ArmorTarget& target, const AutoAimFsm& auto_aim_fsm) const noexcept {
@@ -85,9 +98,7 @@ struct VeryAimer::Impl {
             return best;
         };
         auto accept_all = [](int) { return true; };
-        auto accept_pair_by_height = [&](int i) {
-            return target_state.h() < 0 ? (i == 1 || i == 3) : (i == 0 || i == 2);
-        };
+        auto accept_pair = [&](int i) { return (i == 0 || i == 2); };
 
         if (auto_aim_fsm == AutoAimFsm::AIM_SINGLE_ARMOR
             && target.target_number != ArmorClass::OUTPOST && armor_num > 0)
@@ -129,7 +140,7 @@ struct VeryAimer::Impl {
                     == AutoAimFsm::AIM_WHOLE_CAR_PAIR //4选2,本质提升控制轨迹与目标轨迹重合窗口
                 && target.target_number != ArmorClass::OUTPOST)
             {
-                best_idx = pick_best_range(0, armor_num, accept_pair_by_height);
+                best_idx = pick_best_range(0, armor_num, accept_pair);
             }
             if (best_idx < 0) {
                 best_idx = pick_best_range(0, armor_num, accept_all);
@@ -172,9 +183,10 @@ struct VeryAimer::Impl {
             gimbal_in_gimbal_odom.linear().transpose() * shoot_in_gimbal_odom.linear();
         auto desired_gimbal = desired_shoot * R_gimbal_shoot.transpose();
         auto rpy = utils::matrix2rpy<double>(desired_gimbal);
-        cp.valid = true;
         cp.yaw = rpy[2];
         cp.pitch = rpy[1];
+        cp.valid = true;
+
         cp.aim_point.pose = armor_pose;
         cp.aim_id = aim_id;
         return cp;
@@ -438,8 +450,15 @@ struct VeryAimer::Impl {
             if (!build_traj(limit_traj_, aim_traj_, limit_traj_cp0_, fsm, horizon, dt)) {
                 return cmd;
             }
+            if (!mpc_traj_) {
+                limit_traj_.build_limit(params_.max_yaw_acc, params_.max_pitch_acc, time_in_traj);
+            } else {
+                if (!mpc_traj_->solve(limit_traj_, time_in_traj)) {
+                    AWAKENING_ERROR("very_aimer: mpc solve failed");
+                    return cmd;
+                }
+            }
 
-            limit_traj_.build_limit(params_.max_yaw_acc, params_.max_pitch_acc, time_in_traj);
             if (fsm == AutoAimFsm::AIM_WHOLE_CAR_CENTER) { //瞄准中间的目标和控制不一样
                 aim_center_target_traj_.clear();
                 aim_center_target_traj_.reserve(horizon + 1);
@@ -505,13 +524,19 @@ struct VeryAimer::Impl {
                 return cmd;
             }
             if (limit_traj_.size() > old_limit_size) {
-                const size_t first_changed_cp = old_limit_size == 0 ? 0 : old_limit_size - 1;
-                limit_traj_.build_limit_incremental(
-                    params_.max_yaw_acc,
-                    params_.max_pitch_acc,
-                    time_in_traj,
-                    first_changed_cp
-                );
+                if (!mpc_traj_) {
+                    limit_traj_.update_limit_after_append(
+                        params_.max_yaw_acc,
+                        params_.max_pitch_acc,
+                        time_in_traj,
+                        old_limit_size
+                    );
+                } else {
+                    if (!mpc_traj_->solve(limit_traj_, time_in_traj)) {
+                        AWAKENING_ERROR("very_aimer: mpc solve failed");
+                        return cmd;
+                    }
+                }
             }
             if (fsm == AutoAimFsm::AIM_WHOLE_CAR_CENTER) { //瞄准中间的目标和控制不一样
                 if (!replenish_traj(
@@ -539,7 +564,14 @@ struct VeryAimer::Impl {
             use_center_target ? aim_center_aim_traj_ : aim_traj_;
         auto target_gimbal_state = target_traj.Trajectory::state_at(time_in_traj);
         //目标轨迹，一定击中目标
-        auto control = limit_traj_.dta_utils::LimitTrajectory::state_at(time_in_traj);
+        auto get_control = [&](double t) {
+            if (!mpc_traj_) {
+                return limit_traj_.dta_utils::LimitTrajectory::state_at(t);
+            } else {
+                return mpc_traj_->state_at(t);
+            }
+        };
+        auto control = get_control(time_in_traj);
         //控制轨迹，轨迹优化后最优控制（并非最优，下位机实际vel acc 可以基于error和上位机规划叠加）
         double control_yaw = angles::normalize_angle(control.yaw_state.p + limit_traj_cp0_.yaw);
         double control_pitch =
@@ -610,7 +642,7 @@ struct VeryAimer::Impl {
                ) < cmd.enable_pitch_diff;
         if (fsm != AutoAimFsm::AIM_WHOLE_CAR_CENTER) {
             auto delay_fire = [&](double delay) {
-                auto delay_control = limit_traj_.LimitTrajectory::state_at(time_in_traj + delay);
+                auto delay_control = get_control(time_in_traj + delay);
                 auto delay_target = target_traj.Trajectory::state_at(time_in_traj + delay);
                 auto delay_enable = cal_enbale_diff(time_in_traj + delay);
                 const double control_yaw =
@@ -626,14 +658,20 @@ struct VeryAimer::Impl {
                     && abs_angle_error(control_pitch, target_pitch) < delay_enable.second;
             };
             {
+                bool has_can = false;
+
                 double t_check = 0 + params_.fire_delay_min; //发射延迟内不让打弹
                 while (t_check < (0 + params_.fire_delay_max) && t_check <= horizon / 2.0) {
                     if (!delay_fire(+t_check)) {
                         cmd.no_shoot();
+                    } else {
+                        has_can = true;
                     }
                     t_check += (dt / 2.0);
                 }
-                //发射延迟提前开火？
+                // if (!has_can) {
+                //     cmd.no_shoot();
+                // }
             }
         }
 
@@ -652,6 +690,7 @@ struct VeryAimer::Impl {
     double base_yaw_offset_rad_;
     double base_pitch_offset_rad_;
     std::pair<double, double> operator_offset_ = std::make_pair(0, 0);
+    MPCType::Ptr mpc_traj_;
 };
 VeryAimer::VeryAimer(const YAML::Node& config) {
     _impl = std::make_unique<Impl>(config);

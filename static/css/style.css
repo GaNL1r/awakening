@@ -9,6 +9,7 @@
   --text-strong: #ccf8ff;
   --border-blue: #0068ac;
   --shadow-glow: rgba(0, 212, 255, 0.8);
+  --video-panel-max-height: calc(100dvh - 110px);
 }
 
 * {
@@ -151,7 +152,7 @@ button:active {
   min-height: 0;
   display: grid;
   grid-template-columns: minmax(420px, 1.25fr) minmax(340px, 0.95fr);
-  grid-template-rows: minmax(300px, 1.25fr) minmax(260px, 0.85fr);
+  grid-template-rows: minmax(0, 1.25fr) minmax(0, 0.85fr);
   gap: 8px;
   background: #121b2b;
   border-radius: 14px;
@@ -192,8 +193,16 @@ button:active {
   letter-spacing: 0;
 }
 
+#video-panel {
+  max-height: var(--video-panel-max-height);
+  min-height: 0;
+}
+
 .video-container {
   flex: 1;
+  width: 100%;
+  height: 100%;
+  max-height: calc(var(--video-panel-max-height) - 42px);
   min-height: 0;
   display: grid;
   place-items: center;
@@ -204,10 +213,10 @@ button:active {
 
 .video-container img {
   display: block;
-  max-width: 100%;
-  max-height: 100%;
-  width: auto;
-  height: auto;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
   object-fit: contain;
   border: 2px solid #006db6;
   border-radius: 12px;
@@ -432,6 +441,7 @@ input[type="checkbox"] {
   border-radius: 0;
   background: #000;
   box-shadow: none;
+  max-height: none;
   z-index: 999;
 }
 
@@ -449,19 +459,23 @@ input[type="checkbox"] {
   }
 
   #video-tab {
-    height: auto;
-    min-height: calc(100vh - 86px);
-    overflow: visible;
+    height: calc(100dvh - 86px);
+    min-height: 0;
+    overflow: auto;
   }
 
   #main-grid {
-    height: auto;
+    height: 100%;
     grid-template-columns: 1fr;
-    grid-template-rows: auto;
+    grid-template-rows:
+      minmax(0, min(52vw, calc(100dvh - 110px)))
+      minmax(360px, auto)
+      minmax(360px, auto)
+      minmax(360px, auto);
   }
 
   #video-panel {
-    min-height: 52vw;
+    min-height: 0;
   }
 
   #json-info,
@@ -487,8 +501,17 @@ input[type="checkbox"] {
   }
 
   #video-tab {
-    min-height: calc(100vh - 72px);
+    height: calc(100dvh - 72px);
+    min-height: 0;
     padding: 8px;
+  }
+
+  #main-grid {
+    grid-template-rows:
+      minmax(0, min(62vw, calc(100dvh - 96px)))
+      minmax(360px, auto)
+      minmax(360px, auto)
+      minmax(360px, auto);
   }
 
   .chart-select-controls {

@@ -78,8 +78,6 @@ namespace {
         switch (armor_type_by_armor_class(number)) {
             case ArmorType::SimpleSmall:
                 return ArmorTypeTraits<ArmorType::SimpleSmall>::WIDTH;
-            case ArmorType::BuildingSmall:
-                return ArmorTypeTraits<ArmorType::BuildingSmall>::WIDTH;
             case ArmorType::Large:
                 return ArmorTypeTraits<ArmorType::Large>::WIDTH;
         }

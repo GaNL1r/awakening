@@ -148,6 +148,10 @@ public:
         resources_.emplace_back(Resource { resource, MovableAtomicBool(false) });
     }
 
+    void clear() {
+        resources_.clear();
+    }
+
     Handle acquire() {
         for (auto& r: resources_) {
             bool expected = false;

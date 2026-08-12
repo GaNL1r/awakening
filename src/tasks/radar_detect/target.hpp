@@ -134,19 +134,12 @@ struct PointTarget {
             Eigen::Matrix<double, Z_N, Z_N> r;
             return r;
         };
-        const auto inject = [this](
-                                const Eigen::Matrix<double, X_N, 1>& delta,
-                                Eigen::Matrix<double, X_N, 1>& nominal
-                            ) {
+        const auto inject = [this](const auto& delta, auto& nominal) {
             for (int i = 0; i < X_N; i++) {
                 nominal[i] += delta[i];
             }
         };
-        const auto box_minus = [this](
-                                   const Eigen::Matrix<double, X_N, 1>& nominal,
-                                   const Eigen::Matrix<double, X_N, 1>& value,
-                                   Eigen::Matrix<double, X_N, 1>& delta
-                               ) {
+        const auto box_minus = [this](const auto& nominal, const auto& value, auto& delta) {
             for (int i = 0; i < X_N; i++) {
                 delta[i] = value[i] - nominal[i];
             }
@@ -166,8 +159,8 @@ struct PointTarget {
         Eigen::Matrix<double, Z_N, Z_N> r;
 
         // clang-format off
-        r <<target_config.yp_r, 0, 0, 
-                0, target_config.yp_r , 0, 
+        r <<target_config.yp_r, 0, 0,
+                0, target_config.yp_r , 0,
                 0, 0, target_config.dis_r;
         // clang-format on
         return r;
@@ -187,12 +180,12 @@ struct PointTarget {
                      q_vz_vz = pow(t, 2) * q_xyz.z();
 
         // clang-format off
-            //      xc      v_xc    yc      v_yc    zc      v_zc    
-            q <<    q_x_x,  q_x_vx, 0,      0,      0,      0,      
-                    q_x_vx, q_vx_vx,0,      0,      0,      0,      
-                    0,      0,      q_y_y,  q_y_vy, 0,      0,      
-                    0,      0,      q_y_vy, q_vy_vy,0,      0,      
-                    0,      0,      0,      0,      q_z_z,  q_z_vz, 
+            //      xc      v_xc    yc      v_yc    zc      v_zc
+            q <<    q_x_x,  q_x_vx, 0,      0,      0,      0,
+                    q_x_vx, q_vx_vx,0,      0,      0,      0,
+                    0,      0,      q_y_y,  q_y_vy, 0,      0,
+                    0,      0,      q_y_vy, q_vy_vy,0,      0,
+                    0,      0,      0,      0,      q_z_z,  q_z_vz,
                     0,      0,      0,      0,      q_z_vz, q_vz_vz;
         // clang-format on
         return q;

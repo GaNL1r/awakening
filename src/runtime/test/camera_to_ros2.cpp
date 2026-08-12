@@ -5,7 +5,7 @@
 #include "param_deliver.h"
 #include "sensor_msgs/msg/camera_info.hpp"
 #include "sensor_msgs/msg/image.hpp"
-#include "utils/drivers/hik_camera.hpp"
+#include "utils/drivers/camera_factory.hpp"
 #include "utils/semaphore_guard.hpp"
 #include "utils/signal_guard.hpp"
 #include <array>
@@ -48,16 +48,16 @@ int main(int argc, char** argv) {
     auto config = YAML::LoadFile(config_path);
     Scheduler s;
     auto camera_config = config["camera"];
-    std::unique_ptr<HikCamera> camera;
+    std::unique_ptr<Camera> camera;
     utils::SignalGuard::add_callback([&]() {
         if (camera) {
             camera->stop();
         }
     });
     rcl::RclcppNode rcl_node("camera");
-    camera = std::make_unique<HikCamera>(camera_config["hik_camera"], s);
+    camera = create_camera(camera_config, s, "hik");
     camera->init();
-    if (!camera->running_) {
+    if (!camera->is_running()) {
         return 0;
     }
     if (camera) {

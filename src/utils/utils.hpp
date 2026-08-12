@@ -8,6 +8,7 @@
 #include <numbers>
 #include <opencv2/calib3d.hpp>
 #include <opencv2/core/eigen.hpp>
+#include <opencv2/core/mat.hpp>
 #include <opencv2/core/types.hpp>
 #include <optional>
 #include <pwd.h>
@@ -46,25 +47,7 @@ inline Eigen::Matrix<T, 3, 3> so3_exp(const Eigen::Matrix<T, 3, 1>& phi) {
 
     return R;
 }
-template<typename T>
-Eigen::Matrix<T, 3, 3> so3_right_jacobian_inv(const Eigen::Matrix<T, 3, 1>& phi) {
-    using Mat3 = Eigen::Matrix<T, 3, 3>;
 
-    const T theta = phi.norm();
-
-    Mat3 I = Mat3::Identity();
-    Mat3 W = utils::so3_hat(phi);
-
-    if (theta < T(1e-6)) {
-        return I + T(0.5) * W + T(1.0 / 12.0) * W * W;
-    }
-
-    const T half_theta = theta * T(0.5);
-
-    const T coeff = T(1) - theta * ceres::cos(half_theta) / (T(2) * ceres::sin(half_theta));
-
-    return I + T(0.5) * W + coeff / (theta * theta) * W * W;
-}
 template<class T>
 inline Eigen::Transform<T, 3, Eigen::Isometry>
 se3_exp(const Eigen::Matrix<T, 3, 1>& rho, const Eigen::Matrix<T, 3, 1>& phi) {
@@ -303,20 +286,34 @@ inline std::vector<uint8_t> to_vector(const T& data) {
     std::memcpy(packet.data(), &data, sizeof(T));
     return packet;
 }
-
+inline std::pair<cv::Mat, cv::Mat> eigen_iso3_to_rvec_tvec(const ISO3& iso3) {
+    cv::Mat rvec, R_cv;
+    Mat3 R = iso3.linear();
+    cv::eigen2cv(R, R_cv);
+    cv::Rodrigues(R_cv, rvec);
+    auto t = iso3.translation();
+    cv::Mat tvec = (cv::Mat_<double>(3, 1) << t.x(), t.y(), t.z());
+    return { std::move(rvec), std::move(tvec) };
+}
+inline ISO3 rvec_tvec_to_eigen_iso3(const cv::Mat& rvec, const cv::Mat& tvec) {
+    ISO3 iso3;
+    cv::Mat R_cv;
+    cv::Rodrigues(rvec, R_cv);
+    Mat3 R_eigen;
+    cv::cv2eigen(R_cv, R_eigen);
+    iso3.linear() = R_eigen;
+    Vec3 t_eigen;
+    cv::cv2eigen(tvec, t_eigen);
+    iso3.translation() = t_eigen;
+    return iso3;
+}
 inline std::vector<cv::Point2f> reprojection(
     const cv::Mat& camera_matrix,
     const cv::Mat& dist_coeffs,
     const std::vector<cv::Point3f>& object_points,
     const ISO3& pose_in_camera_cv
 ) noexcept {
-    cv::Mat rvec, R_cv;
-    Mat3 R = pose_in_camera_cv.linear();
-    cv::eigen2cv(R, R_cv);
-    cv::Rodrigues(R_cv, rvec);
-    auto t = pose_in_camera_cv.translation();
-    const cv::Mat tvec = (cv::Mat_<double>(3, 1) << t.x(), t.y(), t.z());
-
+    auto [rvec, tvec] = eigen_iso3_to_rvec_tvec(pose_in_camera_cv);
     std::vector<cv::Point2f> pts_2d;
     pts_2d.reserve(object_points.size());
     cv::projectPoints(object_points, rvec, tvec, camera_matrix, dist_coeffs, pts_2d);
@@ -515,7 +512,6 @@ inline ISO3 solve_pnp(
     const cv::Mat& distortion_coefficients,
     int flags = cv::SOLVEPNP_ITERATIVE
 ) {
-    ISO3 pose;
     cv::Mat rvec, tvec;
     cv::solvePnP(
         object_points,
@@ -527,15 +523,7 @@ inline ISO3 solve_pnp(
         false,
         flags
     );
-    cv::Mat R_cv;
-    cv::Rodrigues(rvec, R_cv);
-    Mat3 R_eigen;
-    cv::cv2eigen(R_cv, R_eigen);
-    pose.linear() = R_eigen;
-    Vec3 t_eigen;
-    cv::cv2eigen(tvec, t_eigen);
-    pose.translation() = t_eigen;
-    return pose;
+    return rvec_tvec_to_eigen_iso3(rvec, tvec);
 }
 inline auto
 calculate_distance_to_img_center(const cv::Point2f& image_point, const cv::Mat& camera_matrix) {
@@ -613,5 +601,10 @@ expand_and_clip_rect(const RectType& rect, double expand_ratio, const cv::Size& 
     RectType img_rect(0, 0, img_size.width, img_size.height);
     r = r & img_rect;
     return r;
+}
+
+template<typename T>
+bool is_finite(const T& s) {
+    return std::apply([](auto... v) { return (std::isfinite(v) && ...); }, s.to_tuple());
 }
 } // namespace awakening::utils

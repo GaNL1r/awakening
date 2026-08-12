@@ -1,13 +1,15 @@
 #pragma once
 #include "utils/common/image.hpp"
+#include <memory>
 #include <opencv2/core/mat.hpp>
 #include <optional>
+#include <vector>
 namespace awakening::utils {
 
 class NetDetectorBase {
 public:
     struct OutPut {
-        cv::Mat output;
+        std::vector<cv::Mat> outputs;
         Eigen::Matrix3f transform_matrix;
         cv::Mat resized_img;
     };

@@ -1,13 +1,15 @@
 #pragma once
 #include "utils/common/image.hpp"
+#include "utils/drivers/camera.hpp"
 #include "utils/logger.hpp"
 #include <stdexcept>
 #include <thread>
 #include <yaml-cpp/node/node.h>
 namespace awakening {
-class UVCCamera {
+class UVCCamera: public Camera {
 public:
-    UVCCamera(const YAML::Node& config) {
+    explicit UVCCamera(const YAML::Node& config, Scheduler* scheduler = nullptr):
+        Camera(scheduler) {
         config_ = config;
         AWAKENING_INFO("try get device_name by ls -l /dev/v4l/by-id/  ls -l /dev/v4l/by-path/");
         try {
@@ -33,11 +35,12 @@ public:
     ~UVCCamera() {
         stop();
     }
-    void stop() {
+    void stop() override {
         if (!running_)
             return;
 
         running_ = false;
+        stop_source_thread();
 
         if (daemon_thread_.joinable())
             daemon_thread_.join();
@@ -96,7 +99,14 @@ public:
         set_and_check(cap_, cv::CAP_PROP_FPS, fps_, "FPS");
         running_ = true;
     }
-    ImageFrame read() {
+    bool start_capture() override {
+        start();
+        return running_;
+    }
+    bool is_running() const override {
+        return running_;
+    }
+    ImageFrame read() override {
         ImageFrame f;
         if (!cap_.isOpened()) {
             AWAKENING_ERROR("Camera is not opened.");
@@ -112,7 +122,7 @@ public:
         }
         return f;
     }
-    void restart() {
+    void restart() override {
         AWAKENING_WARN("Restarting camera.");
 
         cap_.release();
@@ -124,6 +134,15 @@ public:
         }
 
         AWAKENING_INFO("Camera reopened successfully.");
+    }
+    double get_ExposureTime() const override {
+        return exposure_;
+    }
+    void set_ExposureTime(double exposure_time) override {
+        exposure_ = exposure_time;
+        if (cap_.isOpened()) {
+            set_and_check(cap_, cv::CAP_PROP_EXPOSURE, exposure_, "EXPOSURE");
+        }
     }
     std::string device_name_;
     int fps_;

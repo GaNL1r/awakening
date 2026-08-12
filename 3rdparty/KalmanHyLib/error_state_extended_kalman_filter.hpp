@@ -17,25 +17,32 @@ class ErrorStateEKF {
 public:
     using MatrixXX = Eigen::Matrix<double, N_X, N_X>;
     using MatrixX1 = Eigen::Matrix<double, N_X, 1>;
+    using Jet = ceres::Jet<double, N_X>;
+    using JetMatrixX1 = Eigen::Matrix<Jet, N_X, 1>;
 
     using UpdateQFunc = std::function<MatrixXX()>;
     using InjectFunc = std::function<void(const MatrixX1&, MatrixX1&)>;
     using BoxMinusFunc = std::function<void(const MatrixX1&, const MatrixX1&, MatrixX1&)>;
+    using InjectJetFunc = std::function<void(const JetMatrixX1&, JetMatrixX1&)>;
+    using BoxMinusJetFunc =
+        std::function<void(const JetMatrixX1&, const JetMatrixX1&, JetMatrixX1&)>;
 
     ErrorStateEKF() = default;
 
+    template<class Inject, class BoxMinus>
     explicit ErrorStateEKF(
         const PredicFunc& f,
         const UpdateQFunc& u_q,
-        const InjectFunc& inject,
-        const BoxMinusFunc& box_minus,
+        const Inject& inject,
+        const BoxMinus& box_minus,
         const MatrixXX& P0
-    ) noexcept:
+    ):
         f(f),
         update_Q(u_q),
-        inject_state(inject),
-        box_minus_state(box_minus),
-        P_delta(P0) {}
+        P_delta(P0) {
+        set_inject_state(inject);
+        set_box_minus_state(box_minus);
+    }
 
     void set_state(const MatrixX1& x0) noexcept {
         x_nominal = x0;
@@ -48,11 +55,15 @@ public:
     void set_predict_func(const PredicFunc& f_) {
         f = f_;
     }
-    void set_inject_state(const InjectFunc& inject) {
+    template<class Inject>
+    void set_inject_state(const Inject& inject) {
         inject_state = inject;
+        inject_state_jet = inject;
     }
-    void set_box_minus_state(const BoxMinusFunc& box_minus) {
+    template<class BoxMinus>
+    void set_box_minus_state(const BoxMinus& box_minus) {
         box_minus_state = box_minus;
+        box_minus_state_jet = box_minus;
     }
 
     MatrixX1 predict() noexcept {
@@ -62,21 +73,29 @@ public:
             f(x_prev.data(), x_pred.data());
             x_nominal = x_pred;
 
-            constexpr double eps = 1e-6;
+            JetMatrixX1 x_nominal_jet;
+            JetMatrixX1 x_prev_jet;
             for (int i = 0; i < N_X; ++i) {
-                MatrixX1 delta = MatrixX1::Zero();
-                delta[i] = eps;
-
-                MatrixX1 x_pert = x_prev;
-                inject_state(delta, x_pert);
-
-                MatrixX1 x_pert_pred;
-                f(x_pert.data(), x_pert_pred.data());
-
-                MatrixX1 delta_pred;
-                box_minus_state(x_nominal, x_pert_pred, delta_pred);
-                F.col(i) = delta_pred / eps;
+                x_nominal_jet[i] = Jet(x_nominal[i]);
+                x_prev_jet[i] = Jet(x_prev[i]);
             }
+
+            JetMatrixX1 delta_jet;
+            for (int i = 0; i < N_X; ++i) {
+                delta_jet[i] = Jet(0.0);
+                delta_jet[i].v[i] = 1.0;
+            }
+
+            JetMatrixX1 x_pert_jet = x_prev_jet;
+            inject_state_jet(delta_jet, x_pert_jet);
+
+            JetMatrixX1 x_pert_pred_jet;
+            f(x_pert_jet.data(), x_pert_pred_jet.data());
+
+            JetMatrixX1 delta_pred_jet;
+            box_minus_state_jet(x_nominal_jet, x_pert_pred_jet, delta_pred_jet);
+            for (int i = 0; i < N_X; ++i)
+                F.row(i) = delta_pred_jet[i].v.transpose();
 
             delta_x = F * delta_x;
 
@@ -412,6 +431,8 @@ private:
     UpdateQFunc update_Q;
     InjectFunc inject_state;
     BoxMinusFunc box_minus_state;
+    InjectJetFunc inject_state_jet;
+    BoxMinusJetFunc box_minus_state_jet;
 
     MatrixXX F = MatrixXX::Zero();
     MatrixXX Q = MatrixXX::Zero();

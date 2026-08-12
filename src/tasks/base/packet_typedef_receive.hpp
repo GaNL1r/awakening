@@ -3,6 +3,7 @@
 #include "tasks/base/web.hpp"
 #include "utils/common/type_common.hpp"
 #include "utils/utils.hpp"
+#include <Eigen/src/Geometry/Quaternion.h>
 #include <chrono>
 #include <cstdint>
 #include <cstring>
@@ -25,7 +26,8 @@ struct ReceiveRobotData {
 
     float yaw, pitch,
         roll; //坐标系定义： +x:前，+y:左，+z：上，+yaw 左，+pitch 下。+roll 右倾，旋转顺序ZYX
-    float yaw_vel, pitch_vel, roll_vel;
+    // float q[4]; // wxyz
+    float vyaw, vpitch, vroll;
     float v_x, v_y, v_z;
 
     float bullet_speed;
@@ -33,6 +35,7 @@ struct ReceiveRobotData {
     uint32_t bullet_count; //发出弹+1
     float operator_yaw_offset;
     float operator_pitch_offset;
+    // uint8_t mode;
 
     static std::optional<ReceiveRobotData> create(const std::vector<uint8_t>& data) {
         if (data.size() != sizeof(ReceiveRobotData) || data[0] != ID)
@@ -50,13 +53,11 @@ struct ReceiveRobotData {
             j["timestamp_receive_micro"] = Web::val(time_stamp_receive_micro);
             j["timestamp_send_micro"] = Web::val(time_stamp_send_micro);
 
+            // auto _q = Eigen::Quaternionf(q[0], q[1], q[2], q[3]);
+
             j["yaw"] = Web::val(yaw);
             j["pitch"] = Web::val(pitch);
             j["roll"] = Web::val(roll);
-
-            j["yaw_vel"] = Web::val(yaw_vel);
-            j["pitch_vel"] = Web::val(pitch_vel);
-            j["roll_vel"] = Web::val(roll_vel);
 
             j["v_x"] = Web::val(v_x);
             j["v_y"] = Web::val(v_y);
@@ -67,6 +68,7 @@ struct ReceiveRobotData {
             j["bullet_count"] = Web::val(bullet_count);
             j["operator_yaw_offset"] = Web::val(operator_yaw_offset);
             j["operator_pitch_offset"] = Web::val(operator_pitch_offset);
+            // j["mode"] = Web::val(mode);
         });
     }
 

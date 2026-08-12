@@ -36,6 +36,24 @@ struct SendRobotCmdData {
     float a_yaw, a_pitch;
 
     uint8_t detect_color;
+    auto to_tuple() const {
+        return std::tie(
+            cmd_ID,
+            time_stamp,
+            appear,
+            pitch,
+            yaw,
+            target_yaw,
+            target_pitch,
+            enable_yaw_diff,
+            enable_pitch_diff,
+            v_yaw,
+            v_pitch,
+            a_yaw,
+            a_pitch,
+            detect_color
+        );
+    }
 
 } __attribute__((packed));
 
@@ -58,5 +76,12 @@ struct SentryySendYUNTAISHOU {
     uint8_t cmd_ID = ID;
     uint8_t user_data[30];
 } __attribute__((packed));
-
+struct ShootControlSend {
+    static constexpr uint8_t ID = 0x05;
+    uint8_t cmd_ID = ID;
+    uint32_t shoot_count = 0;
+    auto to_tuple() const {
+        return std::tie(cmd_ID, shoot_count);
+    }
+};
 } // namespace awakening

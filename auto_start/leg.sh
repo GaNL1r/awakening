@@ -7,7 +7,7 @@ SERVICE_FILE="/etc/systemd/system/${SERVICE_NAME}.service"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORK_DIR="$(dirname "$SCRIPT_DIR")"
 
-ACTION=$1 
+ACTION=$1
 echo "正在操作： leg"
 echo "📂  脚本路径: $SCRIPT_DIR"
 echo "🏗  工作区路径: $WORK_DIR"
@@ -55,7 +55,7 @@ After=network.target
 Type=simple
 User=root
 WorkingDirectory=${WORK_DIR}
-ExecStart=${WORK_DIR}/run.sh race auto_aim leg false
+ExecStart=${WORK_DIR}/run.sh race standard leg false
 Restart=always
 RestartSec=5
 StandardOutput=journal

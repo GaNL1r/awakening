@@ -1,10 +1,12 @@
 #include "web.hpp"
 #include "tasks/auto_aim/armor_track/motion_model.hpp"
+#include "tasks/auto_buff/rune_track/motion_model.hpp"
 #include "tasks/auto_buff/type.hpp"
 #include "utils/common/type_common.hpp"
 #include "utils/utils.hpp"
 #include <array>
 #include <memory>
+#include <opencv2/calib3d.hpp>
 #include <opencv2/core/types.hpp>
 #include <opencv2/imgproc.hpp>
 namespace awakening {
@@ -85,6 +87,36 @@ struct Web::Impl {
                     }
                 }
             }
+            auto rune0_pose = auto_buff::motion_model::rune_pose(target_state.x.data(), 0);
+            auto vroll_in_rune = ISO3::Identity();
+            vroll_in_rune.translation().x() = target_state.v_roll(rune_target.voter) * 2.0;
+            auto vroll_pose = odom_in_camera_cv * rune0_pose * vroll_in_rune;
+            rune0_pose = odom_in_camera_cv * rune0_pose;
+            auto center_image_points = utils::reprojection(
+                camera_info.camera_matrix,
+                camera_info.distortion_coefficients,
+                { cv::Point3f(0, 0, 0) },
+                rune0_pose
+            );
+            auto [rvec, tvec] = utils::eigen_iso3_to_rvec_tvec(rune0_pose);
+            cv::drawFrameAxes(
+                img,
+                camera_info.camera_matrix,
+                camera_info.distortion_coefficients,
+                rvec,
+                tvec,
+                0.1
+            );
+            auto vroll_image_points = utils::reprojection(
+                camera_info.camera_matrix,
+                camera_info.distortion_coefficients,
+                { cv::Point3f(0, 0, 0) },
+                vroll_pose
+            );
+            cv::Point2f center = center_image_points[0];
+            const cv::Point2f start_pt = center;
+            cv::Point2f end_pt = vroll_image_points[0];
+            cv::arrowedLine(img, start_pt, end_pt, cv::Scalar(50, 255, 50), 3, cv::LINE_AA, 0, 0.1);
             if (cmd.aim_point.pose.translation().z() > 0.1) {
                 auto aim_point_img_points = utils::reprojection(
                     camera_info.camera_matrix,
@@ -207,13 +239,23 @@ struct Web::Impl {
                     { cv::Point3f(0, 0, 0) },
                     vel_pose
                 );
-                auto whole_car_pose = auto_aim::armor_point_motion_model::_whole_car_pose(
+                auto whole_car_pose = auto_aim::armor_point_motion_model::whole_car_pose(
                     target_state.x.data(),
                     armor_target.target_number
                 );
                 auto vyaw_in_car = ISO3::Identity();
                 vyaw_in_car.translation().z() = target_state.vyaw() / 10.0;
                 auto vyaw_pose = odom_in_camera_cv * whole_car_pose * vyaw_in_car;
+                whole_car_pose = odom_in_camera_cv * whole_car_pose;
+                auto [rvec, tvec] = utils::eigen_iso3_to_rvec_tvec(whole_car_pose);
+                cv::drawFrameAxes(
+                    img,
+                    camera_info.camera_matrix,
+                    camera_info.distortion_coefficients,
+                    rvec,
+                    tvec,
+                    0.1
+                );
                 auto vyaw_image_points = utils::reprojection(
                     camera_info.camera_matrix,
                     camera_info.distortion_coefficients,
@@ -245,7 +287,6 @@ struct Web::Impl {
                     0,
                     0.1
                 );
-                cv::circle(img, center, 5, cv::Scalar(50, 255, 50), -1);
                 cv::putText(
                     img,
                     fmt::format("V_yaw: {:.2f}", target_state.vyaw()),
@@ -555,9 +596,13 @@ struct Web::Impl {
         d.yaw_log.handle_once(yaw);
         last_yaw = yaw;
         d.pitch_log.handle_once(cmd.pitch);
-        d.yaw_diff_log.handle_once(angles::normalize_degrees(yaw - gimbal_yaw_pitch.first));
-        d.pitch_diff_log.handle_once(angles::normalize_degrees(cmd.pitch - gimbal_yaw_pitch.second)
+        d.yaw_diff_log.handle_once(std::abs(angles::normalize_degrees(yaw - gimbal_yaw_pitch.first))
         );
+        d.pitch_diff_log.handle_once(
+            std::abs(angles::normalize_degrees(cmd.pitch - gimbal_yaw_pitch.second))
+        );
+        d.enable_yaw_diff_log.handle_once(cmd.enable_yaw_diff);
+        d.enable_pitch_diff_log.handle_once(cmd.enable_pitch_diff);
         d.target_yaw_log.handle_once(un_warp(cmd.target_yaw));
         d.target_pitch_log.handle_once(cmd.target_pitch);
         d.gimbal_yaw_log.handle_once(un_warp(gimbal_yaw_pitch.first));
@@ -696,7 +741,9 @@ struct Web::Impl {
     X(double, 100, rune_a_diff) \
     X(double, 100, rune_w_diff) \
     X(double, 100, yaw_diff) \
-    X(double, 100, pitch_diff)
+    X(double, 100, pitch_diff) \
+    X(double, 100, enable_yaw_diff) \
+    X(double, 100, enable_pitch_diff)
 #define GEN_LOG(TYPE, SIZE, NAME) DatasStream<TYPE, SIZE> NAME##_log { #NAME, j, mtx };
 
 #define X(TYPE, SIZE, NAME) GEN_LOG(TYPE, SIZE, NAME)

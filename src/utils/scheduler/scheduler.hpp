@@ -5,90 +5,19 @@
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
-#include <fcntl.h>
 #include <functional>
 #include <iostream>
 #include <mutex>
 #include <queue>
-#include <spdlog/spdlog.h>
 #include <stdexcept>
 #include <thread>
 #include <type_traits>
 #include <unordered_map>
 #include <vector>
 
+#include <tbb/task_group.h>
+
 namespace awakening {
-
-class ThreadPool {
-public:
-    explicit ThreadPool(size_t num_threads): stop_(false), active_tasks_(0) {
-        for (size_t i = 0; i < num_threads; ++i) {
-            workers_.emplace_back([this] {
-                while (true) {
-                    std::function<void()> task;
-                    {
-                        std::unique_lock lock(mutex_);
-                        condition_.wait(lock, [this] { return stop_ || !tasks_.empty(); });
-                        if (stop_ && tasks_.empty())
-                            return;
-                        task = std::move(tasks_.front());
-                        tasks_.pop();
-                        ++active_tasks_;
-                    }
-                    task();
-                    {
-                        std::lock_guard lock(mutex_);
-                        --active_tasks_;
-                    }
-                    finished_condition_.notify_all();
-                }
-            });
-        }
-    }
-
-    ~ThreadPool() {
-        {
-            std::lock_guard lock(mutex_);
-            stop_ = true;
-        }
-        condition_.notify_all();
-        for (auto& worker: workers_) {
-            if (worker.joinable())
-                worker.join();
-        }
-    }
-
-    template<typename F>
-    void enqueue(F&& f) {
-        {
-            std::lock_guard lock(mutex_);
-            if (stop_)
-                return;
-            tasks_.emplace(std::forward<F>(f));
-        }
-        condition_.notify_one();
-    }
-
-    void cancel_pending() {
-        std::lock_guard lock(mutex_);
-        std::queue<std::function<void()>> empty;
-        std::swap(tasks_, empty);
-    }
-
-    void wait() {
-        std::unique_lock lock(mutex_);
-        finished_condition_.wait(lock, [this] { return tasks_.empty() && active_tasks_ == 0; });
-    }
-
-private:
-    std::vector<std::thread> workers_;
-    std::queue<std::function<void()>> tasks_;
-    std::mutex mutex_;
-    std::condition_variable condition_;
-    std::condition_variable finished_condition_;
-    std::atomic<bool> stop_;
-    std::atomic<size_t> active_tasks_;
-};
 
 class Scheduler {
 public:
@@ -96,8 +25,7 @@ public:
     inline static unsigned int __hardware_concurrency = std::thread::hardware_concurrency();
 
     explicit Scheduler(size_t threads = __hardware_concurrency * 2.0):
-        worker_count(threads ? threads : 1),
-        pool_(worker_count) {}
+        worker_count(threads ? threads : 1) {}
 
     ~Scheduler() {
         stop();
@@ -216,8 +144,8 @@ public:
         }
         rate_threads_.clear();
 
-        pool_.cancel_pending();
-        pool_.wait();
+        group_.cancel();
+        group_.wait();
 
         AWAKENING_INFO("awakening Scheduler stopped");
     }
@@ -266,7 +194,7 @@ private:
             task_queue_.push(node);
         }
 
-        pool_.enqueue([this] { process_queue(); });
+        group_.run([this] { process_queue(); });
     }
 
     void process_queue() {
@@ -308,10 +236,11 @@ private:
     std::vector<RateWorker> rate_workers_;
     std::vector<std::jthread> rate_threads_;
 
-    ThreadPool pool_;
+    tbb::task_group group_;
 
     std::atomic<bool> running_ { false };
     bool built_ { false };
+
     std::queue<NodeBase::Ptr> task_queue_;
     std::mutex queue_mutex_;
 };

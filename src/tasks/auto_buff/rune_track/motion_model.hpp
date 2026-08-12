@@ -8,21 +8,20 @@
 #include "utils/utils.hpp"
 #include <Eigen/src/Core/Matrix.h>
 #include <algorithm>
+#include <cassert>
 #include <ceres/ceres.h>
 #include <ceres/jet.h>
 #include <chrono>
 #include <cmath>
 #include <cstddef>
-#include <cstdlib>
 #include <opencv2/core/types.hpp>
-#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
 namespace awakening::auto_buff::motion_model {
 
 namespace idx {
-    enum { CX, CY, CZ, YAW, ROLL, V_ROLL, TAU, A_RAW, W_RAW, X_N };
+    enum { CX, CY, CZ, YAW, ROLL, V_ROLL, TAU, A, W, X_N };
     enum { R_X, R_Y, _R_Z_N };
     enum { TOP_X, TOP_Y, LEFT_X, LEFT_Y, BOTTOM_X, BOTTOM_Y, RIGHT_X, RIGHT_Y, _FanBlade_Z_N };
     enum { LT_X, LT_Y, LB_X, LB_Y, RB_X, RB_Y, RT_X, RT_Y, CEN_X, CEN_Y, _FanTarget_Z_N };
@@ -48,25 +47,25 @@ using YPDVecZ = Eigen::Matrix<double, YPDZ_N, 1>;
 template<typename T>
 inline T normalize_angle(T a) {
     const T two_pi = T(2.0 * M_PI);
-    return a - two_pi * floor((a + T(M_PI)) / two_pi);
+    return a - two_pi * ceres::floor((a + T(M_PI)) / two_pi);
 }
-template<typename T>
-inline T bounded_sigmoid(T raw, double lower, double upper) {
-    const T s = T(1) / (T(1) + ceres::exp(-raw));
-    return T(lower) + T(upper - lower) * s;
+template<class DeltaVector, class StateVector>
+inline void inject_state(const DeltaVector& delta, StateVector& nominal) {
+    for (int i = 0; i < X_N; ++i) {
+        if (i != idx::YAW && i != idx::ROLL)
+            nominal[i] += delta[i];
+    }
+    nominal[idx::YAW] = normalize_angle(nominal[idx::YAW] + delta[idx::YAW]);
+    nominal[idx::ROLL] = normalize_angle(nominal[idx::ROLL] + delta[idx::ROLL]);
 }
-inline double unbounded_from_bounded(double value, double lower, double upper) {
-    const double ratio = std::clamp((value - lower) / (upper - lower), 1e-6, 1.0 - 1e-6);
-    return std::log(ratio / (1.0 - ratio));
+template<class StateVector, class DeltaVector>
+inline void
+box_minus_state(const StateVector& nominal, const StateVector& value, DeltaVector& delta) {
+    delta = value - nominal;
+    delta[idx::YAW] = normalize_angle(value[idx::YAW] - nominal[idx::YAW]);
+    delta[idx::ROLL] = normalize_angle(value[idx::ROLL] - nominal[idx::ROLL]);
 }
-template<typename T>
-inline T physical_a(const T x[X_N]) {
-    return bounded_sigmoid(x[idx::A_RAW], A_LOWER, A_UPPER);
-}
-template<typename T>
-inline T physical_w(const T x[X_N]) {
-    return bounded_sigmoid(x[idx::W_RAW], W_LOWER, W_UPPER);
-}
+
 struct Voter {
     enum {
         Collecting,
@@ -74,11 +73,11 @@ struct Voter {
         Counterclockwise,
     } state = Collecting;
     enum { Big, Small } mode = Small;
-    void reset(const TimePoint& start_time) {
-        *this = { .start_t = start_time };
+    void reset(const TimePoint&) {
+        *this = {};
     }
     void update(double roll, int need_count) {
-        auto diff = angles::normalize_angle(roll - last_state_roll);
+        const double diff = angles::normalize_angle(roll - last_state_roll);
         if (std::abs(diff) < 0.05) {
             return;
         }
@@ -88,7 +87,7 @@ struct Voter {
             clock_wise_count--;
         }
         last_state_roll = roll;
-        if (std::abs(clock_wise_count) > 10) {
+        if (std::abs(clock_wise_count) > need_count) {
             state = clock_wise_count > 0 ? Clockwise : Counterclockwise;
         } else {
             state = Collecting;
@@ -112,10 +111,8 @@ struct Voter {
         str += (mode == Big ? "Big" : "Small");
         return str;
     }
-    TimePoint start_t;
     int clock_wise_count = 0;
     double last_state_roll = 0.0;
-    int dir_count = 0;
     int double_detect_count = 0;
 };
 struct Predict {
@@ -123,7 +120,7 @@ struct Predict {
     Voter voter;
 
     template<typename T>
-    inline void operator()(const T x0[X_N], T x1[X_N]) const { //copy from talos-2026
+    inline void operator()(const T x0[X_N], T x1[X_N]) const {
         assert(x0 != x1);
         std::copy(x0, x0 + X_N, x1);
         T delta_theta_abs;
@@ -131,9 +128,9 @@ struct Predict {
 
         x1[idx::TAU] += dt;
         if (voter.mode == Voter::Big) {
-            auto a = physical_a(x0);
-            auto w = physical_w(x0);
-            auto b = T(AMPLITUDE_SUM) - a;
+            const T a = x0[idx::A];
+            const T w = x0[idx::W];
+            const T b = T(AMPLITUDE_SUM) - a;
             delta_theta_abs =
                 ((a / w) * (ceres::cos(w * x0[idx::TAU]) - ceres::cos(w * x1[idx::TAU])))
                 + b * T(dt);
@@ -148,13 +145,29 @@ struct Predict {
             delta_theta = -delta_theta_abs;
         }
         x1[idx::ROLL] += delta_theta;
-        apply_mode_constraints(x1);
+        clamp(x1);
     }
 
     template<typename T>
-    inline void apply_mode_constraints(T x[X_N]) const {
+    inline void clamp(T x[X_N]) const {
         if (voter.state != Voter::Collecting) {
             x[idx::V_ROLL] = T(0);
+        }
+        // x[idx::A] = ceres::fmin(x[idx::A], A_UPPER);
+        // x[idx::W] = ceres::fmin(x[idx::W], W_UPPER);
+        // x[idx::A] = ceres::fmax(x[idx::A], A_LOWER);
+        // x[idx::W] = ceres::fmax(x[idx::W], W_LOWER);
+        if (x[idx::A] > T(A_UPPER)) {
+            x[idx::A] = T(A_UPPER);
+        }
+        if (x[idx::W] > T(W_UPPER)) {
+            x[idx::W] = T(W_UPPER);
+        }
+        if (x[idx::A] < T(A_LOWER)) {
+            x[idx::A] = T(A_LOWER);
+        }
+        if (x[idx::W] < T(W_LOWER)) {
+            x[idx::W] = T(W_LOWER);
         }
     }
     inline void f(const VecX& x0, VecX& x1) const {
@@ -198,13 +211,11 @@ struct RMeasure {
 };
 template<typename T>
 inline Eigen::Transform<T, 3, Eigen::Isometry> rune_pose(const T x[X_N], int id) {
-    auto roll = normalize_angle(x[idx::ROLL] + T(id) * T(2.0 * M_PI / FAN_NUM));
-
+    const T roll = normalize_angle(x[idx::ROLL] + T(id) * T(2.0 * M_PI / FAN_NUM));
     Eigen::Transform<T, 3, Eigen::Isometry> rune_in_odom =
         Eigen::Transform<T, 3, Eigen::Isometry>::Identity();
     rune_in_odom.translation() << x[idx::CX], x[idx::CY], x[idx::CZ];
-    auto yaw = ceres::atan2(x[idx::CY], x[idx::CX]);
-    // auto yaw = x[idx::YAW];
+    const T yaw = normalize_angle(ceres::atan2(x[idx::CY], x[idx::CX]));
     Eigen::Quaternion<T> q_yaw_rune_in_odom(Eigen::AngleAxis<T>(yaw, Eigen::Vector3<T>::UnitZ()));
     Eigen::Quaternion<T> q_pitch_rune_in_odom(Eigen::AngleAxis<T>(T(0), Eigen::Vector3<T>::UnitY())
     );
@@ -212,10 +223,6 @@ inline Eigen::Transform<T, 3, Eigen::Isometry> rune_pose(const T x[X_N], int id)
     rune_in_odom.linear() =
         (q_yaw_rune_in_odom * q_pitch_rune_in_odom * q_roll_rune_in_odom).toRotationMatrix();
     return rune_in_odom;
-}
-template<typename T>
-inline Eigen::Transform<T, 3, Eigen::Isometry> fan_pose(const T x[X_N], int id) {
-    return rune_pose(x, id);
 }
 template<typename T>
 inline Eigen::Transform<T, 3, Eigen::Isometry> fan_target_pose(const T x[X_N], int id) {
@@ -234,7 +241,7 @@ struct FanBladeMeasure {
 
     template<typename T>
     inline void operator()(const T x[X_N], T z[FanBladeZ_N]) const {
-        auto pose_in_odom = fan_pose(x, ctx.id);
+        auto pose_in_odom = rune_pose(x, ctx.id);
         Eigen::Transform<T, 3, Eigen::Isometry> camera_cv_in_odom_jet;
         camera_cv_in_odom_jet.matrix() = ctx.camera_cv_in_odom.matrix().template cast<T>();
 
@@ -270,7 +277,7 @@ struct FanTargetMeasure {
 
     template<typename T>
     inline void operator()(const T x[X_N], T z[FanTargetZ_N]) const {
-        auto pose_in_odom = fan_pose(x, ctx.id);
+        auto pose_in_odom = rune_pose(x, ctx.id);
         Eigen::Transform<T, 3, Eigen::Isometry> camera_cv_in_odom_jet;
         camera_cv_in_odom_jet.matrix() = ctx.camera_cv_in_odom.matrix().template cast<T>();
 
@@ -306,17 +313,14 @@ struct YPDMeasure {
 
     template<typename T>
     inline void operator()(const T x[X_N], T z[YPDZ_N]) const {
-        auto roll = normalize_angle(x[idx::ROLL] + T(ctx.id) * T(2.0 * M_PI / FAN_NUM));
-        Eigen::Transform<T, 3, Eigen::Isometry> pose_in_odom = fan_target_pose(x, ctx.id);
+        const T roll = normalize_angle(x[idx::ROLL] + T(ctx.id) * T(2.0 * M_PI / FAN_NUM));
+        Eigen::Transform<T, 3, Eigen::Isometry> pose_in_odom = rune_pose(x, ctx.id);
         T target_x = pose_in_odom.translation().x();
         T target_y = pose_in_odom.translation().y();
         T target_z = pose_in_odom.translation().z();
 
         T xy_dist = ceres::sqrt(target_x * target_x + target_y * target_y);
         T dist = ceres::sqrt(xy_dist * xy_dist + target_z * target_z);
-        // Observation model
-        // auto yaw = x[idx::YAW];
-        auto yaw = ceres::atan2(x[idx::CY], x[idx::CX]);
         z[idx::YPD_Y] = ceres::atan2(target_y, target_x); // yaw
         z[idx::YPD_P] = ceres::atan2(target_z, xy_dist); // pitch
         z[idx::YPD_D] = dist; // distance
@@ -335,20 +339,18 @@ struct State {
     int frame_id = 0;
     inline std::vector<ISO3> get_fan_target_pose() const {
         std::vector<ISO3> r;
+        r.reserve(FAN_NUM);
         for (int i = 0; i < FAN_NUM; ++i) {
-            ISO3 pose = fan_target_pose(x.data(), i);
-
-            r.push_back(pose);
+            r.push_back(fan_target_pose(x.data(), i));
         }
 
         return r;
     }
     inline std::vector<ISO3> get_fan_pose() const {
         std::vector<ISO3> r;
+        r.reserve(FAN_NUM);
         for (int i = 0; i < FAN_NUM; ++i) {
-            ISO3 pose = fan_pose(x.data(), i);
-
-            r.push_back(pose);
+            r.push_back(rune_pose(x.data(), i));
         }
 
         return r;
@@ -391,17 +393,15 @@ struct State {
         return dir * SMALL_SPEED;
     }
     double a() const {
-        return physical_a(x.data());
+        return x[idx::A];
     }
     double w() const {
-        return physical_w(x.data());
+        return x[idx::W];
     }
     double tau() const {
         return x[idx::TAU];
     }
 };
-
-// using RobotStateEKF = kalman_hybird_lib::ExtendedKalmanFilter<X_N, Z_N, Predict, Measure>;
 
 using ESEKF = kalman_hybird_lib::ErrorStateEKF<X_N, Predict>;
 

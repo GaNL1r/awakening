@@ -1,10 +1,12 @@
-#include "mv_camera.hpp"
+#ifdef USE_MvSDK
+    #include "mv_camera.hpp"
 namespace awakening {
 void MvCamera::stop() {
     if (!running_) {
         return;
     }
     running_ = false;
+    stop_source_thread();
     if (daemon_thread_.joinable()) {
         daemon_thread_.join();
     }
@@ -13,6 +15,43 @@ void MvCamera::stop() {
 
     AWAKENING_INFO("mv_camera has stop ");
 }
+
+bool MvCamera::start_capture() {
+    CameraPlay(h_camera_);
+    running_ = true;
+    return true;
+}
+
+ImageFrame MvCamera::read() {
+    ImageFrame frame;
+    tSdkFrameHead head;
+    BYTE* raw = nullptr;
+    auto status = CameraGetImageBuffer(h_camera_, &head, &raw, 100);
+    if (status != CAMERA_STATUS_SUCCESS) {
+        AWAKENING_ERROR("Failed to get image buffer!");
+        return frame;
+    }
+
+    const auto current_time = Clock::now();
+    const auto half_exposure = std::chrono::microseconds(static_cast<long>(get_ExposureTime() / 2));
+    auto img = cv::Mat(cv::Size(head.iWidth, head.iHeight), CV_8UC1, raw);
+    #ifdef USE_TRT
+    if (use_cuda_cvt_) {
+        static utils::__cuda::CvtColor cvt;
+        cvt.process(img, frame.src_img, cv::COLOR_BayerRG2BGR);
+    } else {
+    #endif
+        cv::cvtColor(img, frame.src_img, cv::COLOR_BayerRG2BGR);
+    #ifdef USE_TRT
+    }
+    #endif
+    CameraReleaseImageBuffer(h_camera_, raw);
+
+    frame.timestamp = current_time - half_exposure;
+    frame.format = PixelFormat::BGR;
+    return frame;
+}
+
 void MvCamera::restart() {
     AWAKENING_WARN("Restarting camera");
     CameraUnInit(h_camera_);
@@ -54,9 +93,9 @@ void MvCamera::load(const YAML::Node& config) {
         auto gamma = config["gamma"].as<double>();
         set_gamma(gamma);
     }
-#ifdef USE_TRT
+    #ifdef USE_TRT
     use_cuda_cvt_ = config["use_cuda_cvt"].as<bool>();
-#endif
+    #endif
 }
 void MvCamera::set_ExposureTime(double exposure_time) {
     double exposure_line_time;
@@ -74,7 +113,7 @@ void MvCamera::set_ExposureTime(double exposure_time) {
         t_capability_.sExposeDesc.uiExposeTimeMax * exposure_line_time
     );
 }
-double MvCamera::get_ExposureTime() {
+double MvCamera::get_ExposureTime() const {
     double exposure_time;
     CameraGetExposureTime(h_camera_, &exposure_time);
     return exposure_time;
@@ -172,3 +211,4 @@ bool MvCamera::initialize_camera() {
     return false;
 }
 } // namespace awakening
+#endif

@@ -4,9 +4,8 @@
 #include "tasks/radar_detect/detector.hpp"
 #include "tasks/radar_detect/pixel_to_world.hpp"
 #include "tasks/radar_io/frame.hpp"
-#include "utils/drivers/hik_camera.hpp"
+#include "utils/drivers/camera_factory.hpp"
 #include "utils/drivers/serial_driver.hpp"
-#include "utils/drivers/video_player.hpp"
 #include "utils/io/video_save.hpp"
 #include "utils/semaphore_guard.hpp"
 #include "utils/signal_guard.hpp"
@@ -120,27 +119,21 @@ int main(int argc, char** argv) {
             camera_cv_in_target_map
         );
     }
-    std::unique_ptr<VideoPlayer> video;
-    std::unique_ptr<HikCamera> camera;
+    std::unique_ptr<Camera> camera;
     std::unique_ptr<VideoSaver> video_saver;
     utils::SignalGuard::add_callback([&]() {
         if (camera) {
             camera->stop();
         }
     });
-    std::string camera_type = camera_config["type"].as<std::string>();
-    camera_type = utils::to_upper(camera_type);
-    if (camera_type == "VIDEO") {
-        video = std::make_unique<VideoPlayer>(camera_config["video"], s);
-    } else {
-        camera = std::make_unique<HikCamera>(camera_config["hik_camera"], s);
+    std::string camera_type = utils::to_upper(camera_config["type"].as<std::string>("hik"));
+    camera = create_camera(camera_config, s, "hik");
+    if (camera_type != "VIDEO") {
         video_saver = std::make_unique<VideoSaver>(
             VideoSaver::generate_record_filename(std::string(RECORD_FOLDER_PATH))
         );
-    }
-    if (camera) {
         camera->init();
-        if (!camera->running_) {
+        if (!camera->is_running()) {
             return 0;
         }
     }
@@ -612,10 +605,7 @@ int main(int argc, char** argv) {
         }
     });
     if (camera) {
-        camera->start<CameraTag>("hik");
-    }
-    if (video) {
-        video->start<CameraTag>("video");
+        camera->start<CameraTag>(camera_type == "VIDEO" ? "video" : "hik");
     }
     if (referee_serial) {
         referee_serial->start<RefereeSerialTag>("referee_serial");

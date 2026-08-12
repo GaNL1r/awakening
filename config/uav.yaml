@@ -4,7 +4,7 @@ bullet_speed: 23.0
 
 serial:
   enable: true
-  device_name: /dev/ttyACM0 
+  device_name: /dev/ttyACM0
   baud_rate: 115200
   char_size: 8
   read_buf_size: 4096
@@ -13,7 +13,7 @@ use_sim: false
 
 record:
  enable: false
- 
+
 tf:
   camera_in_gimbal:
     t: [0.04,0.0,-0.03]
@@ -29,7 +29,7 @@ bullet_pick_up:
   ballistic_trajectory:
     gravity: 9.8
     resistance: 0.001
-  
+
 auto_exposure:
   enable: true
   target_brightness: 35.0
@@ -54,12 +54,12 @@ armor_detector:
       execution_mode: "PERFORMANCE"
       infer_request_buffer_num: 10
     tensorrt:
-      model_path: ${ROOT_DIR}/model/opt-1208-001.onnx
+      model_path: ${ROOT_DIR}/model/praysky_c2psa_e2e_0228_640x640.onnx
       copy_context_num: 3
       min_free_mem_ratio: 0.1
       use_cuda_preproces: true
     armor_infer:
-      model_type: tup
+      model_type: at1
       conf_threshold: 0.2
   number_classifier:
     enable: true
@@ -78,7 +78,7 @@ armor_detector:
       min_ratio: 0.8
       max_ratio: 5.0
 
-      
+
 armor_tracker:
   lost_time_thres: 1.5
   lost_time_thres_outpost: 2.0
@@ -104,9 +104,9 @@ armor_tracker:
   esekf_iter_num: 5
 
 auto_aim_fsm:
-  single_whole_up: 1.5 
+  single_whole_up: 1.5
   single_whole_down: 1.0
-  whole_pair_up: 10.5 
+  whole_pair_up: 10.5
   whole_pair_down: 9.5 #1s内至少换2次板子  2pi  否则轨迹规划无意义
   pair_center_up: 16.5
   pair_center_down: 15.0
@@ -117,15 +117,15 @@ very_aimer:
   base_yaw_offset: 0.0
   base_pitch_offset: 0.0
   sample_total_time: 1.0
-  
+
   sample_horizon: 100
 
   fire_delay_min: 0.01
   fire_delay_max: 0.05
-  
+
   max_yaw_acc: 40
   max_pitch_acc: 50
-  
+
 
   prediction_delay: 0.00
   aim_center_more_prediction_time: 0.0
@@ -195,7 +195,7 @@ rune_aimer:
   sample_total_time: 0.5
   sample_horizon: 10
   prediction_delay: -0.00
-  max_yaw_acc: 40 
+  max_yaw_acc: 40
   max_pitch_acc: 50
   shooting_range_h: 0.12
   shooting_range_w: 0.12
@@ -206,7 +206,7 @@ rune_aimer:
     resistance: 0.001
 
 
-camera: 
+camera:
   hik_camera:
     target_sn: DA0710030
     adc_bit_depth: Bits_8
@@ -225,7 +225,7 @@ camera:
     trigger_mode: Off
     trigger_source: ""
     trigger_activation: ""
-    format: "bgr" 
+    format: "bgr"
     use_cuda_cvt: true
   camera_info:
     #8mm

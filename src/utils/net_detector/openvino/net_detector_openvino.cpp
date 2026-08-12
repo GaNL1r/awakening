@@ -134,6 +134,7 @@ struct NetDetectorOpenVINO::Impl {
     Impl(const YAML::Node& config, Config c) {
         params_.load(config);
         config_ = c;
+        input_format_ = config_.target_format;
         init();
     }
     void init() {
@@ -173,13 +174,16 @@ struct NetDetectorOpenVINO::Impl {
             .scale((1.0 / config_.preprocess_scale))
             .convert_color(toColor(config_.target_format));
         ppp.input().model().set_layout("NCHW");
-        ppp.output().tensor().set_element_type(ov::element::f32);
+        for (size_t i = 0; i < model_->outputs().size(); ++i) {
+            ppp.output(i).tensor().set_element_type(ov::element::f32);
+        }
 
         model_ = ppp.build();
 
         compiled_model_ = std::make_unique<ov::CompiledModel>(
             ov_core_->compile_model(model_, params_.device_name, any_map)
         );
+        infer_request_buffer_.clear();
         for (int i = 0; i < params_.infer_request_buffer_num; ++i) {
             infer_request_buffer_.add_resource(create_infer_request());
         }
@@ -189,24 +193,49 @@ struct NetDetectorOpenVINO::Impl {
     ov::InferRequest create_infer_request() noexcept {
         return compiled_model_->create_infer_request();
     }
-    ov::Tensor infer(const ov::Tensor& input_tensor, ov::InferRequest& infer_request) noexcept {
+    void infer(const ov::Tensor& input_tensor, ov::InferRequest& infer_request) noexcept {
         infer_request.set_input_tensor(input_tensor);
         infer_request.infer();
-        return infer_request.get_output_tensor();
     }
-    ov::Tensor infer(const ov::Tensor& input_tensor) noexcept {
+    std::vector<ov::Tensor> output_tensors(ov::InferRequest& infer_request) const {
+        std::vector<ov::Tensor> outputs;
+        const size_t count = compiled_model_->outputs().size();
+        outputs.reserve(count);
+        for (size_t i = 0; i < count; ++i) {
+            outputs.push_back(infer_request.get_output_tensor(i));
+        }
+        return outputs;
+    }
+    std::vector<ov::Tensor> infer(const ov::Tensor& input_tensor) noexcept {
         auto infer_request = compiled_model_->create_infer_request();
 
-        return infer(input_tensor, infer_request);
+        infer(input_tensor, infer_request);
+        return output_tensors(infer_request);
     }
-    ov::Tensor infer_buffer(const ov::Tensor& input_tensor) noexcept {
+    std::vector<ov::Tensor> infer_buffer(const ov::Tensor& input_tensor) noexcept {
         auto r = infer_request_buffer_.acquire();
         if (!r) {
             return infer(input_tensor);
         }
         auto& infer_request = *r;
 
-        return infer(input_tensor, infer_request);
+        infer(input_tensor, infer_request);
+        return output_tensors(infer_request);
+    }
+    static cv::Mat tensor_to_mat(const ov::Tensor& tensor) {
+        const auto& shape = tensor.get_shape();
+        auto ptr = tensor.data<float>();
+
+        if (shape.size() == 2) {
+            return cv::Mat(shape[0], shape[1], CV_32F, (void*)ptr).clone();
+        }
+        if (shape.size() == 3) {
+            return cv::Mat(shape[1], shape[2], CV_32F, (void*)ptr).clone();
+        }
+        if (shape.size() == 4) {
+            return cv::Mat(shape[1] * shape[2], shape[3], CV_32F, (void*)ptr).clone();
+        }
+        return {};
     }
     OutPut detect(const cv::Mat& img, PixelFormat format) noexcept {
         if (resetting_ || img.empty()) {
@@ -227,14 +256,10 @@ struct NetDetectorOpenVINO::Impl {
             output.resized_img.data
         );
 
-        const auto output_tensor = infer_buffer(input_tensor);
-        const auto& shape = output_tensor.get_shape();
-        auto ptr = output_tensor.data<float>();
-
-        if (shape.size() == 3) {
-            output.output = cv::Mat(shape[1], shape[2], CV_32F, (void*)ptr).clone();
-        } else if (shape.size() == 4) {
-            output.output = cv::Mat(shape[2], shape[3], CV_32F, (void*)ptr).clone();
+        const auto output_tensors = infer_buffer(input_tensor);
+        output.outputs.reserve(output_tensors.size());
+        for (const auto& tensor: output_tensors) {
+            output.outputs.push_back(tensor_to_mat(tensor));
         }
 
         return output;

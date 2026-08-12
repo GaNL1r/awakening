@@ -84,7 +84,7 @@ inline void pub_armor_target_marker(
         angular_v_marker.id = 1;
         angular_v_marker.points.clear();
         angular_v_marker.points.emplace_back(position_marker.pose.position);
-        auto whole_car_pose = auto_aim::armor_point_motion_model::_whole_car_pose(
+        auto whole_car_pose = auto_aim::armor_point_motion_model::whole_car_pose(
             target_state.x.data(),
             target.target_number
         );
@@ -102,11 +102,6 @@ inline void pub_armor_target_marker(
                     return std::make_pair(
                         auto_aim::ArmorTypeTraits<auto_aim::ArmorType::SimpleSmall>::WIDTH,
                         auto_aim::ArmorTypeTraits<auto_aim::ArmorType::SimpleSmall>::HEIGHT
-                    );
-                case auto_aim::ArmorType::BuildingSmall:
-                    return std::make_pair(
-                        auto_aim::ArmorTypeTraits<auto_aim::ArmorType::BuildingSmall>::WIDTH,
-                        auto_aim::ArmorTypeTraits<auto_aim::ArmorType::BuildingSmall>::HEIGHT
                     );
                 case auto_aim::ArmorType::Large:
                     return std::make_pair(

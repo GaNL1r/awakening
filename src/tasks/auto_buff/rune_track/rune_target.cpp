@@ -7,6 +7,7 @@
 #include "utils/logger.hpp"
 #include "utils/utils.hpp"
 #include <Eigen/src/Core/Matrix.h>
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <cstdlib>
@@ -20,6 +21,50 @@ namespace awakening::auto_buff {
 using namespace motion_model;
 
 namespace {
+    template<int N>
+    Eigen::Matrix<double, N, N> diagonal_covariance(double value) {
+        return Eigen::Matrix<double, N, N>::Identity() * value;
+    }
+
+    FanBladeVecZ fan_blade_observation(const RuneFanBladeWithR& fan) {
+        FanBladeVecZ z;
+        constexpr std::array indices {
+            RuneFanBladeWithR::PointsIndex::TOP,
+            RuneFanBladeWithR::PointsIndex::LEFT,
+            RuneFanBladeWithR::PointsIndex::BOTTOM,
+            RuneFanBladeWithR::PointsIndex::RIGHT,
+        };
+        for (std::size_t i = 0; i < indices.size(); ++i) {
+            z[2 * i] = fan.points[indices[i]].x;
+            z[2 * i + 1] = fan.points[indices[i]].y;
+        }
+        return z;
+    }
+
+    FanTargetVecZ fan_target_observation(const RuneFanTarget& fan) {
+        FanTargetVecZ z;
+        constexpr std::array indices {
+            RuneFanTarget::PointsIndex::LT,     RuneFanTarget::PointsIndex::LB,
+            RuneFanTarget::PointsIndex::RB,     RuneFanTarget::PointsIndex::RT,
+            RuneFanTarget::PointsIndex::CENTER,
+        };
+        for (std::size_t i = 0; i < indices.size(); ++i) {
+            z[2 * i] = fan.key_points[indices[i]].x;
+            z[2 * i + 1] = fan.key_points[indices[i]].y;
+        }
+        return z;
+    }
+
+    template<class Iterator>
+    cv::Point2f average_point(Iterator begin, Iterator end) {
+        const auto count = std::distance(begin, end);
+        const auto sum =
+            std::accumulate(begin, end, cv::Point2f {}, [](const auto& a, const auto& b) {
+                return a + b;
+            });
+        return sum * (1.0 / count);
+    }
+
     template<typename Fan, typename Pnp>
     std::vector<std::pair<int, Fan>> match_fans_by_ypd(
         const RuneTarget& target,
@@ -27,14 +72,6 @@ namespace {
         const TimePoint& timestamp,
         Pnp&& pnp
     ) noexcept {
-        // fans.erase(
-        //     std::remove_if(
-        //         fans.begin(),
-        //         fans.end(),
-        //         [&](const Fan& f) { return (f.color != target.target_color); }
-        //     ),
-        //     fans.end()
-        // );
         constexpr double MAX_COST = 1e9;
         std::vector<std::pair<int, Fan>> result;
         const int n_obs = static_cast<int>(fans.size());
@@ -113,39 +150,36 @@ bool RuneTarget::reset(
     if (!d.fan_blades.empty()) {
         fan_pnp(d.fan_blades.front(), camera_info, camera_cv_in_odom, true);
         pose = d.fan_blades.front().pose;
-        // target_color = d.fan_blades.front().color;
     } else if (!d.fan_targets.empty() && !d.rune_rs.empty()) {
-        std::optional<RuneR*> r = std::nullopt;
-        double min_dist = std::numeric_limits<double>::max();
-        for (auto& rune_r: d.rune_rs) {
-            double dist = utils::calculate_distance_to_img_center(
-                rune_r.rr.center,
-                camera_info.camera_matrix
-            );
-            if (dist < min_dist) {
-                min_dist = dist;
-                r = &rune_r;
+        const auto closest = std::min_element(
+            d.rune_rs.begin(),
+            d.rune_rs.end(),
+            [&](const RuneR& lhs, const RuneR& rhs) {
+                return utils::calculate_distance_to_img_center(
+                           lhs.rr.center,
+                           camera_info.camera_matrix
+                       )
+                    < utils::calculate_distance_to_img_center(
+                           rhs.rr.center,
+                           camera_info.camera_matrix
+                    );
             }
-        }
-        if (r.has_value()) {
-            r.value()->laji = false;
+        );
+        if (closest != d.rune_rs.end()) {
+            closest->laji = false;
             fan_target_pnp(
                 d.fan_targets.front(),
-                r.value()->rr.center,
+                closest->rr.center,
                 camera_info,
                 camera_cv_in_odom,
                 true
             );
             pose = d.fan_targets.front().pose;
-            // target_color = d.fan_targets.front().color;
         }
     }
     if (!pose) {
         return false;
     }
-    ypd_ctx = {
-        .id = 0,
-    };
     r_ctx = {
         .camera_cv_in_odom = camera_cv_in_odom,
         .camera_info = camera_info.clone(),
@@ -163,42 +197,24 @@ bool RuneTarget::reset(
     Eigen::DiagonalMatrix<double, X_N> p0;
     p0.diagonal().setZero();
     p0.diagonal()[idx::CX] = p0.diagonal()[idx::CY] = p0.diagonal()[idx::CZ] = 1;
-    p0.diagonal()[idx::A_RAW] = p0.diagonal()[idx::W_RAW] = 1;
     p0.diagonal()[idx::ROLL] = p0.diagonal()[idx::YAW] = 1;
     p0.diagonal()[idx::V_ROLL] = 100;
     p0.diagonal()[idx::TAU] = 100;
-    const auto u_q = [this]() {
-        Eigen::Matrix<double, X_N, X_N> q;
-        return q;
-    };
-
-    const auto inject =
-        [this](const Eigen::Matrix<double, X_N, 1>& delta, Eigen::Matrix<double, X_N, 1>& nominal) {
-            for (int i = 0; i < X_N; i++) {
-                if (i == idx::YAW || i == idx::ROLL)
-                    continue;
-                nominal[i] += delta[i];
-            }
-            nominal[idx::YAW] = angles::normalize_angle(nominal[idx::YAW] + delta[idx::YAW]);
-            nominal[idx::ROLL] = angles::normalize_angle(nominal[idx::ROLL] + delta[idx::ROLL]);
-        };
-    const auto box_minus = [](const Eigen::Matrix<double, X_N, 1>& nominal,
-                              const Eigen::Matrix<double, X_N, 1>& value,
-                              Eigen::Matrix<double, X_N, 1>& delta) {
-        delta = value - nominal;
-
-        // angle difference must be wrapped
-        delta[idx::YAW] = angles::normalize_angle(value[idx::YAW] - nominal[idx::YAW]);
-        delta[idx::ROLL] = angles::normalize_angle(value[idx::ROLL] - nominal[idx::ROLL]);
+    p0.diagonal()[idx::A] = 1;
+    p0.diagonal()[idx::W] = 1;
+    const auto u_q = [] { return Eigen::Matrix<double, X_N, X_N>::Zero(); };
+    const auto inject = [](const auto& delta, auto& nominal) { inject_state(delta, nominal); };
+    const auto box_minus = [](const auto& nominal, const auto& value, auto& delta) {
+        box_minus_state(nominal, value, delta);
     };
 
     voter.reset(timestamp);
     esekf = ESEKF(Predict { .dt = 0.005, .voter = voter }, u_q, inject, box_minus, p0);
 
-    esekf.value().set_iteration_num(cfg.esekf_iter_num);
+    esekf->set_iteration_num(cfg.esekf_iter_num);
 
-    auto pos = pose.value().translation();
-    auto rpy = utils::matrix2rpy<double>(pose.value().linear());
+    const auto pos = pose->translation();
+    const auto rpy = utils::matrix2rpy<double>(pose->linear());
     double a_guess = (A_LOWER + A_UPPER) / 2.0;
     double w_guess = (W_LOWER + W_UPPER) / 2.0;
     double tau = 0;
@@ -213,18 +229,18 @@ bool RuneTarget::reset(
     target_state.set_pos(pos);
     target_state.x[idx::ROLL] = rpy[0];
     target_state.x[idx::YAW] = rpy[2];
-    target_state.x[idx::A_RAW] = unbounded_from_bounded(a_guess, A_LOWER, A_UPPER);
-    target_state.x[idx::W_RAW] = unbounded_from_bounded(w_guess, W_LOWER, W_UPPER);
+    target_state.x[idx::A] = a_guess;
+    target_state.x[idx::W] = w_guess;
     target_state.x[idx::TAU] = tau;
     target_state.timestamp = timestamp;
     target_state.frame_id = frame_id;
-    esekf.value().set_state(target_state.x);
+    esekf->set_state(target_state.x);
     last_update = timestamp;
     is_inited = true;
     track_state.reset();
-    this_id = GOBAL_ID++;
+    this_id = GLOBAL_ID++;
     fan_wc.reset();
-    fan_wc.is_visable[0] = true;
+    fan_wc.is_visible[0] = true;
     return true;
 }
 void RuneTarget::fan_pnp(
@@ -234,13 +250,51 @@ void RuneTarget::fan_pnp(
     bool in_r
 ) noexcept {
     auto key_points = r.points;
+    // std::vector<cv::Mat> rvecs;
+    // std::vector<cv::Mat> tvecs;
+    // if (!cv::solvePnPGeneric(
+    //         in_r ? RuneFanBladeWithR::Point3DRZERO<cv::Point3f>::build()
+    //              : RuneFanBladeWithR::Point3DTargetCenterZERO<cv::Point3f>::build(),
+    //         key_points,
+    //         camera_info.camera_matrix,
+    //         camera_info.distortion_coefficients,
+    //         rvecs,
+    //         tvecs,
+    //         false,
+    //         cv::SOLVEPNP_IPPE,
+    //         cv::noArray(),
+    //         cv::noArray()
+    //     ))
+    // {
+    //     return;
+    // }
+
+    // bool has_valid = false;
+    // for (size_t i = 0; i < rvecs.size(); ++i) {
+    //     cv::Mat R_cv;
+    //     cv::Rodrigues(rvecs[i], R_cv);
+    //     Mat3 R_eigen;
+    //     cv::cv2eigen(R_cv, R_eigen);
+    //     Vec3 axis_x = R_eigen.col(0);
+    //     Vec3 t_eigen;
+    //     cv::cv2eigen(tvecs[i], t_eigen);
+    //     Vec3 front_normal = -axis_x;
+    //     if (front_normal.dot(-t_eigen) > 0)
+    //     { //选择正面朝向相机，这里重投影误差已经进行过排序，所以直接break
+    //         r.pose.translation() = t_eigen;
+    //         r.pose.linear() = R_eigen;
+    //         has_valid = true;
+    //         break;
+    //     }
+    // }
     r.pose = utils::solve_pnp(
         key_points,
-        !in_r ? RuneFanBladeWithR::Point3DTargetCenterZERO<cv::Point3f>::build()
-              : RuneFanBladeWithR::Point3DRZERO<cv::Point3f>::build(),
+        in_r ? RuneFanBladeWithR::Point3DRZERO<cv::Point3f>::build()
+             : RuneFanBladeWithR::Point3DTargetCenterZERO<cv::Point3f>::build(),
         camera_info.camera_matrix,
         camera_info.distortion_coefficients
     );
+
     r.pose = camera_cv_in_odom * r.pose;
 }
 void RuneTarget::fan_target_pnp(
@@ -252,28 +306,65 @@ void RuneTarget::fan_target_pnp(
 ) noexcept {
     a.sort_corners(r);
     auto key_points = a.key_points;
+    // std::vector<cv::Mat> rvecs;
+    // std::vector<cv::Mat> tvecs;
+    // if (!cv::solvePnPGeneric(
+    //         in_r ? RuneFanTarget::Point3DRZERO<cv::Point3f>::build_no_r()
+    //              : RuneFanTarget::Point3DTargetCenterZERO<cv::Point3f>::build_no_r(),
+    //         key_points,
+    //         camera_info.camera_matrix,
+    //         camera_info.distortion_coefficients,
+    //         rvecs,
+    //         tvecs,
+    //         false,
+    //         cv::SOLVEPNP_IPPE,
+    //         cv::noArray(),
+    //         cv::noArray()
+    //     ))
+    // {
+    //     return;
+    // }
+
+    // bool has_valid = false;
+    // for (size_t i = 0; i < rvecs.size(); ++i) {
+    //     cv::Mat R_cv;
+    //     cv::Rodrigues(rvecs[i], R_cv);
+    //     Mat3 R_eigen;
+    //     cv::cv2eigen(R_cv, R_eigen);
+    //     Vec3 axis_x = R_eigen.col(0);
+    //     Vec3 t_eigen;
+    //     cv::cv2eigen(tvecs[i], t_eigen);
+    //     Vec3 front_normal = -axis_x;
+    //     if (front_normal.dot(-t_eigen) > 0)
+    //     { //选择正面朝向相机，这里重投影误差已经进行过排序，所以直接break
+    //         a.pose.translation() = t_eigen;
+    //         a.pose.linear() = R_eigen;
+    //         has_valid = true;
+    //         break;
+    //     }
+    // }
     a.pose = utils::solve_pnp(
         key_points,
-        !in_r ? RuneFanTarget::Point3DTargetCenterZERO<cv::Point3f>::build_no_r()
-              : RuneFanTarget::Point3DRZERO<cv::Point3f>::build_no_r(),
+        in_r ? RuneFanTarget::Point3DRZERO<cv::Point3f>::build_no_r()
+             : RuneFanTarget::Point3DTargetCenterZERO<cv::Point3f>::build_no_r(),
         camera_info.camera_matrix,
         camera_info.distortion_coefficients
     );
     a.pose = camera_cv_in_odom * a.pose;
 }
 [[nodiscard]] Eigen::Matrix<double, motion_model::X_N, motion_model::X_N>
-RuneTarget::process_noise(double dt, const Voter& v) const noexcept {
+RuneTarget::process_noise(double dt) const noexcept {
     Eigen::Matrix<double, X_N, X_N> q;
     q.setZero();
+    auto dt2 = dt * dt;
     q(idx::CX, idx::CX) = dt * cfg.q_xyz.x();
     q(idx::CY, idx::CY) = dt * cfg.q_xyz.y();
     q(idx::CZ, idx::CZ) = dt * cfg.q_xyz.z();
     q(idx::YAW, idx::YAW) = dt * cfg.q_yaw;
 
     utils::fill_constant_accel_noise(q, idx::ROLL, idx::V_ROLL, cfg.q_roll, dt);
-
-    q(idx::A_RAW, idx::A_RAW) = dt * cfg.q_a_raw;
-    q(idx::W_RAW, idx::W_RAW) = dt * cfg.q_w_raw;
+    q(idx::A, idx::A) = dt * cfg.q_a;
+    q(idx::W, idx::W) = dt * cfg.q_w;
     q(idx::TAU, idx::TAU) = dt * cfg.q_tau;
 
     return q;
@@ -286,7 +377,7 @@ RuneTarget::ypdmeasurement_covariance(const Eigen::Matrix<double, motion_model::
     r.setZero(); //copy下sp_vision_25 这个参数不用在观测，差不多就行
     r(idx::YPD_Y, idx::YPD_Y) = 4e-3;
     r(idx::YPD_P, idx::YPD_P) = 4e-3;
-    r(idx::YPD_D, idx::YPD_D) = z[idx::YPD_D] * z[idx::YPD_D] * 0.1;
+    r(idx::YPD_D, idx::YPD_D) = 0.5;
     r(idx::ROT_YAW, idx::ROT_YAW) = 0.1;
     r(idx::ROT_ROLL, idx::ROT_ROLL) = 0.05;
     return r;
@@ -294,14 +385,12 @@ RuneTarget::ypdmeasurement_covariance(const Eigen::Matrix<double, motion_model::
 [[nodiscard]] Eigen::Matrix<double, motion_model::YPDZ_N, 1>
 RuneTarget::get_ypdmeasurement(const ISO3& pose) const noexcept {
     Eigen::Matrix<double, YPDZ_N, 1> z;
-    double ax = pose.translation().x(), ay = pose.translation().y(), az = pose.translation().z();
-    auto ypd_y = std::atan2(ay, ax);
-    auto ypd_p = std::atan2(az, std::sqrt(ax * ax + ay * ay));
-    auto ypd_d = std::sqrt(ax * ax + ay * ay + az * az);
-    z[idx::YPD_Y] = ypd_y;
-    z[idx::YPD_P] = ypd_p;
-    z[idx::YPD_D] = ypd_d;
-    auto rpy = utils::matrix2rpy<double>(pose.linear());
+    const Vec3 position = pose.translation();
+    const double xy_distance = position.head<2>().norm();
+    z[idx::YPD_Y] = std::atan2(position.y(), position.x());
+    z[idx::YPD_P] = std::atan2(position.z(), xy_distance);
+    z[idx::YPD_D] = position.norm();
+    const auto rpy = utils::matrix2rpy<double>(pose.linear());
     z[idx::ROT_YAW] = rpy[2];
     z[idx::ROT_ROLL] = rpy[0];
     return z;
@@ -311,69 +400,59 @@ void RuneTarget::predict_ekf(const TimePoint& timestamp) {
         throw std::runtime_error("ESEKF is not initialized");
     }
     auto dt = std::chrono::duration<double>(timestamp - target_state.timestamp).count();
-    esekf.value().set_predict_func(Predict { .dt = dt, .voter = voter });
-    esekf.value().set_update_Q([&]() { return process_noise(dt, voter); });
-    target_state.x = esekf.value().predict();
+    esekf->set_predict_func(Predict { .dt = dt, .voter = voter });
+    esekf->set_update_Q([&]() { return process_noise(dt); });
+    target_state.x = esekf->predict();
     target_state.timestamp = timestamp;
-    this_id = GOBAL_ID++; //全局状态标记，下游控制对同一id的不重复构建轨迹
+    this_id = GLOBAL_ID++;
 }
 std::optional<std::pair<bool, cv::Point2f>> RuneTarget::match_r(
-    std::vector<std::pair<int, RuneFanBladeWithR>>& matched_fans,
+    const std::vector<std::pair<int, RuneFanBladeWithR>>& matched_fans,
     std::vector<RuneR>& rs,
     const TimePoint& timestamp,
     const CameraInfo& camera_info,
     const ISO3& camera_cv_in_odom
 ) {
-    std::optional<std::pair<bool, cv::Point2f>> best = std::nullopt;
     if (rs.empty()) {
-        return best;
+        return std::nullopt;
     }
     auto pred_state = target_state;
     pred_state.predict(timestamp, voter);
-    RVecZ _r_z_pred;
-    auto _r_ctx = r_ctx;
-    _r_ctx.camera_cv_in_odom = camera_cv_in_odom;
-    RMeasure _r_measure { .ctx = _r_ctx };
-    _r_measure.h(pred_state.x, _r_z_pred);
-    FanBladeVecZ _fan_z_pred;
-    auto _fan_ctx = fan_ctx;
-    _fan_ctx.camera_cv_in_odom = camera_cv_in_odom;
-    _fan_ctx.id = 0;
-    FanBladeMeasure _fan_measure { .ctx = _fan_ctx };
-    _fan_measure.h(pred_state.x, _fan_z_pred);
+    RVecZ r_prediction;
+    auto r_measure_ctx = r_ctx;
+    r_measure_ctx.camera_cv_in_odom = camera_cv_in_odom;
+    RMeasure r_measure { .ctx = r_measure_ctx };
+    r_measure.h(pred_state.x, r_prediction);
+    FanBladeVecZ fan_prediction;
+    auto fan_measure_ctx = fan_ctx;
+    fan_measure_ctx.camera_cv_in_odom = camera_cv_in_odom;
+    fan_measure_ctx.id = 0;
+    FanBladeMeasure fan_measure { .ctx = fan_measure_ctx };
+    fan_measure.h(pred_state.x, fan_prediction);
     std::vector<cv::Point2f> r_vec;
     std::vector<double> fan_hand_length_vec;
-    for (const auto& [id, fan]: matched_fans) {
+    for (const auto& match: matched_fans) {
+        const auto& fan = match.second;
         r_vec.push_back(fan.points[RuneFanBladeWithR::PointsIndex::R]);
         fan_hand_length_vec.push_back(cv::norm(
             fan.points[RuneFanBladeWithR::PointsIndex::BOTTOM]
             - fan.points[RuneFanBladeWithR::PointsIndex::R]
         ));
     }
-    r_vec.emplace_back(_r_z_pred[idx::R_X], _r_z_pred[idx::R_Y]);
+    r_vec.emplace_back(r_prediction[idx::R_X], r_prediction[idx::R_Y]);
     fan_hand_length_vec.push_back(cv::norm(
-        cv::Point2f(_fan_z_pred[idx::BOTTOM_X], _fan_z_pred[idx::BOTTOM_Y])
-        - cv::Point2f(_r_z_pred[idx::R_X], _r_z_pred[idx::R_Y])
+        cv::Point2f(fan_prediction[idx::BOTTOM_X], fan_prediction[idx::BOTTOM_Y])
+        - cv::Point2f(r_prediction[idx::R_X], r_prediction[idx::R_Y])
     ));
-    auto avg_r = std::accumulate(
-                     r_vec.begin(),
-                     r_vec.end(),
-                     cv::Point2f(0, 0),
-                     [](const cv::Point2f& a, const cv::Point2f& b) {
-                         return cv::Point2f(a.x + b.x, a.y + b.y);
-                     }
-                 )
-        * (1.0 / (r_vec.size()));
-    auto avg_hand_length =
+    auto avg_r = average_point(r_vec.begin(), r_vec.end());
+    const double avg_hand_length =
         std::accumulate(fan_hand_length_vec.begin(), fan_hand_length_vec.end(), 0.0)
         / fan_hand_length_vec.size();
     int best_id = -1;
     double min_cost = std::numeric_limits<double>::max();
+    // std::cout<<avg_hand_length<<std::endl;
     for (size_t i = 0; i < rs.size(); ++i) {
-        // if (rs[i].color != target_color) {
-        //     continue;
-        // }
-        double error = cv::norm(rs[i].rr.center - avg_r);
+        const double error = cv::norm(rs[i].rr.center - avg_r);
         if (error > avg_hand_length * 0.2) {
             continue;
         }
@@ -383,121 +462,100 @@ std::optional<std::pair<bool, cv::Point2f>> RuneTarget::match_r(
         }
     }
     if (best_id != -1) {
-        best = std::make_pair(true, rs[best_id].rr.center);
         rs[best_id].laji = false;
+        return std::make_pair(true, rs[best_id].rr.center);
     } else if (!matched_fans.empty() && r_vec.size() > 1) {
-        avg_r = std::accumulate(
-                    r_vec.begin(),
-                    r_vec.end() - 1,
-                    cv::Point2f(0, 0),
-                    [](const cv::Point2f& a, const cv::Point2f& b) {
-                        return cv::Point2f(a.x + b.x, a.y + b.y);
-                    }
-                )
-            * (1.0 / (r_vec.size() - 1));
-        best = std::make_pair(false, avg_r);
+        return std::make_pair(false, average_point(r_vec.begin(), r_vec.end() - 1));
     }
-
-    return best;
+    return std::nullopt;
 }
 std::tuple<int, int> RuneTarget::update(
-    std::vector<std::pair<int, RuneFanBladeWithR>>& matched_fans,
-    std::vector<std::pair<int, RuneFanTarget>>& matched_fan_targets,
-    std::optional<std::pair<bool, cv::Point2f>>& r,
+    const std::vector<std::pair<int, RuneFanBladeWithR>>& matched_fans,
+    const std::vector<std::pair<int, RuneFanTarget>>& matched_fan_targets,
+    const std::optional<std::pair<bool, cv::Point2f>>& r,
     const TimePoint& timestamp,
     const CameraInfo& camera_info,
     const ISO3& camera_cv_in_odom
 ) {
     std::vector<std::shared_ptr<ESEKF::ObsBase>> obs;
+    auto pred_state = target_state;
+    pred_state.predict(timestamp, voter);
+    FanBladeVecZ fan_prediction;
+    auto fan_measure_ctx = fan_ctx;
+    fan_measure_ctx.camera_cv_in_odom = camera_cv_in_odom;
+    fan_measure_ctx.id = 0;
+    FanBladeMeasure fan_measure { .ctx = fan_measure_ctx };
+    fan_measure.h(pred_state.x, fan_prediction);
+    RVecZ r_prediction;
+    auto r_measure_ctx = r_ctx;
+    r_measure_ctx.camera_cv_in_odom = camera_cv_in_odom;
+    RMeasure r_measure { .ctx = r_measure_ctx };
+    r_measure.h(pred_state.x, r_prediction);
+    double fan_hand_length = cv::norm(
+        cv::Point2f(fan_prediction[idx::BOTTOM_X], fan_prediction[idx::BOTTOM_Y])
+        - cv::Point2f(r_prediction[idx::R_X], r_prediction[idx::R_Y])
+    );
     if (r) {
-        RVecZ z;
+        RVecZ z(r->second.x, r->second.y);
         auto ctx = r_ctx;
         ctx.camera_cv_in_odom = camera_cv_in_odom;
         RMeasure measure { .ctx = ctx };
-        const auto r_u_r = [&](const Eigen::Matrix<double, RZ_N, 1>& z) {
-            Eigen::Matrix<double, RZ_N, RZ_N> _r;
-            _r.setZero();
-            auto r_uv = (r.value().first) ? cfg.r_uv_cv : cfg.r_uv_net;
-            _r.diagonal().setConstant(r_uv);
-            return _r;
+        const auto r_u_r = [&](const auto&) {
+            auto sigma_ratio = r->first ? cfg.r_sigma_pix_by_hand_length_ratio_cv
+                                        : cfg.r_sigma_pix_by_hand_length_ratio_net;
+            auto sigma = sigma_ratio * fan_hand_length;
+            return diagonal_covariance<RZ_N>(sigma * sigma / 2.0);
         };
-        const auto r_cal_residual = [](const Eigen::Matrix<double, RZ_N, 1>& z_pred,
-                                       const Eigen::Matrix<double, RZ_N, 1>& z) {
-            return z - z_pred;
-        };
-        z[idx::R_X] = r.value().second.x;
-        z[idx::R_Y] = r.value().second.y;
-        obs.push_back(esekf.value().make_obs(z, measure, r_u_r, r_cal_residual));
+        const auto residual = [](const auto& z_pred, const auto& z) { return z - z_pred; };
+        auto tmp_ekf = esekf.value();
+        auto tmp_state = target_state;
+        tmp_state.x = tmp_ekf.update(z, measure, r_u_r, residual);
+        if ((tmp_state.pos() - target_state.pos()).norm() < 1.0) {
+            obs.push_back(esekf->make_obs(z, measure, r_u_r, residual));
+        } else {
+            AWAKENING_WARN("FUCK r");
+        }
     }
 
-    const auto fan_u_r = [&](const Eigen::Matrix<double, FanBladeZ_N, 1>& z) {
-        Eigen::Matrix<double, FanBladeZ_N, FanBladeZ_N> r;
-        r.setZero();
-        r.diagonal().setConstant(cfg.r_uv_net);
-        return r;
+    const auto fan_u_r = [&](const auto&) {
+        auto sigma_ratio = cfg.r_sigma_pix_by_hand_length_ratio_net;
+        auto sigma = sigma_ratio * fan_hand_length;
+        return diagonal_covariance<FanBladeZ_N>(sigma * sigma / 2.0);
     };
-
-    const auto fan_cal_residual = [](const Eigen::Matrix<double, FanBladeZ_N, 1>& z_pred,
-                                     const Eigen::Matrix<double, FanBladeZ_N, 1>& z) {
-        return z - z_pred;
-    };
+    const auto residual = [](const auto& z_pred, const auto& z) { return z - z_pred; };
     if (!matched_fans.empty() || !matched_fan_targets.empty()) {
         fan_wc.reset();
     }
     for (const auto& [id, fan]: matched_fans) {
         fan_wc.update(id, timestamp);
-        FanBladeVecZ z;
-        z[idx::TOP_X] = fan.points[RuneFanBladeWithR::PointsIndex::TOP].x;
-        z[idx::TOP_Y] = fan.points[RuneFanBladeWithR::PointsIndex::TOP].y;
-        z[idx::LEFT_X] = fan.points[RuneFanBladeWithR::PointsIndex::LEFT].x;
-        z[idx::LEFT_Y] = fan.points[RuneFanBladeWithR::PointsIndex::LEFT].y;
-        z[idx::RIGHT_X] = fan.points[RuneFanBladeWithR::PointsIndex::RIGHT].x;
-        z[idx::RIGHT_Y] = fan.points[RuneFanBladeWithR::PointsIndex::RIGHT].y;
-        z[idx::BOTTOM_X] = fan.points[RuneFanBladeWithR::PointsIndex::BOTTOM].x;
-        z[idx::BOTTOM_Y] = fan.points[RuneFanBladeWithR::PointsIndex::BOTTOM].y;
         auto ctx = fan_ctx;
         ctx.id = id;
         ctx.camera_cv_in_odom = camera_cv_in_odom;
         FanBladeMeasure measure { .ctx = ctx };
-        obs.push_back(esekf.value().make_obs(z, measure, fan_u_r, fan_cal_residual));
+        obs.push_back(esekf->make_obs(fan_blade_observation(fan), measure, fan_u_r, residual));
     }
-    const auto fan_target_u_r = [&](const Eigen::Matrix<double, FanTargetZ_N, 1>& z) {
-        Eigen::Matrix<double, FanTargetZ_N, FanTargetZ_N> r;
-        r.setZero();
-        r.diagonal().setConstant(cfg.r_uv_cv);
-        return r;
-    };
-
-    const auto fan_target_cal_residual = [](const Eigen::Matrix<double, FanTargetZ_N, 1>& z_pred,
-                                            const Eigen::Matrix<double, FanTargetZ_N, 1>& z) {
-        return z - z_pred;
+    const auto fan_target_u_r = [&](const auto&) {
+        auto sigma_ratio = cfg.r_sigma_pix_by_hand_length_ratio_cv;
+        auto sigma = sigma_ratio * fan_hand_length;
+        return diagonal_covariance<FanTargetZ_N>(sigma * sigma / 2.0);
     };
     for (const auto& [id, fan]: matched_fan_targets) {
         fan_wc.update(id, timestamp);
-        FanTargetVecZ z;
-        z[idx::LT_X] = fan.key_points[RuneFanTarget::PointsIndex::LT].x;
-        z[idx::LT_Y] = fan.key_points[RuneFanTarget::PointsIndex::LT].y;
-        z[idx::LB_X] = fan.key_points[RuneFanTarget::PointsIndex::LB].x;
-        z[idx::LB_Y] = fan.key_points[RuneFanTarget::PointsIndex::LB].y;
-        z[idx::RB_X] = fan.key_points[RuneFanTarget::PointsIndex::RB].x;
-        z[idx::RB_Y] = fan.key_points[RuneFanTarget::PointsIndex::RB].y;
-        z[idx::RT_X] = fan.key_points[RuneFanTarget::PointsIndex::RT].x;
-        z[idx::RT_Y] = fan.key_points[RuneFanTarget::PointsIndex::RT].y;
-        z[idx::CEN_X] = fan.key_points[RuneFanTarget::PointsIndex::CENTER].x;
-        z[idx::CEN_Y] = fan.key_points[RuneFanTarget::PointsIndex::CENTER].y;
         auto ctx = fan_target_ctx;
         ctx.id = id;
         ctx.camera_cv_in_odom = camera_cv_in_odom;
         FanTargetMeasure measure { .ctx = ctx };
-        obs.push_back(esekf.value().make_obs(z, measure, fan_target_u_r, fan_target_cal_residual));
+        obs.push_back(
+            esekf->make_obs(fan_target_observation(fan), measure, fan_target_u_r, residual)
+        );
     }
-    if (obs.size() > 0) {
-        target_state.x = esekf.value().update_multi(obs);
+    if (!obs.empty()) {
+        target_state.x = esekf->update_multi(obs);
         target_state.timestamp = timestamp;
         last_update = timestamp;
-        this_id = GOBAL_ID++; //全局状态标记，下游控制对同一id的不重复构建轨迹]
+        this_id = GLOBAL_ID++;
     }
-    int match_fan_num = matched_fans.size() + matched_fan_targets.size();
+    const int match_fan_num = matched_fans.size() + matched_fan_targets.size();
     if (match_fan_num > 0) {
         voter.update(target_state.roll(), cfg.voter_state_need_count);
     }
@@ -507,7 +565,7 @@ std::tuple<int, int> RuneTarget::update(
             voter.mode = Voter::Big;
         }
     }
-    return std::make_tuple(match_fan_num, (r) ? 1 : 0);
+    return { match_fan_num, r ? 1 : 0 };
 }
 std::vector<std::pair<int, RuneFanBladeWithR>> RuneTarget::match_fan(
     std::vector<RuneFanBladeWithR>& fans,
@@ -516,21 +574,31 @@ std::vector<std::pair<int, RuneFanBladeWithR>> RuneTarget::match_fan(
     const ISO3& camera_cv_in_odom
 ) const noexcept {
     return match_fans_by_ypd(*this, fans, timestamp, [&](RuneFanBladeWithR& fan) {
-        fan_pnp(fan, camera_info, camera_cv_in_odom, false);
+        fan_pnp(fan, camera_info, camera_cv_in_odom, true);
     });
 }
 std::vector<std::pair<int, RuneFanTarget>> RuneTarget::match_fan_target(
     std::vector<RuneFanTarget>& fans,
-    std::optional<std::pair<bool, cv::Point2f>>& r,
+    const std::optional<std::pair<bool, cv::Point2f>>& r,
     const TimePoint& timestamp,
     const CameraInfo& camera_info,
     const ISO3& camera_cv_in_odom
 ) const noexcept {
-    if (!r) {
-        return {};
-    }
+    cv::Point2f r_tag;
+    // if (!r) {
+    auto pred_state = target_state;
+    pred_state.predict(timestamp, voter);
+    RVecZ r_prediction;
+    auto r_measure_ctx = r_ctx;
+    r_measure_ctx.camera_cv_in_odom = camera_cv_in_odom;
+    RMeasure r_measure { .ctx = r_measure_ctx };
+    r_measure.h(pred_state.x, r_prediction);
+    r_tag = cv::Point2f(r_prediction[idx::R_X], r_prediction[idx::R_Y]);
+    // } else {
+    //     r_tag = r->second;
+    // }
     return match_fans_by_ypd(*this, fans, timestamp, [&](RuneFanTarget& fan) {
-        fan_target_pnp(fan, r.value().second, camera_info, camera_cv_in_odom, false);
+        fan_target_pnp(fan, r_tag, camera_info, camera_cv_in_odom, true);
     });
 }
 [[nodiscard]] cv::Rect RuneTarget::get_net_focus_roi(
@@ -547,15 +615,16 @@ std::vector<std::pair<int, RuneFanTarget>> RuneTarget::match_fan_target(
     auto tmp_target_state = target_state;
     tmp_target_state.predict(timestamp, voter);
 
-    static std::vector<cv::Point3f> CAR_BOX;
     constexpr float car_box_half = 1.0f;
-    CAR_BOX = { { 0, car_box_half, -car_box_half },
-                { 0, -car_box_half, -car_box_half },
-                { 0, -car_box_half, car_box_half },
-                { 0, car_box_half, car_box_half } };
+    static const std::vector<cv::Point3f> CAR_BOX {
+        { 0, car_box_half, -car_box_half },
+        { 0, -car_box_half, -car_box_half },
+        { 0, -car_box_half, car_box_half },
+        { 0, car_box_half, car_box_half },
+    };
 
     auto pos = tmp_target_state.pos();
-    ISO3 pose_in_odom;
+    ISO3 pose_in_odom = ISO3::Identity();
     pose_in_odom.translation() = pos;
     pose_in_odom.linear() = utils::rpy2matrix(Vec3(0, 0, std::atan2(pos.x(), pos.y())));
     auto pose_in_camera_cv = camera_cv_in_odom.inverse() * pose_in_odom;
@@ -599,7 +668,7 @@ std::vector<std::pair<int, RuneFanTarget>> RuneTarget::match_fan_target(
 
     double dt = std::chrono::duration<double>(timestamp - last_update).count();
     double lost_dt = cfg.lost_time_thres;
-    double dt_clamped = std::max(0.0, std::min(dt, lost_dt));
+    const double dt_clamped = std::clamp(dt, 0.0, lost_dt);
 
     int base_side = std::max(ratio_rect.width, ratio_rect.height);
     int max_side = std::max(image_size.width, image_size.height);

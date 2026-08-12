@@ -1,7 +1,8 @@
-#include "hik_camera.hpp"
-#ifdef USE_TRT
-    #include "utils/cuda/cvtcolor.hpp"
-#endif
+#ifdef USE_HikSDK
+    #include "hik_camera.hpp"
+    #ifdef USE_TRT
+        #include "utils/cuda/cvtcolor.hpp"
+    #endif
 namespace awakening {
 void HikCamera::load(const YAML::Node& config) {
     std::string target_sn = config["target_sn"].as<std::string>();
@@ -44,9 +45,9 @@ void HikCamera::load(const YAML::Node& config) {
 
     auto format_str = config["format"].as<std::string>();
     target_format_ = string2PixelFormat(format_str);
-#ifdef USE_TRT
+    #ifdef USE_TRT
     use_cuda_cvt_ = config["use_cuda_cvt"].as<bool>();
-#endif
+    #endif
     AWAKENING_INFO("Camera parameters set successfully!");
 }
 void HikCamera::stop() {
@@ -54,6 +55,7 @@ void HikCamera::stop() {
         return;
     }
     running_ = false;
+    stop_source_thread();
     if (daemon_thread_.joinable()) {
         daemon_thread_.join();
     }
@@ -64,6 +66,37 @@ void HikCamera::stop() {
     }
     AWAKENING_INFO("hik_camera has stop ");
 }
+
+bool HikCamera::start_capture() {
+    int n_ret = MV_CC_StartGrabbing(camera_handle_);
+    if (n_ret != MV_OK) {
+        AWAKENING_ERROR("Failed to start camera grabbing!");
+        return false;
+    }
+    running_ = true;
+    return true;
+}
+
+ImageFrame HikCamera::read() {
+    ImageFrame img_frame;
+    if (!camera_handle_) {
+        AWAKENING_ERROR("hik_camera: camera is not initialized");
+        return img_frame;
+    }
+
+    Frame frame;
+    int n_ret = MV_CC_GetImageBuffer(camera_handle_, &frame.out_frame, 100);
+    if (n_ret != MV_OK) {
+        AWAKENING_ERROR("MV_CC_GetImageBuffer fail: {}", n_ret);
+        return img_frame;
+    }
+
+    const auto current_time = Clock::now();
+    const auto half_exposure = std::chrono::microseconds(static_cast<long>(get_ExposureTime() / 2));
+    frame.timestamp = current_time - half_exposure;
+    return to_image_frame(frame);
+}
+
 void HikCamera::restart() {
     AWAKENING_WARN("Restarting camera");
     MV_CC_StopGrabbing(camera_handle_);
@@ -93,16 +126,16 @@ ImageFrame HikCamera::to_image_frame(Frame& f) {
     const auto& ref_cvt = get_cvt_map();
     int cvt_code = ref_cvt.at(pixel_type);
     if (cvt_code != -1) {
-#ifdef USE_TRT
+    #ifdef USE_TRT
         if (use_cuda_cvt_) {
             static utils::__cuda::CvtColor cvt;
             cvt.process(src, img_frame.src_img, cvt_code);
         } else {
-#endif
+    #endif
             cv::cvtColor(src, img_frame.src_img, cvt_code);
-#ifdef USE_TRT
+    #ifdef USE_TRT
         }
-#endif
+    #endif
 
     } else {
         img_frame.src_img = src.clone();
@@ -185,3 +218,4 @@ bool HikCamera::initialize_camera(const std::string& target_sn) {
     return false;
 }
 } // namespace awakening
+#endif

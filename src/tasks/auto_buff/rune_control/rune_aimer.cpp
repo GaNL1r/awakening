@@ -5,6 +5,7 @@
 #include "tasks/base/dta_utils.hpp"
 #include "utils/common/type_common.hpp"
 #include "utils/logger.hpp"
+#include <chrono>
 #include <ostream>
 namespace awakening::auto_buff {
 struct RuneAimer::Impl {
@@ -41,6 +42,18 @@ struct RuneAimer::Impl {
         double fly_time;
     };
     int get_select_id(const RuneTarget& target) const noexcept {
+        auto& wc = target.fan_wc;
+        if (target.voter.mode != motion_model::Voter::Big) {
+            return target.fan_wc.get_min_visable_fan_id();
+        }
+        static std::array<TimePoint, FAN_NUM> fan_aim_times { Clock::now(),
+                                                              Clock::now(),
+                                                              Clock::now(),
+                                                              Clock::now(),
+                                                              Clock::now() };
+        enum class FSM {
+            no_inited,
+        };
         return target.fan_wc.get_min_visable_fan_id();
     }
     [[nodiscard]] dta_utils::ControlPoint get_control_point(
@@ -358,6 +371,18 @@ struct RuneAimer::Impl {
                ) < cmd.enable_pitch_diff;
         return cmd;
     }
+    bool tick_fire(const RuneTarget& _target, const GimbalCmd& cmd) const noexcept {
+        static TimePoint last_fire_time = Clock::now();
+        if (_target.voter.mode != motion_model::Voter::Big) {
+        }
+        if (cmd.appear) {
+            if (Clock::now() - last_fire_time > std::chrono::duration<double>(cmd.fly_time * 2.0)) {
+                last_fire_time = Clock::now();
+                return true;
+            }
+        }
+        return false;
+    }
     void set_operator_offset(std::pair<double, double> offset) {
         operator_offset_ = offset;
     }
@@ -389,5 +414,8 @@ std::pair<double, double> RuneAimer::get_yaw_pitch_offset() {
 }
 void RuneAimer::set_operator_offset(std::pair<double, double> offset) {
     _impl->set_operator_offset(offset);
+}
+bool RuneAimer::tick_fire(const RuneTarget& _target, const GimbalCmd& cmd) const noexcept {
+    return _impl->tick_fire(_target, cmd);
 }
 } // namespace awakening::auto_buff
